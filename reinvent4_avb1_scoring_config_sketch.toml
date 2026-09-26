@@ -61,7 +61,7 @@ type = "geometric_mean"
 #
 # The carboxylate is a GATE, not a MatchingSubstructure penalty: that component
 # hardcodes 0.5 * (1.0 + match), and under it a molecule WITHOUT the carboxylate
-# scored a flat 0.500 while molecules WITH it had a median of 0.203, because the
+# scored a flat 0.500 while molecules WITH it had a median of 0.060, because the
 # acid adds ~37 TPSA and falls out of the window. The agent's best move was to drop
 # the MIDAS anchor. GroupCount + right_step makes absence cost 6.31e-04 instead.
 #
@@ -77,7 +77,7 @@ type = "geometric_mean"
 [[stage.scoring.component.GroupCount.endpoint]]
 name = "carboxylate MIDAS anchor"
 weight = 1.0
-params.smarts = ["[CX3](=O)[OX2H1,OX1-]"]
+params.smarts = "[CX3](=O)[OX2H1,OX1-]"
 transform.type = "right_step"
 transform.high = 1
 
@@ -98,8 +98,10 @@ transform.coef_si = 20.0
 transform.coef_se = 20.0
 
 # GUARD RAIL, not an optimization axis. Every reference molecule and every prior
-# sample scores exactly 1.000 here, so this term contributes nothing at step 0; it
-# only bites if 600 steps of RL drift past SA 6, the conventional hard-to-make line.
+# sample scores 0.99998 or better here (reverse_sigmoid approaches 1.0 asymptotically;
+# the worst reference molecule scores 0.999983), contributing nothing measurable at
+# step 0 - a total is depressed by 2.2e-06. It only bites if 600 steps of RL drift
+# past SA 6, the conventional hard-to-make line.
 # The earlier (3, 6) window gave actives_extended's worst molecule (SA 5.10) a 0.093
 # - punishing a published active.
 [[stage.scoring.component]]

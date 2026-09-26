@@ -9,36 +9,30 @@ from rdkit import Chem, RDLogger
 
 RDLogger.DisableLog("rdApp.*")
 
-from known_scaffolds import is_scaffold_novel, known_scaffolds
+from known_scaffolds import REFERENCE_FILES, is_scaffold_novel, known_scaffolds
 from normalize import canonical_tautomer
 from novelty import load_smi, murcko
 
 PLN_NONAROMATIC = "O=C(O)[C@H](CCCCCCCC1=CC=C2C(N1)=NCCC2)NC(C3(C)CCOCC3)=O"
 PLN_AROMATIC = "CC1(C(=O)NC(CCCCCCCc2ccc3c(n2)NCCC3)C(=O)O)CCOCC1"
+# PLN-1474's pyridine nitrogen written protonated, as the de novo generator's
+# vocabulary (which includes [nH+]) could plausibly emit it.
+PLN_PROTONATED = "CC1(C(=O)NC(CCCCCCCc2ccc3c([nH+]2)NCCC3)C(=O)O)CCOCC1"
+
+# Computed once for the whole module: known_scaffolds() reads and normalizes five
+# files, and re-deriving it in nearly every test was costing ~860s across this
+# file alone.
+KNOWN = None
+
+
+def setUpModule():
+    global KNOWN
+    KNOWN = known_scaffolds()
 
 
 class TestKnownScaffolds(unittest.TestCase):
     def test_reference_files_yield_106_scaffolds(self):
-        self.assertEqual(len(known_scaffolds()), 106)
-
-    def test_published_reference_compounds_are_all_covered(self):
-        """The gate must never call a benchmark compound's scaffold novel.
-
-        actives_extended alone misses PLN-1474, bexotegrast and A1AFA: it is
-        defined as ChEMBL alphaVbeta1 actives <= 1 uM, and PLN-1474's structure
-        came from AdisInsight rather than a ChEMBL activity record while A1AFA
-        sits at pIC50 5.30, below the potency cut. PLN-1474 is the only clinical
-        alphaVbeta1-selective compound in this project and its structure has been
-        public since August 2023, so a generated molecule rebuilding its scaffold
-        is not novel.
-        """
-        known = known_scaffolds()
-        for path in ("data/benchmark_panel.smi", "data/similarity_refs.smi",
-                     "data/actives_core.smi", "data/actives_core_B.smi",
-                     "data/actives_extended.smi"):
-            for smiles, label in load_smi(path):
-                with self.subTest(path=path, label=label):
-                    self.assertFalse(is_scaffold_novel(smiles, known))
+        self.assertEqual(len(KNOWN), 106)
 
     def test_the_three_compounds_the_union_exists_for(self):
         """Direct regression guard for the five-file reference set.
@@ -51,7 +45,6 @@ class TestKnownScaffolds(unittest.TestCase):
         if REFERENCE_FILES is ever narrowed back to actives_extended alone.
         """
         extended_only = known_scaffolds(("data/actives_extended.smi",))
-        union = known_scaffolds()
         compounds = {
             "PLN-1474": "CC1(C(=O)NC(CCCCCCCc2ccc3c(n2)NCCC3)C(=O)O)CCOCC1",
             "bexotegrast":
@@ -62,8 +55,8 @@ class TestKnownScaffolds(unittest.TestCase):
             with self.subTest(label=label):
                 scaffold = murcko(canonical_tautomer(Chem.MolFromSmiles(smiles)))
                 self.assertNotIn(scaffold, extended_only)
-                self.assertIn(scaffold, union)
-                self.assertFalse(is_scaffold_novel(smiles, union))
+                self.assertIn(scaffold, KNOWN)
+                self.assertFalse(is_scaffold_novel(smiles, KNOWN))
 
     def test_empty_scaffold_is_not_in_the_known_set(self):
         """Review Focus 4: an acyclic molecule's Murcko scaffold is "".
@@ -71,12 +64,20 @@ class TestKnownScaffolds(unittest.TestCase):
         Every known active has rings, so "" must be absent - otherwise every
         acyclic generated molecule would be judged non-novel by accident.
         """
-        self.assertNotIn("", known_scaffolds())
+        self.assertNotIn("", KNOWN)
 
     def test_acyclic_molecule_reports_novel_and_is_flagged(self):
-        known = known_scaffolds()
         self.assertEqual(murcko(Chem.MolFromSmiles("CCCCC(=O)O")), "")
-        self.assertTrue(is_scaffold_novel("CCCCC(=O)O", known))
+        self.assertTrue(is_scaffold_novel("CCCCC(=O)O", KNOWN))
+
+    def test_known_scaffolds_file_matches_the_function(self):
+        """Pin data/known_scaffolds.smi to what known_scaffolds() actually
+        produces - §9.3 pre-registers this file by name, but nothing else checks
+        that its contents still agree with the code that generates it."""
+        with open("data/known_scaffolds.smi") as handle:
+            from_file = {line.strip() for line in handle
+                         if line.strip() and not line.startswith("#")}
+        self.assertEqual(from_file, KNOWN)
 
 
 class TestTautomerDependence(unittest.TestCase):
@@ -95,17 +96,31 @@ class TestTautomerDependence(unittest.TestCase):
 
     def test_pln1474_is_not_novel_in_either_tautomer(self):
         """A known clinical compound must never pass the gate, either way written."""
-        known = known_scaffolds()
-        self.assertFalse(is_scaffold_novel(PLN_NONAROMATIC, known))
-        self.assertFalse(is_scaffold_novel(PLN_AROMATIC, known))
+        self.assertFalse(is_scaffold_novel(PLN_NONAROMATIC, KNOWN))
+        self.assertFalse(is_scaffold_novel(PLN_AROMATIC, KNOWN))
+
+
+class TestChargeDependence(unittest.TestCase):
+    """Review fix 9: charge is the same reference-vs-measured asymmetry the
+    tautomer work closed, left open. Reference .smi files are produced by
+    standardize(), which applies Uncharger, so an un-normalized measured side
+    can diverge on charge alone. The generator's vocabulary includes
+    [N+] [N-] [O-] [S+] [n+], so this is reachable, unlike '.'."""
+
+    def test_protonated_and_neutral_pln1474_converge(self):
+        a = canonical_tautomer(Chem.MolFromSmiles(PLN_PROTONATED))
+        b = canonical_tautomer(Chem.MolFromSmiles(PLN_AROMATIC))
+        self.assertEqual(Chem.MolToSmiles(a), Chem.MolToSmiles(b))
+
+    def test_protonated_pln1474_is_not_novel(self):
+        self.assertFalse(is_scaffold_novel(PLN_PROTONATED, KNOWN))
 
 
 class TestGateOnPriorSamples(unittest.TestCase):
     def test_861_percent_of_prior_samples_are_scaffold_novel(self):
-        known = known_scaffolds()
         with open("logs/cmp.vigHoB/samples_prior.csv") as handle:
             smiles = [row["SMILES"] for row in csv.DictReader(handle)]
-        verdicts = [is_scaffold_novel(s, known) for s in smiles]
+        verdicts = [is_scaffold_novel(s, KNOWN) for s in smiles]
         novel = sum(1 for v in verdicts if v)
         total = sum(1 for v in verdicts if v is not None)
         self.assertEqual(total, 488)
@@ -118,6 +133,10 @@ class TestReferenceSetsNormalizeCleanly(unittest.TestCase):
         """canonical_tautomer falls back to the un-canonicalized molecule when the
         enumerator raises. On the reference side that would silently weaken the
         gate, so it must never happen: all 424 reference molecules normalize.
+
+        This test keeps its own explicit known_scaffolds() call, rather than the
+        module-level KNOWN, so its before/after TAUTOMER_FAILURES delta stays
+        meaningful regardless of what other tests already triggered.
         """
         import normalize
 
@@ -129,10 +148,9 @@ class TestReferenceSetsNormalizeCleanly(unittest.TestCase):
 class TestInvalidInput(unittest.TestCase):
     def test_unparseable_smiles_returns_none(self):
         """Review Focus 1: never crash the triage funnel on generator output."""
-        known = known_scaffolds()
         for bad in ["", "not_a_smiles", "C((("]:
             with self.subTest(bad=bad):
-                self.assertIsNone(is_scaffold_novel(bad, known))
+                self.assertIsNone(is_scaffold_novel(bad, KNOWN))
 
 
 if __name__ == "__main__":

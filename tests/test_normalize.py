@@ -18,6 +18,9 @@ from normalize import (
 # pyridine tautomer stored in data/benchmark_panel.smi. Same formula C24H37N3O4.
 PLN_NONAROMATIC = "O=C(O)[C@H](CCCCCCCC1=CC=C2C(N1)=NCCC2)NC(C3(C)CCOCC3)=O"
 PLN_AROMATIC = "CC1(C(=O)NC(CCCCCCCc2ccc3c(n2)NCCC3)C(=O)O)CCOCC1"
+# PLN-1474 with its pyridine nitrogen protonated - reachable because the
+# generator's vocabulary includes [nH+].
+PLN_PROTONATED = "CC1(C(=O)NC(CCCCCCCc2ccc3c([nH+]2)NCCC3)C(=O)O)CCOCC1"
 
 
 class TestFlatten(unittest.TestCase):
@@ -51,6 +54,12 @@ class TestCanonicalTautomer(unittest.TestCase):
         once = canonical_tautomer_smiles(PLN_NONAROMATIC)
         twice = canonical_tautomer_smiles(once)
         self.assertEqual(once, twice)
+
+    def test_protonated_and_neutral_pln1474_converge(self):
+        """Review fix 9: charge must normalize the same way tautomers do."""
+        a = canonical_tautomer_smiles(PLN_PROTONATED)
+        b = canonical_tautomer_smiles(PLN_AROMATIC)
+        self.assertEqual(a, b)
 
     def test_success_records_no_failure(self):
         import normalize

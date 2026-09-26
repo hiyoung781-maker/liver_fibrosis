@@ -104,9 +104,13 @@ class TestCarboxylateSmartsSpecificity(unittest.TestCase):
             "c1nnn[nH]1": 0.0,     # tetrazole bioisostere
         }
         result = score_smiles(list(cases))
-        for smiles, expected in zip(cases, result["cooh"]):
+        # Zip through result["smiles"], not `cases`: score_smiles drops unparseable
+        # input, so pairing by position would silently shift every case after a
+        # parse failure onto the wrong score.
+        got = dict(zip(result["smiles"], result["cooh"]))
+        for smiles, expected in cases.items():
             with self.subTest(smiles=smiles):
-                self.assertEqual(expected, cases[smiles])
+                self.assertEqual(got[smiles], expected)
 
 
 class TestSpecNumbers(unittest.TestCase):

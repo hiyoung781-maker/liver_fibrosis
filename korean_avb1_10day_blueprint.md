@@ -255,7 +255,7 @@ Diversity filter는 동일 Murcko scaffold당 몇 개의 분자까지 보상에 
 [[stage.scoring.component.GroupCount.endpoint]]
 name = "carboxylate MIDAS anchor"
 weight = 1.0
-params.smarts = ["[CX3](=O)[OX2H1,OX1-]"]
+params.smarts = "[CX3](=O)[OX2H1,OX1-]"
 transform.type = "right_step"
 transform.high = 1
 ```
@@ -273,10 +273,10 @@ total = geometric_mean([(COOH, 1.0), (TPSA, 1.0), (SAScore, 0.5)]) × alert_filt
 
 | prior 샘플 | n | 총점 중앙값 | p90 | 최댓값 |
 |---|---|---|---|---|
-| 카르복실산 **있음** | 254 | **0.203** | 1.000 | 1.000 |
+| 카르복실산 **있음** | 254 | **0.060** | 1.000 | 1.000 |
 | 카르복실산 **없음** | 189 | **0.500** | 0.500 | 0.500 |
 
-카르복실산이 없으면 0.500에 고정되는데 있으면 중앙값이 0.203이다 — 카르복실산이 TPSA를 약 37 올려 창 밖으로 밀어내기 때문이다. **agent의 기대보상 최적 전략이 MIDAS 카르복실레이트를 버리는 것**이었다. 이 프로젝트가 타협 불가라고 선언한 바로 그 구조다.
+카르복실산이 없으면 0.500에 고정되는데 있으면 중앙값이 0.060이다 — 카르복실산이 TPSA를 약 37 올려 창 밖으로 밀어내기 때문이다. **agent의 기대보상 최적 전략이 MIDAS 카르복실레이트를 버리는 것**이었다. 이 프로젝트가 타협 불가라고 선언한 바로 그 구조다.
 
 `CustomAlerts`로는 해결되지 않는다 — 그것은 "매치되면 0"이므로 **부재**를 표현할 수 없고, SMARTS에는 분자 수준 부정이 없다. 따라서 `GroupCount` + `right_step`을 scored endpoint로 쓴다. `geometric_mean`이 0을 1e-8로 clamp하므로 카르복실산 부재 시 총점 상한은 **6.31e-04**이고(prior 샘플 219개 전부가 그 아래) DAP σ=128 기준 만점과 **약 128 nat** 차이다 — 문자 그대로 0은 아니지만 실질적 게이트다. `w_COOH`를 올리면 바닥은 더 내려가지만(w=3 → 4.6e-06) TPSA 지수가 희석되어 gradient가 평탄해지므로 **w=1**로 둔다.
 
@@ -289,8 +289,9 @@ N=[N+]=[N-]
 C(=O)Cl
 [SH]
 [Nr0][Nr0]
-+ RDKit PAINS 카탈로그
 ```
+
+PAINS는 **이 TOML로 표현할 수 없다** — `reinvent_plugins`에는 PAINS 컴포넌트가 없으므로 RL은 이 여덟 개 SMARTS만 적용한다. PAINS는 대신 `scripts/objective.py`의 오프라인 스코어러와 §8 triage에서 적용된다.
 
 **endpoint를 3개로 제한하는 이유:** 선행연구 [113]은 docking score·QED·SAscore 3개 endpoint에 **각각 0.3의 균등 가중**을 주었다(REINVENT4가 내부적으로 정규화하므로 실효 가중은 1/3씩이다). 이것은 취향이 아니라 조종 가능성(steerability)의 조건이다. `geometric_mean` 아래에서 각 endpoint는 곱셈 veto이므로, endpoint를 늘리면 달성 가능한 천장이 무너지고 "우리 목적에 맞는 분자"가 아니라 "목적함수에만 최적화된 분자"가 나온다. 세밀한 filtering은 목적함수가 아니라 §8의 사후 triage와 정성 분석의 몫이다.
 
@@ -387,7 +388,7 @@ sketch의 `(3, 6, k=0.5)`는 **guard rail로 부적합하다.** 중앙값에서�
 
 `(6, 8, k=0.5)`를 채택한다. 참조 세트와 prior 샘플의 **최악 분자가 0.99998**을 받는다 — `reverse_sigmoid`는 로지스틱 곡선이라 1.0에 점근하되 도달하지 않으므로 정확히 1.000이 되지는 않는다. `actives_extended`의 최악 분자(SA 5.095)가 0.999983, prior의 최악 분자(SA 5.017)가 0.999989이고, `geometric_mean`의 0.2 지수를 거치면 총점을 **2.2e-06** 낮춘다 — 실질적으로 무기여다. 그리고 SA > 6(합성 난이도의 통상적 경계)부터 비로소 작동해 SA 7에서 0.5, SA 8에서 사실상 veto가 된다. `(6, 9, k=0.4)`는 SA 7에서도 0.823으로 너무 관용적이고, `(5, 8, k=0.4)`는 통상 경계보다 이른 SA 6에서 이미 물기 시작한다.
 
-**이 문서는 SAScore가 합성 가능성을 최적화한다고 주장하지 않는다** — 0 step에서 정확히 ×1이며, 600 step RL이 prior가 한 번도 샘플링하지 않는 영역으로 드리프트할 때만 작동하는 보험이다.
+**이 문서는 SAScore가 합성 가능성을 최적화한다고 주장하지 않는다** — 0 step에서 0.99998 이상을 받아 실질적으로 무기여(총점을 2.2e-06 낮추는 수준)이며, 600 step RL이 prior가 한 번도 샘플링하지 않는 영역으로 드리프트할 때만 작동하는 보험이다.
 
 **정직한 요약: 0 step 기준 살아 있는 최적화 축은 카르복실레이트 anchor와 TPSA 둘이다.** TL이 focusing을 이미 끝냈다는 전제를 받아들이면 이것이 일관된 귀결이다.
 
@@ -405,7 +406,7 @@ sketch의 `(3, 6, k=0.5)`는 **guard rail로 부적합하다.** 중앙값에서�
 
 아닐린 관련 반응성 대사체 위험 자체는 유효하지만(해당 series의 이력 [111]), 필요한 것은 1차 방향족 아민에 한정된 패턴이다. `[NX3;H2;!$(N[!#6]);!$(NC=O);!$(NS(=O)=O)][c]`와 `[NX3;H2][c]`는 모든 테스트에서 결과가 **완전히 동일**하다 — `H2`가 이미 N-acyl·N-sulfonyl·N-heteroatom 치환을 배제하기 때문이다(그 경우 H가 1개 이하). 세 exclusion은 중복이므로 단순한 쪽을 채택한다. 2-아미노피리딘/2-아미노피리미딘은 `[NX3;H2][c]`에 매치되며, 헤테로고리를 제외하려면 `[NX3;H2][c;!$(c~n);!$(c~o);!$(c~s)]`를 쓸 수 있으나 차이는 prior 샘플 12개 vs 9개(0.6%p)이고 참조 세트는 양쪽 모두 0이므로 더 엄격하고 단순한 쪽을 쓴다.
 
-나머지 alert는 정상이다 — 합집합으로 `actives_core` 0/29, `actives_extended` 1/190, `similarity_refs` 0/6, `benchmark_panel` 0/6, prior 19/488(3.9%). 다만 이 문서는 "PAINS/reactive/aniline"이라고 기술해 왔는데 실제 config에 **PAINS 패턴이 하나도 없었다.** RDKit PAINS 카탈로그는 core 0/29, refs 0/6, bench 0/6, prior 15/488(3.1%)을 잡아 참조 세트에 비용이 없으므로 추가해 문서–config 간극을 닫는다.
+나머지 alert는 정상이다 — 합집합으로 `actives_core` 0/29, `actives_extended` 1/190, `similarity_refs` 0/6, `benchmark_panel` 0/6, prior 19/488(3.9%). 이번에 바로잡은 간극: 이 문서는 "PAINS/reactive/aniline"이라고 기술해 왔는데, 실제로는 PAINS가 RL config의 패턴이 아니다 — `reinvent_plugins`에 PAINS 컴포넌트가 없어 애초에 TOML로 표현할 수 없고, 따라서 RL은 여덟 SMARTS만 적용하며 PAINS는 `scripts/objective.py`와 §8 triage에서만 적용된다. prior 샘플 측정치: 여덟 SMARTS 단독 31/488, `objective.py`의 전체 필터(여덟 SMARTS ∪ PAINS) 45/488, PAINS 단독 15/488 — `actives_core`(0/29), `similarity_refs`(0/6), `benchmark_panel`(0/6)에는 비용이 없지만 `actives_extended`(190개)에서는 3개가 걸린다 — `CHEMBL244434`, `CHEMBL244013`(둘 다 PAINS `mannich_A(296)`), `CHEMBL4756602`(`[Nr0][Nr0]`). 이 세 건이 spec의 success criterion 2와 §10 D4 체크포인트("참조 화합물 0건 확인")가 정직하게 보고해야 할 실제 비용이다.
 
 ### 5.5 모니터링 — 보상이 아닌 진단 (100 step마다)
 
@@ -447,10 +448,10 @@ similarity가 목적함수에서 빠지므로 기존 모니터링 기대치("Sta
    |---|---|---|---|
    | `actives_core` (29) | 0/29 | — | 0 |
    | `benchmark_panel` (6) | 0/6 | — | 0 |
-   | `actives_extended` (190) | 14/190 (7.4%) | 0.736 | 4 |
-   | **TL-A prior 샘플 (488)** | **43/488 (8.8%)** | 0.621 (최소 0.379) | **34** |
+   | `actives_extended` (190) | 14/190 (7.4%) | 0.736 | 1 |
+   | **TL-A prior 샘플 (488)** | **43/488 (8.8%)** | 0.621 (최소 0.379) | **29** |
 
-   즉 **생성 분자 488개 중 34개(7%)가 자기 자신의 다른 타우토머에 대해서도 §8.3 기준으로 "scaffold-novel" 판정을 받는다.** PLN-1474가 그 예다 — 테트라히드로-1,8-나프티리딘을 비방향족 아미딘 형태로 쓰면 방향족 형태와 분자식은 같지만(`C24H37N3O4`) QED 0.4332 vs 0.4619, 방향족 고리 수 0 vs 1, 그리고 **서로에 대한 NN-Tanimoto가 0.458**이다. 알려진 임상 화합물을 그대로 재현해도 신규 분자로 통과한다는 뜻이다.
+   즉 **생성 분자 488개 중 29개(5.9%)가 자기 자신의 다른 타우토머에 대해서도 §8.3 기준으로 "scaffold-novel" 판정을 받는다.** PLN-1474가 그 예다 — 테트라히드로-1,8-나프티리딘을 비방향족 아미딘 형태로 쓰면 방향족 형태와 분자식은 같지만(`C24H37N3O4`) QED 0.4332 vs 0.4619, 방향족 고리 수 0 vs 1, 그리고 **서로에 대한 NN-Tanimoto가 0.458**이다. 알려진 임상 화합물을 그대로 재현해도 신규 분자로 통과한다는 뜻이다.
 
    비대칭이 문제의 핵심이다: ChEMBL actives는 일관된 방향족 형태로 들어오지만(core 0%, bench 0%) 생성 분자는 모델이 내보내는 형태 그대로다 — 기준 쪽은 정규화돼 있고 측정 대상만 흔들린다. 같은 이유로 aniline alert도 타우토머 의존적이므로(비방향족 형태는 `[NH2,NH][c]`에 미매치) RL이 표현을 바꿔 필터를 회피하는 SMILES 수준 reward hacking이 가능했다. §5.4의 `[NX3;H2][c]`는 두 형태 모두 미매치라 이 경로가 닫히지만, 정규화를 상류에 두는 것이 근본 해결이다.
 
@@ -478,9 +479,9 @@ similarity가 목적함수에서 빠지므로 기존 모니터링 기대치("Sta
 
    **기준 집합은 `actives_extended` 단독이 아니라 큐레이션된 참조 파일 5개의 합집합이다**(`actives_core`, `actives_core_B`, `actives_extended`, `benchmark_panel`, `similarity_refs` → 106개, `scripts/known_scaffolds.py`가 산출). `actives_extended` 단독(103개)에는 **PLN-1474, bexotegrast, A1AFA의 scaffold가 없다** — 그 파일이 "ChEMBL αvβ1 active ≤ 1 µM"으로 정의되기 때문이다. PLN-1474 구조는 ChEMBL 활성 레코드가 아니라 AdisInsight 출처이고[88], A1AFA는 pIC50 5.30으로 효력 컷 아래다. 단독 집합을 쓰면 **PLN-1474의 골격을 재현한 생성 분자가 "scaffold-novel"로 통과한다** — 유일한 임상 αvβ1 선택적 화합물이고 2023년 8월부터 구조가 공개된 화합물인데도. 포스터가 비교 대상으로 내세우는 공개 화합물의 골격은 기준에 반드시 들어가야 한다. `tests/test_known_scaffolds.py`가 세 화합물 각각에 대해 "단독 집합에는 없고 합집합에는 있다"를 단언한다.
 
-   - TL-A prior 샘플 488개 중 **425개(87.1%)** 통과 — 느슨한 필터다. 구속력은 §8.5 docking 기하와 §9.2 permeability가 갖는다.
+   - TL-A prior 샘플 488개 중 **420개(86.1%)** 통과 — 느슨한 필터다. 구속력은 §8.5 docking 기하와 §9.2 permeability가 갖는다.
    - **정확 구조 불일치만으로는 불충분하다.** TL-A 200 epoch는 암기한다(§4: 최대 NN-Tanimoto = 1.000, 학습 active를 그대로 재현한 샘플이 존재). 메틸 하나를 붙이면 "기존에 없던 구조"가 되므로, 이 기준으로는 "cpd 25에 메틸 붙인 것 아닌가"라는 공격을 막을 수 없다. Murcko는 막는다.
-   - **NN-Tanimoto는 게이트가 아니라 보고 수치로 유지한다.** Murcko가 새로운 425개 중 **5개가 NN ≥ 0.680(최대 0.738)** 이므로 analog 논란이 가능하다. 각 lead의 NN 값과 **가장 가까운 known active의 이름**을 함께 적으면 임계값 없이 독자가 판단할 수 있다. 위 대역 표는 그 값을 읽는 맥락으로만 남긴다 — `data/novelty_band.json`은 게이트가 아니다.
+   - **NN-Tanimoto는 게이트가 아니라 보고 수치로 유지한다.** Murcko가 새로운 420개 중 **5개가 NN ≥ 0.680(최대 0.738)** 이므로 analog 논란이 가능하다. 각 lead의 NN 값과 **가장 가까운 known active의 이름**을 함께 적으면 임계값 없이 독자가 판단할 수 있다. 위 대역 표는 그 값을 읽는 맥락으로만 남긴다 — `data/novelty_band.json`은 게이트가 아니다.
    - **타우토머 정규화가 여기에 직접 걸린다(§8.0).** 검증했다: PLN-1474의 두 타우토머는 정규화 없이 **서로 다른 Murcko SMILES**를 낸다(`...C1=CC=C2CCCN=C2N1` vs `...c1ccc2c(n1)NCCC2`). 정규화 후 동일해진다. 정규화를 빼면 신규성 주장이 표현 차이로 뚫린다.
 4. **Counter-screen 플래그:** αvβ3/α5β1 active에 대해 Tanimoto ≥ 0.5 → 플래그만 부여하고 자동 폐기하지 않음(유사도 ≠ 활성). 단 플래그 비율은 보고한다
 5. **Docking — affinity 순위가 아니라 기하학적 필터:**
@@ -514,7 +515,7 @@ similarity가 목적함수에서 빠지므로 기존 모니터링 기대치("Sta
 | D1 | **완료.** K-BDS 실측으로 환경 확정(§11), `setup_kbds.sh` + `slurm/00_smoke.sbatch` 준비, prior는 v4.5.11 동봉분을 체크섬 검증. **§3.1 큐레이션도 완료** — `scripts/curate_actives.py`, 산출물은 `data/`, 근거는 `data/CURATION_LOG.md` | 세트 고정: core 29 / core_B 200 / extended 197 / refs 6 / panel 6 |
 | D2 | Counter-screen set(**target ID 검증 완료, §3.2**) | 모든 데이터 고정. 음성 패널은 폐기(§3.4) |
 | D3 | TL-A·TL-B 실행 + 3개 arm 전체 진단 | D3 기준으로 arm 1개 선택, **화학형 이동이 결정적**. TL-B가 Arg 모방체 비율이나 TPSA를 올리면 다른 수치와 무관하게 탈락 |
-| D4 | **선행 작업:** 타우토머 정규화를 `curate_actives.py`에 추가 → `novelty_band.json` 재계산(§8.0); `CustomAlerts` aniline 패턴 교체 검증(§5.4). 그 후 RL 단일 stage 0–300 step | 참조 세트 0점 화합물이 0개임을 확인한 뒤 착수; 100 step마다 §5.5 진단 기록 |
+| D4 | **선행 작업:** 타우토머 정규화를 비교 계층(`scripts/normalize.py`)에 추가 → `novelty_band.json` 재계산(§8.0); `CustomAlerts` aniline 패턴 교체 검증(§5.4). **`curate_actives.standardize()`는 의도적으로 그대로 둔다** — 그 출력은 TL-A 학습 입력이자 RL inception seed인 `data/actives_core.smi`에 기록되므로, 여기에 타우토머 정규화를 추가하면 이미 완료된 D3 run이 무효화된다. 정규화는 비교 계층에만 존재한다(`scripts/normalize.py:8-9`, `scripts/curate_actives.py:243-246`). 그 후 RL 단일 stage 0–300 step | 참조 세트 0점 화합물이 0개임을 확인한 뒤 착수; 100 step마다 §5.5 진단 기록 |
 | D5 | RL 단일 stage 300–600 step | 최종 agent; 알려진 series로의 붕괴 감시(NN-Tanimoto가 0.6 초과로 상승 → DF `minscore` 0.4 → 0.5로 상향, 필요시 이전 체크포인트에서 재시작). **similarity 가중치 조정은 불가** — 그 component는 목적함수에 없다(§5.2) |
 | D6 | Sampling 20–50k; 벤치마크 패널 scoring | `library.smi` + 기준 점수 분포 |
 | D7 | Docking 설정 + TR01225179 redocking 검증 | 검증된 프로토콜 **또는** similarity/QSAR 기반 triage로의 fallback 문서화 |

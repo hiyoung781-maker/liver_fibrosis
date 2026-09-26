@@ -78,7 +78,7 @@ class TestComponents(unittest.TestCase):
     def test_carboxylate_is_a_groupcount_gate(self):
         component_type, endpoint = endpoints(load())["carboxylate MIDAS anchor"]
         self.assertEqual(component_type, "GroupCount")
-        self.assertEqual(endpoint["params"]["smarts"], [CARBOXYLATE_SMARTS])
+        self.assertEqual(endpoint["params"]["smarts"], CARBOXYLATE_SMARTS)
         self.assertEqual(endpoint["transform"]["type"], "right_step")
         self.assertEqual(endpoint["transform"]["high"], 1)
         self.assertEqual(endpoint["weight"], 1.0)
@@ -224,6 +224,29 @@ class TestReinventAcceptsTheComponents(unittest.TestCase):
                         self.assertLessEqual(set(endpoint.get("params", {})),
                                              allowed)
         self.assertEqual(seen, set(COMPONENT_MODULES))
+
+    def test_every_component_parameters_instantiate(self):
+        """REINVENT collects one value per endpoint into a list, then validates.
+
+        Key names alone are not enough: GroupCount declares smarts: List[str], so an
+        endpoint must give a bare string, while CustomAlerts declares
+        List[List[str]] and takes a list. Getting that backwards is a startup
+        failure, so it belongs in a 0.2s test rather than on a GPU.
+        """
+        config = load()
+        for block in config["stage"][0]["scoring"]["component"]:
+            for component_type, body in block.items():
+                module = __import__(COMPONENT_MODULES[component_type],
+                                    fromlist=["Parameters"])
+                declared = getattr(module, "Parameters", None)
+                if declared is None:
+                    continue
+                collected = {}
+                for endpoint in body["endpoint"]:
+                    for key, value in endpoint.get("params", {}).items():
+                        collected.setdefault(key, []).append(value)
+                with self.subTest(component=component_type):
+                    declared(**collected)
 
 
 class TestFragments(unittest.TestCase):

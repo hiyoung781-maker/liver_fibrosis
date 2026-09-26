@@ -151,9 +151,15 @@ CHEMBL4649232**. A1AFA만 살아남는다.
 | `[Nr0][Nr0]` | 0 | 1/190 | 0 | 0 | 16 |
 | **합집합** | **0/29** | **1/190** | **0/6** | **0/6** | 19/488 (3.9%) |
 
-단, 블루프린트는 "PAINS/reactive/aniline"이라고 기술하는데 실제 config에
-**PAINS 패턴이 하나도 없다**. RDKit PAINS 카탈로그는 core 0/29, refs 0/6, bench 0/6,
-prior 15/488 (3.1%)를 잡으므로 참조 세트에 비용이 없다. 추가하여 문서–config 간극을 닫는다.
+단, 블루프린트는 "PAINS/reactive/aniline"이라고 기술하는데 PAINS는 애초에 **이
+TOML로 표현할 수 없다** — `reinvent_plugins`에는 PAINS 컴포넌트가 없다. 따라서 RL
+config는 이 여덟 개 SMARTS만 적용하며, PAINS는 `scripts/objective.py`의 오프라인
+스코어러와 §8 triage에서만 적용된다. RDKit PAINS 카탈로그는 core 0/29, refs 0/6,
+bench 0/6, prior 15/488 (3.1%)를 잡아 세 세트는 비용이 없지만, `actives_extended`
+(190개)에서는 3개가 걸린다 — `CHEMBL244434`, `CHEMBL244013`(둘 다 PAINS
+`mannich_A(296)`), `CHEMBL4756602`(여덟 SMARTS 중 `[Nr0][Nr0]`). 이 세 건이 spec의
+success criterion 2와 블루프린트 §10 D4 체크포인트("참조 화합물 0건 확인")가 보고해야
+할 실제 비용이다.
 
 ### 2.7 타우토머 정규화 누락이 §9.3에 false-positive 경로를 만든다
 
@@ -183,10 +189,10 @@ canonical SMILES로 수렴하고 Tanimoto 1.0, QED 0.4619가 된다.
 |---|---|---|---|
 | `actives_core` (29) | 0/29 | — | 0 |
 | `benchmark_panel` (6) | 0/6 | — | 0 |
-| `actives_extended` (190) | 14/190 (7.4%) | 0.736 | 4 |
-| **TL-A prior 샘플 (488)** | **43/488 (8.8%)** | 0.621 (최소 0.379) | **34** |
+| `actives_extended` (190) | 14/190 (7.4%) | 0.736 | 1 |
+| **TL-A prior 샘플 (488)** | **43/488 (8.8%)** | 0.621 (최소 0.379) | **29** |
 
-§8.3의 신규성 기준은 NN-Tanimoto < 0.710이다. **생성 분자 488개 중 34개(7%)가
+§8.3의 신규성 기준은 NN-Tanimoto < 0.710이다. **생성 분자 488개 중 29개(5.9%)가
 자기 자신의 다른 타우토머에 대해서도 "scaffold-novel" 판정을 받는다.** PLN-1474가
 바로 그 예다 — 알려진 임상 화합물을 그대로 재현해도 0.458로 측정되어 신규 분자로 통과한다.
 
@@ -275,10 +281,10 @@ total = geometric_mean([(COOH, 1.0), (TPSA, 1.0), (SAScore, 0.5)]) × alert_filt
 
 | prior 샘플 | n | 총점 중앙값 | p90 | 최댓값 |
 |---|---|---|---|---|
-| 카르복실산 **있음** | 254 | **0.203** | 1.000 | 1.000 |
+| 카르복실산 **있음** | 254 | **0.060** | 1.000 | 1.000 |
 | 카르복실산 **없음** | 189 | **0.500** | 0.500 | 0.500 |
 
-카르복실산이 없으면 0.500에 고정되는데 있으면 중앙값이 0.203이다 — 카르복실산이 TPSA를
+카르복실산이 없으면 0.500에 고정되는데 있으면 중앙값이 0.060이다 — 카르복실산이 TPSA를
 약 37 올려 창 밖으로 밀어내기 때문이다. **agent의 기대보상 최적 전략이 MIDAS 카르복실레이트를
 버리는 것**이었다. 타협 불가라고 선언한 구조다.
 
@@ -378,7 +384,13 @@ similarity가 목적함수에서 빠지므로 폐기하고 다음으로 대체�
 2. `data/actives_extended.smi`, `data/actives_core.smi`
 3. `data/novelty_band.json` **재계산** — 0.710이 변할 수 있다 (extended 14개 영향)
 4. anti-target counter-screen 참조 (§8.4)
-5. `scripts/curate_actives.py`의 `standardize()` 함수에 추가
+
+**`curate_actives.standardize()`는 의도적으로 건드리지 않는다.** 그 출력은
+`data/actives_core.smi`에 기록되며, 이는 TL-A 학습 입력이자 RL inception seed다.
+`standardize()`에 타우토머 정규화를 추가하면 이미 완료된 D3 run의 불변량이
+깨진다. 정규화는 비교 계층(`scripts/normalize.py`)에만 존재하고
+`standardize()`는 그대로 둔다 — `scripts/normalize.py:8-9`,
+`scripts/curate_actives.py:243-246`.
 
 기준 세트와 측정 대상에 **동일한** 정규화를 적용하는 것이 요점이다 (§2.7의 비대칭).
 
@@ -447,10 +459,10 @@ PLN-1474의 골격을 재현한 분자가 novel로 통과한다. 지문 의존 �
 한 문장으로 기술됨. diversity filter가 이미 `IdenticalMurckoScaffold`이므로 보상 기전과
 성공 기준이 **같은 단위**를 쓴다.
 
-- prior 488개 중 **425개(87.1%)** 통과 — 느슨한 필터. 구속력은 §8.5 docking 기하와 §9.2가 갖는다.
+- prior 488개 중 **420개(86.1%)** 통과 — 느슨한 필터. 구속력은 §8.5 docking 기하와 §9.2가 갖는다.
 - **정확 구조 불일치만으로는 불충분.** TL-A 200 epoch는 암기한다(§4: 최대 NN-Tanimoto 1.000).
   메틸 하나면 "기존에 없던 구조"가 되므로 "cpd 25에 메틸 붙인 것 아닌가"를 막지 못한다.
-- **NN-Tanimoto는 보고 수치로 유지.** Murcko가 새로운 425개 중 5개가 NN ≥ 0.680(최대 0.738).
+- **NN-Tanimoto는 보고 수치로 유지.** Murcko가 새로운 420개 중 5개가 NN ≥ 0.680(최대 0.738).
   각 lead의 NN 값과 최근접 known active 이름을 병기하면 임계값 없이 독자가 판단한다.
   `novelty_band.json`은 그 값을 읽는 맥락으로만 남고 게이트가 아니다.
 - **타우토머 정규화가 직접 걸린다.** 검증: PLN-1474의 두 타우토머는 정규화 없이 서로 다른
@@ -492,7 +504,7 @@ drug-like ChEMBL 분자는 대부분 카르복실산이 없으니 음성 패널�
 | §9.3 | Murcko scaffold 신규성 |
 | §9.5 | 음성 패널 절 삭제, 비순환 축 비교 |
 | §10 D2 | 음성 패널 작업 삭제 |
-| §10 D4 | 선행 작업(타우토머 정규화, 패턴 검증) 배치 |
+| §10 D4 | 선행 작업(타우토머 정규화는 비교 계층에서만, `standardize()`는 의도적으로 미변경, 패턴 검증) 배치 |
 
 ## 8. 남은 구현 작업
 

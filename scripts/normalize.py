@@ -29,6 +29,8 @@ FPGEN = rdFingerprintGenerator.GetMorganGenerator(
 )
 
 _TAUTOMER = rdMolStandardize.TautomerEnumerator()
+_LARGEST_FRAGMENT = rdMolStandardize.LargestFragmentChooser()
+_UNCHARGER = rdMolStandardize.Uncharger()
 
 # SMILES whose tautomer canonicalization raised. Callers report this count rather
 # than letting a silent fallback desynchronize reference and measured sets.
@@ -43,13 +45,24 @@ def flatten(mol: Chem.Mol | None) -> Chem.Mol | None:
 
 
 def canonical_tautomer(mol: Chem.Mol | None) -> Chem.Mol | None:
-    """Flatten, then pick RDKit's canonical tautomer. None if either step fails."""
+    """Flatten, neutralize charge, then pick RDKit's canonical tautomer.
+
+    LargestFragmentChooser + Uncharger run before the tautomer step because a
+    reference .smi file was produced by curate_actives.standardize(), whose
+    pipeline already applies this pair. Leaving charge un-normalized here lets a
+    known compound's protonated form (e.g. PLN-1474 with its pyridine nitrogen
+    written as [nH+]) pass the novelty gate as scaffold-novel, purely because its
+    Murcko SMILES carries a charge the reference side never has - the same
+    reference-vs-measured asymmetry the tautomer step exists to close. None if
+    any step fails.
+    """
     flat = flatten(mol)
     if flat is None:
         return None
     try:
         with rdBase.BlockLogs():
-            return _TAUTOMER.Canonicalize(flat)
+            neutral = _UNCHARGER.uncharge(_LARGEST_FRAGMENT.choose(flat))
+            return _TAUTOMER.Canonicalize(neutral)
     except Exception:
         TAUTOMER_FAILURES.append(Chem.MolToSmiles(flat))
         return flat

@@ -1,0 +1,11 @@
+# TanimotoSimilarity references: ONE MOLECULE PER ENDPOINT.
+# REINVENT4 computes one score array per reference SMILES but
+# compute_scores.py zips those arrays against the endpoint list, so every
+# reference after the first in a single endpoint's params.smiles is silently
+# discarded.  Declare each line below as its own endpoint.
+O=C(NC(Cc1ccccc1)C(=O)O)c1ccc(Cl)cc1Cl	A1AFA
+CCNC(=O)Nc1cnnc(-c2ccc(CC(NC(=O)c3c(Cl)cccc3Cl)C(=O)O)cc2)c1	CHEMBL4649232
+Cc1ccc(Cl)c(C(=O)NC(CNC(=O)Cn2c(=O)[nH]c3nc(C)c(F)cc32)C(=O)O)c1F	CHEMBL5532604
+O=C(NC(Cc1ccc2nc(-c3c(Cl)cccc3Cl)ccc2c1)C(=O)O)c1c(Cl)cccc1Cl	CHEMBL234562
+O=C(NC(CNc1ccc(N2CCNC2=O)cc1)C(=O)O)c1c(Cl)cccc1Cl	CHEMBL5517939
+CC1(C(=O)NC(CCCCCCCc2ccc3c(n2)NCCC3)C(=O)O)CCOCC1	PLN-1474

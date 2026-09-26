@@ -15,18 +15,22 @@ EXTENDED = "data/actives_extended.smi"
 
 
 class TestBandReproduction(unittest.TestCase):
-    """Without normalization the band must reproduce the committed JSON exactly.
+    """Golden pre-normalization values: what the band was BEFORE tautomer
 
-    That is the check that the reimplementation matches curate_actives.py:627-641.
+    canonicalization, i.e. what cross_scaffold_band(normalize=False) has always
+    produced. data/novelty_band.json itself now holds the post-normalization
+    numbers (0.680 for extended), which TestBandAfterNormalization below checks;
+    this class exists only to pin the un-normalized calculation, which is a call
+    into cross_scaffold_band(normalize=False) rather than a duplicate of it.
     """
 
-    def test_core_unnormalized_matches_committed_json(self):
+    def test_core_unnormalized_matches_golden_values(self):
         band = cross_scaffold_band([s for s, _ in load_smi(CORE)], normalize=False)
         self.assertEqual(band["n"], 29)
         self.assertAlmostEqual(band["p25"], 0.552, places=3)
         self.assertAlmostEqual(band["p50"], 0.676, places=3)
 
-    def test_extended_unnormalized_matches_committed_json(self):
+    def test_extended_unnormalized_matches_golden_values(self):
         band = cross_scaffold_band([s for s, _ in load_smi(EXTENDED)], normalize=False)
         self.assertEqual(band["n"], 190)
         self.assertAlmostEqual(band["p25"], 0.710, places=3)
@@ -44,6 +48,31 @@ class TestBandAfterNormalization(unittest.TestCase):
         band = cross_scaffold_band([s for s, _ in load_smi(EXTENDED)], normalize=True)
         self.assertAlmostEqual(band["p25"], 0.680, places=3)
         self.assertLess(band["p25"], 0.710)
+
+
+class TestCommittedJsonMatchesTheFunction(unittest.TestCase):
+    """Pin data/novelty_band.json to what cross_scaffold_band actually produces.
+
+    Nothing else checks that the committed file agrees with the code, though
+    §9.3 pre-registers the actives_extended p25 by name.
+    """
+
+    def test_json_p25_values_match_the_normalized_band(self):
+        import json
+
+        with open("data/novelty_band.json") as handle:
+            committed = json.load(handle)
+        core_band = cross_scaffold_band([s for s, _ in load_smi(CORE)],
+                                         normalize=True)
+        extended_band = cross_scaffold_band([s for s, _ in load_smi(EXTENDED)],
+                                             normalize=True)
+        self.assertAlmostEqual(committed["actives_core"]["p25"],
+                                core_band["p25"], places=3)
+        self.assertAlmostEqual(committed["actives_extended"]["p25"],
+                                extended_band["p25"], places=3)
+        self.assertAlmostEqual(committed["actives_core"]["p25"], 0.552, places=3)
+        self.assertAlmostEqual(committed["actives_extended"]["p25"], 0.680,
+                                places=3)
 
 
 class TestLoadSmi(unittest.TestCase):

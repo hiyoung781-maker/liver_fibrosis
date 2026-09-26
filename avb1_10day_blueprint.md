@@ -255,7 +255,7 @@ The diversity filter caps how many molecules per identical Murcko scaffold can k
 [[stage.scoring.component.GroupCount.endpoint]]
 name = "carboxylate MIDAS anchor"
 weight = 1.0
-params.smarts = ["[CX3](=O)[OX2H1,OX1-]"]
+params.smarts = "[CX3](=O)[OX2H1,OX1-]"
 transform.type = "right_step"
 transform.high = 1
 ```
@@ -273,10 +273,10 @@ This re-implementation was checked against real REINVENT output in `logs/cmp.vig
 
 | prior sample | n | total-score median | p90 | max |
 |---|---|---|---|---|
-| carboxylic acid **present** | 254 | **0.203** | 1.000 | 1.000 |
+| carboxylic acid **present** | 254 | **0.060** | 1.000 | 1.000 |
 | carboxylic acid **absent** | 189 | **0.500** | 0.500 | 0.500 |
 
-Without a carboxylic acid the score is pinned at 0.500; with one, the median is only 0.203 — because the carboxylic acid raises TPSA by roughly 37 and pushes the molecule out of the window. **The agent's expected-reward-optimal strategy was to drop the MIDAS carboxylate** — exactly the structure this project has declared non-negotiable.
+Without a carboxylic acid the score is pinned at 0.500; with one, the median is only 0.060 — because the carboxylic acid raises TPSA by roughly 37 and pushes the molecule out of the window. **The agent's expected-reward-optimal strategy was to drop the MIDAS carboxylate** — exactly the structure this project has declared non-negotiable.
 
 `CustomAlerts` does not fix this — it scores "0 if matched," so it cannot express **absence**, and SMARTS has no molecule-level negation. Hence `GroupCount` + `right_step` is used as a scored endpoint. Because `geometric_mean` clamps 0 to 1e-8, the total-score ceiling when the carboxylic acid is absent is **6.31e-04** (all 219 of the sampled priors sit below it) — about 128 nats short of a perfect score under DAP σ=128. Not literally zero, but a gate in every practical sense. Raising `w_COOH` pushes the floor lower still (w=3 → 4.6e-06), but it dilutes the TPSA exponent and flattens the gradient, so **w=1** is kept.
 
@@ -289,8 +289,9 @@ N=[N+]=[N-]
 C(=O)Cl
 [SH]
 [Nr0][Nr0]
-+ RDKit PAINS catalogue
 ```
+
+PAINS is **not expressible in this TOML** — `reinvent_plugins` has no PAINS-capable component, and the RL run therefore applies only these eight SMARTS. PAINS is applied downstream instead: in `scripts/objective.py`'s offline reference scorer and in the §8 triage filter, both of which run the RDKit PAINS catalogue directly.
 
 **Why the objective is limited to three endpoints:** prior work [113] gave docking score, QED and SAscore **equal weights of 0.3 each** (REINVENT4 normalizes internally, so the effective weight is 1/3 each). This is not a matter of taste but a condition for steerability. Under `geometric_mean`, each endpoint is a multiplicative veto, so adding endpoints collapses the achievable ceiling, and the result is "a molecule optimized purely for the objective function" rather than "a molecule that fits our purpose." Fine-grained filtering belongs to §8's post-hoc triage and qualitative review, not the objective.
 
@@ -387,7 +388,7 @@ The sketch's `(3, 6, k=0.5)` is **unfit as a guard rail.** It looks harmless at 
 
 `(6, 8, k=0.5)` is adopted. The **worst molecule across the reference sets and prior samples scores 0.99998** — `reverse_sigmoid` is a logistic curve, so it approaches 1.0 asymptotically without ever landing exactly on 1.000. `actives_extended`'s worst molecule (SA 5.095) scores 0.999983, and the prior's worst (SA 5.017) scores 0.999989; after `geometric_mean`'s 0.2 exponent, that lowers a total score by **2.2e-06** — effectively no contribution at all. And it does not start biting until SA > 6, the conventional synthesizability boundary, becoming 0.5 at SA 7 and a near-veto at SA 8. `(6, 9, k=0.4)` is too permissive — still 0.823 at SA 7 — while `(5, 8, k=0.4)` starts biting at SA 6, earlier than the conventional boundary.
 
-**This document does not claim SAScore optimizes synthesizability** — at step 0 it is exactly ×1, a form of insurance that only engages if 600 steps of RL drift into territory the prior never sampled.
+**This document does not claim SAScore optimizes synthesizability** — at step 0 it scores 0.99998 or better, contributing nothing measurable (a total is depressed by 2.2e-06), a form of insurance that only engages if 600 steps of RL drift into territory the prior never sampled.
 
 **Honest summary: at step 0, the only optimization axes actually alive are the carboxylate anchor and TPSA.** Given that TL has already done the focusing, that is the consistent conclusion.
 
@@ -405,7 +406,7 @@ The 5 zeroed in `benchmark_panel` are **PLN-1474, bexotegrast, CWHM-12, GLPG0187
 
 The reactive-metabolite risk around anilines is real (this series has that history [111]), but what is needed is a pattern limited to **primary aromatic amines**. `[NX3;H2;!$(N[!#6]);!$(NC=O);!$(NS(=O)=O)][c]` and `[NX3;H2][c]` give **identical** results on every test — `H2` already excludes N-acyl, N-sulfonyl and N-heteroatom substitution (those leave ≤ 1 H). The three exclusions are redundant, so the simpler pattern is adopted. 2-aminopyridine/2-aminopyrimidine both match `[NX3;H2][c]`; excluding heterocycles would need `[NX3;H2][c;!$(c~n);!$(c~o);!$(c~s)]`, but the difference is 12 vs 9 prior samples (0.6 pp) and both reference sets score 0 either way, so the stricter, simpler pattern is used.
 
-The rest of the alert set is unremarkable — union match rates are `actives_core` 0/29, `actives_extended` 1/190, `similarity_refs` 0/6, `benchmark_panel` 0/6, prior 19/488 (3.9%). One gap: this document had described "PAINS/reactive/aniline" while the actual config carried **no PAINS pattern at all**. The RDKit PAINS catalogue catches core 0/29, refs 0/6, bench 0/6, prior 15/488 (3.1%) — free on the reference sets — so it is added to close the doc/config gap.
+The rest of the alert set is unremarkable — union match rates are `actives_core` 0/29, `actives_extended` 1/190, `similarity_refs` 0/6, `benchmark_panel` 0/6, prior 19/488 (3.9%). One gap this pass closes: this document had described "PAINS/reactive/aniline" as if PAINS were one of the RL config's patterns, but PAINS cannot be expressed in the TOML at all (no PAINS-capable component exists in `reinvent_plugins`), so the RL run never applied it — only `scripts/objective.py` and the §8 triage do. Measured divergence on the prior sample: the eight SMARTS alone catch 31/488, the full `objective.py` filter (eight SMARTS ∪ PAINS) catches 45/488, and PAINS alone catches 15/488 — free on `actives_core` (0/29), `similarity_refs` (0/6) and `benchmark_panel` (0/6), but `actives_extended` (190) loses 3: **CHEMBL244434, CHEMBL244013** (both via PAINS `mannich_A(296)`) and **CHEMBL4756602** (via `[Nr0][Nr0]`). These three are the real cost that spec success criterion 2 and blueprint §10's D4 checkpoint ("confirm zero reference compounds score zero") need to report honestly.
 
 ### 5.5 Monitoring — diagnostics, not reward (every 100 steps)
 
@@ -447,10 +448,10 @@ Order matters — cheap to expensive:
    |---|---|---|---|
    | `actives_core` (29) | 0/29 | — | 0 |
    | `benchmark_panel` (6) | 0/6 | — | 0 |
-   | `actives_extended` (190) | 14/190 (7.4%) | 0.736 | 4 |
-   | **TL-A prior samples (488)** | **43/488 (8.8%)** | 0.621 (min 0.379) | **34** |
+   | `actives_extended` (190) | 14/190 (7.4%) | 0.736 | 1 |
+   | **TL-A prior samples (488)** | **43/488 (8.8%)** | 0.621 (min 0.379) | **29** |
 
-   That is, **34 of 488 generated molecules (7%) pass §8.3's "scaffold-novel" test against their own other tautomer.** PLN-1474 is a case in point — written as the non-aromatic amidine tautomer of its tetrahydro-1,8-naphthyridine instead of the aromatic form, it keeps the same molecular formula (`C24H37N3O4`) but QED 0.4332 vs 0.4619, aromatic ring count 0 vs 1, and **an NN-Tanimoto to its own other tautomer of 0.458**. A known clinical compound can reproduce itself exactly and still pass as a novel molecule.
+   That is, **29 of 488 generated molecules (5.9%) pass §8.3's "scaffold-novel" test against their own other tautomer.** PLN-1474 is a case in point — written as the non-aromatic amidine tautomer of its tetrahydro-1,8-naphthyridine instead of the aromatic form, it keeps the same molecular formula (`C24H37N3O4`) but QED 0.4332 vs 0.4619, aromatic ring count 0 vs 1, and **an NN-Tanimoto to its own other tautomer of 0.458**. A known clinical compound can reproduce itself exactly and still pass as a novel molecule.
 
    The asymmetry is the core of the problem: ChEMBL actives arrive in a consistent aromatic form (core 0%, bench 0%), but generated molecules come out however the model emits them — the reference side is normalized and only the measured side wobbles. The aniline alert is tautomer-dependent for the same reason (the non-aromatic form does not match `[NH2,NH][c]`), which had opened a SMILES-level reward-hacking path where RL could dodge the filter by changing representation. §5.4's `[NX3;H2][c]` closes that path since neither form matches it, but putting normalization upstream is the root fix.
 
@@ -478,9 +479,9 @@ Order matters — cheap to expensive:
 
    **The reference set is the union of five curated reference files, not `actives_extended` alone** (`actives_core`, `actives_core_B`, `actives_extended`, `benchmark_panel`, `similarity_refs` → 106, produced by `scripts/known_scaffolds.py`). `actives_extended` alone (103) **is missing the scaffolds of PLN-1474, bexotegrast and A1AFA** — because that file is defined as "ChEMBL αvβ1 actives ≤ 1 µM": PLN-1474's structure comes from AdisInsight, not a ChEMBL activity record [88], and A1AFA sits at pIC50 5.30, below the potency cut. Using the standalone set means **a generated molecule that reproduces PLN-1474's scaffold would pass as "scaffold-novel"** — despite being the one clinical αvβ1-selective compound, public since August 2023. The scaffolds of the public compounds the poster compares against must be in the reference set. `tests/test_known_scaffolds.py` asserts, for each of the three compounds, "absent from the standalone set, present in the union."
 
-   - 425 of 488 (87.1%) TL-A prior samples pass — a loose filter. Bite comes from §8.5 docking geometry and §9.2 permeability.
+   - 420 of 488 (86.1%) TL-A prior samples pass — a loose filter. Bite comes from §8.5 docking geometry and §9.2 permeability.
    - **Exact-structure mismatch alone is not enough.** TL-A at 200 epochs memorizes (§4: max NN-Tanimoto = 1.000, some samples reproduce a training active verbatim). Adding one methyl group makes a "structure not seen before," so this criterion alone cannot answer "isn't this just cpd 25 with a methyl added?" Murcko does answer it.
-   - **NN-Tanimoto is kept as a reported number, not a gate.** Of the 425 that pass on Murcko, **5 sit at NN ≥ 0.680 (max 0.738)**, so analog objections are possible. Reporting each lead's NN value alongside **the name of its nearest known active** lets a reader judge without a threshold. The band table above is retained only as context for reading that value — `data/novelty_band.json` is not a gate.
+   - **NN-Tanimoto is kept as a reported number, not a gate.** Of the 420 that pass on Murcko, **5 sit at NN ≥ 0.680 (max 0.738)**, so analog objections are possible. Reporting each lead's NN value alongside **the name of its nearest known active** lets a reader judge without a threshold. The band table above is retained only as context for reading that value — `data/novelty_band.json` is not a gate.
    - **Tautomer normalization bites directly here (§8.0).** Verified: PLN-1474's two tautomers give **different Murcko SMILES** without normalization (`...C1=CC=C2CCCN=C2N1` vs `...c1ccc2c(n1)NCCC2`), and identical Murcko SMILES with it. Without normalization, the novelty claim is breakable by a representation change.
 4. **Counter-screen flags:** Tanimoto ≥ 0.5 to αvβ3/α5β1 actives → flag only, no auto-discard (similarity ≠ activity), but the flag rate is reported.
 5. **Docking — a geometric filter, not an affinity ranking:**
@@ -514,7 +515,7 @@ Through the **identical** funnel, the proposal succeeds if at least one generate
 | D1 | **Done.** Environment fixed against a live K-BDS probe (§11); `setup_kbds.sh` + `slurm/00_smoke.sbatch` ready; priors are the v4.5.11 in-repo bundle, checksum-verified. **§3.1 curation also done** — `scripts/curate_actives.py`, outputs in `data/`, provenance in `data/CURATION_LOG.md` | sets frozen: core 29 / core_B 200 / extended 197 / refs 6 / panel 6 |
 | D2 | Counter-screen sets (**target IDs verified, §3.2**) | all data frozen. **Negative panel dropped (§3.4)** |
 | D3 | TL-A and TL-B runs + diagnostics on all three arms | one arm selected on the D3 checks, **chemotype drift decisive**; if TL-B raises the Arg-mimic fraction or TPSA, it is out regardless of its other numbers |
-| D4 | **Preceding work:** add tautomer normalization to `curate_actives.py` → recompute `novelty_band.json` (§8.0); verify the `CustomAlerts` aniline pattern replacement (§5.4). Then RL single stage, steps 0–300 | start only after confirming zero reference-set molecules score 0; log §5.5 diagnostics every 100 steps |
+| D4 | **Preceding work:** add tautomer normalization to the comparison layer (`scripts/normalize.py`) → recompute `novelty_band.json` (§8.0); verify the `CustomAlerts` aniline pattern replacement (§5.4). **`curate_actives.standardize()` is deliberately left untouched** — its output is written to `data/actives_core.smi`, the TL-A training input and RL inception seed, and adding tautomer canonicalization there would invalidate the completed D3 run; normalization lives only in the comparison layer (`scripts/normalize.py:8-9`, `scripts/curate_actives.py:243-246`). Then RL single stage, steps 0–300 | start only after confirming zero reference-set molecules score 0; log §5.5 diagnostics every 100 steps |
 | D5 | RL single stage, steps 300–600 | final agent; watch for collapse onto known series (NN-Tanimoto rising above 0.6 → raise DF `minscore` 0.4 → 0.5, restart from an earlier checkpoint if needed). **No similarity-weight adjustment is possible** — that component is not in the objective (§5.2) |
 | D6 | Sampling 20–50k; benchmark panel scoring | `library.smi` + reference score distributions |
 | D7 | Docking setup + TR01225179 redocking validation | validated protocol **or** documented fallback to similarity/QSAR-only triage |

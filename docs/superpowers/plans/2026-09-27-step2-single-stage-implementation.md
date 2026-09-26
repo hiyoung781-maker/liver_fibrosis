@@ -1048,7 +1048,7 @@ and the aggregator are ported from REINVENT4 v4.5.11:
 
 COOH is a GATE, not a penalty: REINVENT's MatchingSubstructure hardcodes
 0.5 * (1.0 + match), and with that a molecule WITHOUT the carboxylate scored a flat
-0.500 while molecules WITH it had a median of 0.203 - the agent's best move was to
+0.500 while molecules WITH it had a median of 0.060 - the agent's best move was to
 drop the MIDAS anchor. GroupCount + right_step removes that inversion.
 """
 
@@ -1498,7 +1498,7 @@ Expected: FAIL — 현재 sketch에 stage가 2개이고 `TanimotoSimilarity`가 
 #
 # The carboxylate is a GATE, not a MatchingSubstructure penalty: that component
 # hardcodes 0.5 * (1.0 + match), and under it a molecule WITHOUT the carboxylate
-# scored a flat 0.500 while molecules WITH it had a median of 0.203, because the
+# scored a flat 0.500 while molecules WITH it had a median of 0.060, because the
 # acid adds ~37 TPSA and falls out of the window. The agent's best move was to drop
 # the MIDAS anchor. GroupCount + right_step makes absence cost 6.31e-04 instead.
 #
@@ -1514,7 +1514,7 @@ Expected: FAIL — 현재 sketch에 stage가 2개이고 `TanimotoSimilarity`가 
 [[stage.scoring.component.GroupCount.endpoint]]
 name = "carboxylate MIDAS anchor"
 weight = 1.0
-params.smarts = ["[CX3](=O)[OX2H1,OX1-]"]
+params.smarts = "[CX3](=O)[OX2H1,OX1-]"
 transform.type = "right_step"
 transform.high = 1
 
@@ -1535,8 +1535,10 @@ transform.coef_si = 20.0
 transform.coef_se = 20.0
 
 # GUARD RAIL, not an optimization axis. Every reference molecule and every prior
-# sample scores exactly 1.000 here, so this term contributes nothing at step 0; it
-# only bites if 600 steps of RL drift past SA 6, the conventional hard-to-make line.
+# sample scores 0.99998 or better here (reverse_sigmoid approaches 1.0 asymptotically;
+# the worst reference molecule scores 0.999983), contributing nothing measurable at
+# step 0 - a total is depressed by 2.2e-06. It only bites if 600 steps of RL drift
+# past SA 6, the conventional hard-to-make line.
 # The earlier (3, 6) window gave actives_extended's worst molecule (SA 5.10) a 0.093
 # - punishing a published active.
 [[stage.scoring.component]]
@@ -1693,7 +1695,7 @@ grep -n '^#\{2,3\} ' avb1_10day_blueprint.md
 
 `### Stage 1 — "focus" (max_steps = 200)`부터 `### Stage 2` 절 끝까지(현재 233–256행)를 다음 소절로 교체한다. 국문판 해당 절의 **모든 표와 수치를 그대로** 옮기고, 산문만 영어로 쓴다:
 
-- `### 5.1 The objective — three scored endpoints and one filter` — 국문 §5.1의 component 표, `GroupCount` TOML 블록, 집계식, MatchingSubstructure 역전 표(카르복실산 있음 0.203 / 없음 0.500)
+- `### 5.1 The objective — three scored endpoints and one filter` — 국문 §5.1의 component 표, `GroupCount` TOML 블록, 집계식, MatchingSubstructure 역전 표(카르복실산 있음 0.060 / 없음 0.500)
 - `### 5.2 What was removed from the objective` — 국문 §5.2의 제거 표 + `TanimotoSimilarity` zip 결함 인용 블록
 - `### 5.3 Why a single stage and not a curriculum` — 3개 논거 + 보정 측정 표(총점 중앙값 0.011)
 - `### 5.4 Component-by-component rationale` — TPSA 창 앵커 표, 창 후보 비교 표 + 계산 정정 주석, SlogP 제거, QED 제거, SAScore 창 표, aniline 패턴 표

@@ -11,7 +11,7 @@ and the aggregator are ported from REINVENT4 v4.5.11:
 
 COOH is a GATE, not a penalty: REINVENT's MatchingSubstructure hardcodes
 0.5 * (1.0 + match), and with that a molecule WITHOUT the carboxylate scored a flat
-0.500 while molecules WITH it had a median of 0.203 - the agent's best move was to
+0.500 while molecules WITH it had a median of 0.060 - the agent's best move was to
 drop the MIDAS anchor. GroupCount + right_step removes that inversion.
 """
 
