@@ -534,7 +534,7 @@ from novelty import cross_scaffold_band
 - [ ] **Step 7: 테스트를 다시 돌리고 커밋한다**
 
 Run: `python3 -m unittest discover -s tests -t . -v`
-Expected: PASS — 12 tests
+Expected: PASS — 14 tests
 
 ```bash
 git add tests/test_novelty_band.py scripts/novelty.py scripts/curate_actives.py data/novelty_band.json
@@ -791,7 +791,21 @@ def write_known_scaffolds(out_path: str = DEFAULT_OUTPUT) -> int:
 Run: `python3 -m unittest tests.test_known_scaffolds -v`
 Expected: PASS — 10 tests
 
-- [ ] **Step 5: `data/known_scaffolds.smi`를 생성한다**
+- [ ] **Step 5: `curate_actives.py`가 `_note`를 잃지 않게 한다**
+
+Task 2의 Step 5 스니펫은 `data/novelty_band.json`에 "REPORTING CONTEXT ONLY" 주석을 넣었지만, `curate_actives.py`가 만드는 `band` dict에는 그 키가 없다. 따라서 **큐레이션 스크립트를 실제로 다시 돌리면 그 주석이 조용히 사라지고** JSON이 다시 게이트처럼 읽힌다. `curate_actives.py`의 `(DATA / "novelty_band.json").write_text(...)` 바로 앞에 다음을 추가한다:
+
+```python
+    band["_note"] = (
+        "Tautomer-canonicalized (blueprint 8.0). REPORTING CONTEXT ONLY - the "
+        "novelty gate is Murcko scaffold membership, see data/known_scaffolds.smi. "
+        "Pre-normalization values were core p25 0.552, extended p25 0.710."
+    )
+```
+
+확인: `python3 -c "import sys; sys.path.insert(0,'scripts'); import curate_actives; print('import ok')"`
+
+- [ ] **Step 6: `data/known_scaffolds.smi`를 생성한다**
 
 ```bash
 python3 -c "import sys; sys.path.insert(0,'scripts'); from known_scaffolds import write_known_scaffolds as w; print(w(), 'scaffolds')"
@@ -801,10 +815,10 @@ Expected: `106 scaffolds`
 Run: `grep -vc '^#' data/known_scaffolds.smi`
 Expected: `106`
 
-- [ ] **Step 6: 커밋**
+- [ ] **Step 7: 커밋**
 
 ```bash
-git add tests/test_known_scaffolds.py scripts/known_scaffolds.py data/known_scaffolds.smi
+git add tests/test_known_scaffolds.py scripts/known_scaffolds.py data/known_scaffolds.smi scripts/curate_actives.py
 git commit -m "$(cat <<'MSG'
 feat: Murcko scaffold 신규성 게이트와 known_scaffolds.smi
 
@@ -1515,9 +1529,13 @@ cat configs/_rl_scoring.frag >> reinvent4_avb1_scoring_config_sketch.toml
 
 - [ ] **Step 5: 옛 fragment를 삭제한다**
 
+이 두 파일은 **git에 추적되지 않은 상태**이므로 `git rm`은 `did not match any files`로 실패한다. 평문 `rm`을 쓴다:
+
 ```bash
-git rm configs/_stage1_scoring.frag configs/_stage2_scoring.frag
+rm configs/_stage1_scoring.frag configs/_stage2_scoring.frag
 ```
+
+Step 6의 `test_stage_fragments_are_gone`은 `Path(...).exists()`를 보므로 이것으로 충족된다.
 
 - [ ] **Step 6: 테스트가 통과하는 것을 확인한다**
 
@@ -1526,9 +1544,11 @@ Expected: PASS — 13 tests
 
 전체 스위트도 확인한다:
 Run: `python3 -m unittest discover -s tests -t . -v`
-Expected: PASS — 43 tests
+Expected: PASS — 47 tests
 
 - [ ] **Step 7: 커밋**
+
+`reinvent4_avb1_scoring_config_sketch.toml`도 추적되지 않은 파일이므로 diff에 새 파일로 나타난다 — 정상이다.
 
 ```bash
 git add reinvent4_avb1_scoring_config_sketch.toml configs/_rl_scoring.frag tests/test_config.py
@@ -1625,6 +1645,6 @@ MSG
 ## 실행 후 확인
 
 ```bash
-python3 -m unittest discover -s tests -t . -v   # 43 tests, all pass
+python3 -m unittest discover -s tests -t . -v   # 47 tests, all pass
 git log --oneline afa1099..HEAD                 # 6 commits
 ```
