@@ -561,8 +561,6 @@ Pip installs binary-only (`--only-binary=:all:`). Without it, a package whose ne
 - Run: `reinvent -l run.log config.toml`
 - Data curation: `python3 scripts/curate_actives.py` (RDKit only; ChEMBL/PubChem/RCSB responses cached under `data/.cache`, so the run is reproducible offline and the exact ChEMBL release is recorded in the log).
 - GPU: RL `batch_size = 128`; submit to `1gpu` (one A100 is enough, and it is the cheapest queue at 1 node-hour per hour). Every GPU partition was fully allocated when probed — expect to queue.
-- GPU: RL `batch_size = 128`; sampling 50k molecules takes minutes on GPU (~1 h on CPU).
-- Docking: smina or AutoDock Vina binary; receptor prep with OpenBabel/ADFR; keep the prepared receptor and box configuration under version control — the redocking validation depends on it.
 
 ---
 
