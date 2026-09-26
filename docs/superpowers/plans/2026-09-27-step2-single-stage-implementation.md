@@ -789,7 +789,7 @@ def write_known_scaffolds(out_path: str = DEFAULT_OUTPUT) -> int:
 - [ ] **Step 4: 테스트가 통과하는 것을 확인한다**
 
 Run: `python3 -m unittest tests.test_known_scaffolds -v`
-Expected: PASS — 10 tests
+Expected: PASS — 11 tests
 
 - [ ] **Step 5: `curate_actives.py`가 `_note`를 잃지 않게 한다**
 
@@ -1544,7 +1544,7 @@ Expected: PASS — 13 tests
 
 전체 스위트도 확인한다:
 Run: `python3 -m unittest discover -s tests -t . -v`
-Expected: PASS — 47 tests
+Expected: PASS — 48 tests
 
 - [ ] **Step 7: 커밋**
 
@@ -1645,6 +1645,6 @@ MSG
 ## 실행 후 확인
 
 ```bash
-python3 -m unittest discover -s tests -t . -v   # 47 tests, all pass
+python3 -m unittest discover -s tests -t . -v   # 48 tests, all pass
 git log --oneline afa1099..HEAD                 # 6 commits
 ```
