@@ -242,8 +242,7 @@ def standardize(smiles: str) -> tuple[str, str] | None:
 # Tautomer canonicalization lives in scripts/normalize.py, NOT here. standardize()
 # feeds data/actives_core.smi, which is the TL-A training input and the RL inception
 # memory; changing it would invalidate the D3 result. Every Tanimoto and Murcko
-# comparison imports canonical_tautomer from normalize instead.
-from normalize import canonical_tautomer, canonical_tautomer_smiles  # noqa: E402
+# comparison goes through normalize.canonical_tautomer instead.
 
 
 _FPGEN = rdFingerprintGenerator.GetMorganGenerator(
