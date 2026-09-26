@@ -412,7 +412,7 @@ similarity가 목적함수에서 빠지므로 폐기하고 다음으로 대체�
 | `reinvent4_avb1_scoring_config_sketch.toml` | 단일 stage로 재작성 — **후속 작업** |
 | `configs/_stage1_scoring.frag` | 삭제 — **후속 작업** |
 | `configs/_stage2_scoring.frag` | 단일 stage 반영 — **후속 작업** |
-| `scripts/curate_actives.py` | `standardize()`에 타우토머 정규화 추가 — **후속 작업** |
+| `scripts/curate_actives.py` | **완료** — band 계산을 `cross_scaffold_band(normalize=True)` 호출로 교체, threshold 안내문 정정, `band["_note"]` 추가. `standardize()`는 **의도적으로 미변경**(§3.6) |
 | `data/novelty_band.json` | 재계산 — **후속 작업** |
 
 ## 6. 해결된 사항 (2026-09-26 ~ 27 추가 계산)
@@ -511,6 +511,6 @@ drug-like ChEMBL 분자는 대부분 카르복실산이 없으니 음성 패널�
 - `avb1_10day_blueprint.md`(영문) 동기화
 - `reinvent4_avb1_scoring_config_sketch.toml` 단일 stage + 게이트 구성으로 재작성
 - `configs/_stage1_scoring.frag` 삭제, `_stage2_scoring.frag` 갱신
-- `scripts/curate_actives.py`: `standardize()`에 타우토머 정규화 추가, band 계산도 정규화 후로
+- ~~`scripts/curate_actives.py`: `standardize()`에 타우토머 정규화 추가~~ → **이 지시는 철회했다.** `standardize()`의 출력이 `data/actives_core.smi`(TL-A 학습 입력 + RL inception 시드)에 쓰이므로 완료된 D3 run의 불변량을 파괴한다(§3.6). 정규화는 비교 계층(`scripts/normalize.py`)에만 두었고 band 계산은 정규화 후로 바꿨다 — 둘 다 완료.
 - `data/novelty_band.json` 재생성(게이트는 아니지만 보고 맥락으로 유지)
 - Murcko scaffold 집합(참조 파일 5개 합집합, 106개)을 `data/known_scaffolds.smi`로 고정 산출
