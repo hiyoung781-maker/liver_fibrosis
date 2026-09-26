@@ -648,6 +648,11 @@ def main() -> int:
          "this band alongside the binary scaffold verdict: the percentile survives "
          "a change of fingerprint in a way a bare cut-off does not.")
     note()
+    band["_note"] = (
+        "Tautomer-canonicalized (blueprint 8.0). REPORTING CONTEXT ONLY - the "
+        "novelty gate is Murcko scaffold membership, see data/known_scaffolds.smi. "
+        "Pre-normalization values were core p25 0.552, extended p25 0.710."
+    )
     (DATA / "novelty_band.json").write_text(json.dumps(band, indent=2) + "\n")
 
     # ---- annotated table
