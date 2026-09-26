@@ -32,7 +32,7 @@ spec이 요구하지만 어떤 작업의 테스트도 직접 건드리지 않는
 1. **파싱 불가 SMILES** — 생성기는 무효 SMILES를 낸다. 정규화·신규성 헬퍼가 예외를 던지면 triage 전체가 멈춘다. `None`을 돌려주고 호출자가 건너뛰어야 한다. → Task 1
 2. **`TautomerEnumerator`가 실패하거나 분자를 바꾸지 못하는 경우** — 큰/이상한 분자에서 예외 또는 입력 그대로 반환이 가능하다. 이 경우 조용히 원본을 쓰면 기준 세트와 측정 세트의 정규화가 어긋난다(spec §2.7의 비대칭이 다시 생긴다). 실패를 삼키지 말고 원본 반환 + 카운터 기록. → Task 1
 3. **카르복실레이트 SMARTS가 에스터/아마이드/테트라졸을 잡는지** — 잡으면 게이트가 열려 MIDAS anchor 없는 분자가 통과한다. → Task 4
-4. **비고리 분자의 Murcko scaffold는 빈 문자열 `""`** — 103개 집합에 `""`가 없으므로 "신규"로 통과하고, diversity filter에서는 모든 비고리 분자가 같은 버킷을 공유한다. 명시적으로 처리하고 보고해야 한다. → Task 3
+4. **비고리 분자의 Murcko scaffold는 빈 문자열 `""`** — 106개 집합에 `""`가 없으므로 "신규"로 통과하고, diversity filter에서는 모든 비고리 분자가 같은 버킷을 공유한다. 명시적으로 처리하고 보고해야 한다. → Task 3
 5. **REINVENT의 config 검증** — `get_transform`은 이름을 `lower().replace("_","")`로 해석하고(`right_step` → `rightstep` → `RightStep`), 섹션 파라미터는 pydantic `extra="forbid"`라서 오타 키가 하드 실패다. TOML을 쓰고 나서 실제로 파싱·검증해야 한다. → Task 5
 
 ---
@@ -500,7 +500,8 @@ MSG
 - Consumes: `scripts.normalize.canonical_tautomer`, `scripts.novelty.murcko`, `scripts.novelty.load_smi`
 - Produces:
   - `scripts/known_scaffolds.py`:
-    - `known_scaffolds(path: str = "data/actives_extended.smi") -> set[str]`
+    - `REFERENCE_FILES: tuple[str, ...]` — 기준 집합을 이루는 다섯 파일
+    - `known_scaffolds(paths: Sequence[str] = REFERENCE_FILES) -> set[str]`
     - `is_scaffold_novel(smiles: str, known: set[str]) -> bool | None` — 파싱 실패 시 `None`
     - `write_known_scaffolds(out_path: str = "data/known_scaffolds.smi") -> int` — 쓴 scaffold 개수 반환
 - 이후 Task 4가 `known_scaffolds`를 import 한다.
@@ -523,15 +524,33 @@ RDLogger.DisableLog("rdApp.*")
 
 from known_scaffolds import is_scaffold_novel, known_scaffolds
 from normalize import canonical_tautomer
-from novelty import murcko
+from novelty import load_smi, murcko
 
 PLN_NONAROMATIC = "O=C(O)[C@H](CCCCCCCC1=CC=C2C(N1)=NCCC2)NC(C3(C)CCOCC3)=O"
 PLN_AROMATIC = "CC1(C(=O)NC(CCCCCCCc2ccc3c(n2)NCCC3)C(=O)O)CCOCC1"
 
 
 class TestKnownScaffolds(unittest.TestCase):
-    def test_extended_yields_103_scaffolds(self):
-        self.assertEqual(len(known_scaffolds()), 103)
+    def test_reference_files_yield_106_scaffolds(self):
+        self.assertEqual(len(known_scaffolds()), 106)
+
+    def test_published_reference_compounds_are_all_covered(self):
+        """The gate must never call a benchmark compound's scaffold novel.
+
+        actives_extended alone misses PLN-1474, bexotegrast and A1AFA: it is
+        defined as ChEMBL alphaVbeta1 actives <= 1 uM, and PLN-1474's structure
+        came from AdisInsight rather than a ChEMBL activity record while A1AFA
+        sits at pIC50 5.30, below the potency cut. PLN-1474 is the only clinical
+        alphaVbeta1-selective compound in this project and its structure has been
+        public since August 2023, so a generated molecule rebuilding its scaffold
+        is not novel.
+        """
+        known = known_scaffolds()
+        for path in ("data/benchmark_panel.smi", "data/similarity_refs.smi",
+                     "data/actives_core.smi", "data/actives_extended.smi"):
+            for smiles, label in load_smi(path):
+                with self.subTest(path=path, label=label):
+                    self.assertFalse(is_scaffold_novel(smiles, known))
 
     def test_empty_scaffold_is_not_in_the_known_set(self):
         """Review Focus 4: an acyclic molecule's Murcko scaffold is "".
@@ -562,15 +581,14 @@ class TestTautomerDependence(unittest.TestCase):
         self.assertEqual(a, b)
 
     def test_pln1474_is_not_novel_in_either_tautomer(self):
-        """A known clinical compound must never pass the novelty gate."""
+        """A known clinical compound must never pass the gate, either way written."""
         known = known_scaffolds()
-        known = known | {murcko(canonical_tautomer(Chem.MolFromSmiles(PLN_AROMATIC)))}
         self.assertFalse(is_scaffold_novel(PLN_NONAROMATIC, known))
         self.assertFalse(is_scaffold_novel(PLN_AROMATIC, known))
 
 
 class TestGateOnPriorSamples(unittest.TestCase):
-    def test_871_percent_of_prior_samples_are_scaffold_novel(self):
+    def test_861_percent_of_prior_samples_are_scaffold_novel(self):
         known = known_scaffolds()
         with open("logs/cmp.vigHoB/samples_prior.csv") as handle:
             smiles = [row["SMILES"] for row in csv.DictReader(handle)]
@@ -578,7 +596,8 @@ class TestGateOnPriorSamples(unittest.TestCase):
         novel = sum(1 for v in verdicts if v)
         total = sum(1 for v in verdicts if v is not None)
         self.assertEqual(total, 488)
-        self.assertAlmostEqual(novel / total, 0.871, places=2)
+        self.assertEqual(novel, 420)
+        self.assertAlmostEqual(novel / total, 0.861, places=2)
 
 
 class TestInvalidInput(unittest.TestCase):
@@ -616,27 +635,46 @@ same compound yields two different Murcko SMILES (verified on PLN-1474).
 
 from __future__ import annotations
 
+from typing import Sequence
+
 from rdkit import Chem
 
 from normalize import canonical_tautomer
 from novelty import load_smi, murcko
 
-__all__ = ["is_scaffold_novel", "known_scaffolds", "write_known_scaffolds"]
+__all__ = [
+    "REFERENCE_FILES",
+    "is_scaffold_novel",
+    "known_scaffolds",
+    "write_known_scaffolds",
+]
 
-DEFAULT_REFERENCE = "data/actives_extended.smi"
+# Every curated reference set, not just actives_extended. That file is defined as
+# ChEMBL alphaVbeta1 actives <= 1 uM, which omits PLN-1474 (structure from
+# AdisInsight, not a ChEMBL activity record), bexotegrast, and A1AFA (pIC50 5.30,
+# below the cut) - so on its own the gate would call a molecule rebuilding
+# PLN-1474's scaffold novel. The union is 106 scaffolds.
+REFERENCE_FILES = (
+    "data/actives_core.smi",
+    "data/actives_core_B.smi",
+    "data/actives_extended.smi",
+    "data/benchmark_panel.smi",
+    "data/similarity_refs.smi",
+)
 DEFAULT_OUTPUT = "data/known_scaffolds.smi"
 
 
-def known_scaffolds(path: str = DEFAULT_REFERENCE) -> set[str]:
-    """Murcko scaffolds of every published active, tautomer-canonicalized."""
+def known_scaffolds(paths: Sequence[str] = REFERENCE_FILES) -> set[str]:
+    """Murcko scaffolds of every published reference compound, tautomer-canonicalized."""
     scaffolds = set()
-    for smiles, _ in load_smi(path):
-        mol = canonical_tautomer(Chem.MolFromSmiles(smiles))
-        if mol is None:
-            continue
-        scaffold = murcko(mol)
-        if scaffold:  # "" means acyclic; no known active is acyclic
-            scaffolds.add(scaffold)
+    for path in paths:
+        for smiles, _ in load_smi(path):
+            mol = canonical_tautomer(Chem.MolFromSmiles(smiles))
+            if mol is None:
+                continue
+            scaffold = murcko(mol)
+            if scaffold:  # "" means acyclic; no reference compound is acyclic
+                scaffolds.add(scaffold)
     return scaffolds
 
 
@@ -658,8 +696,9 @@ def write_known_scaffolds(out_path: str = DEFAULT_OUTPUT) -> int:
     """Freeze the scaffold set to disk so triage does not recompute it."""
     scaffolds = sorted(known_scaffolds())
     lines = [
-        "# Murcko scaffolds of data/actives_extended.smi (190 ChEMBL alphaVbeta1",
-        "# actives <= 1 uM), tautomer-canonicalized per blueprint section 8.0.",
+        "# Murcko scaffolds of every curated reference set - actives_core,",
+        "# actives_core_B, actives_extended, benchmark_panel, similarity_refs -",
+        "# tautomer-canonicalized per blueprint section 8.0. 106 scaffolds.",
         "# A generated molecule whose Murcko scaffold is absent here is",
         "# scaffold-novel (sections 8.3, 9.3). Regenerate with:",
         "#   python3 -c \"import sys; sys.path.insert(0,'scripts'); \\",
@@ -674,17 +713,17 @@ def write_known_scaffolds(out_path: str = DEFAULT_OUTPUT) -> int:
 - [ ] **Step 4: 테스트가 통과하는 것을 확인한다**
 
 Run: `python3 -m unittest tests.test_known_scaffolds -v`
-Expected: PASS — 8 tests
+Expected: PASS — 9 tests
 
 - [ ] **Step 5: `data/known_scaffolds.smi`를 생성한다**
 
 ```bash
 python3 -c "import sys; sys.path.insert(0,'scripts'); from known_scaffolds import write_known_scaffolds as w; print(w(), 'scaffolds')"
 ```
-Expected: `103 scaffolds`
+Expected: `106 scaffolds`
 
 Run: `grep -vc '^#' data/known_scaffolds.smi`
-Expected: `103`
+Expected: `106`
 
 - [ ] **Step 6: 커밋**
 
@@ -693,9 +732,10 @@ git add tests/test_known_scaffolds.py scripts/known_scaffolds.py data/known_scaf
 git commit -m "$(cat <<'MSG'
 feat: Murcko scaffold 신규성 게이트와 known_scaffolds.smi
 
-actives_extended 190개에서 103개 scaffold를 고정 산출. 이진 판정이라 지문 의존과
-임계값이 없고, diversity filter와 같은 단위를 쓴다. prior 샘플 488개 중 425개(87.1%)
-통과를 테스트로 고정했다. 비고리 분자의 빈 scaffold와 무효 SMILES도 명시 처리한다.
+큐레이션된 기준 세트 5개의 합집합에서 106개 scaffold를 고정 산출. actives_extended
+단독(103개)은 PLN-1474/bexotegrast/A1AFA의 골격을 빠뜨려 그 골격을 재현한 분자를
+"신규"로 통과시켰다. 이진 판정이라 지문 의존과 임계값이 없고 diversity filter와 같은
+단위를 쓴다. prior 샘플 488개 중 420개(86.1%) 통과를 테스트로 고정했다. 비고리 분자의 빈 scaffold와 무효 SMILES도 명시 처리한다.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 MSG
@@ -1480,7 +1520,7 @@ grep -n '^#\{2,3\} ' avb1_10day_blueprint.md
 - [ ] **Step 4: 두 파일이 같은 사실을 말하는지 기계적으로 확인한다**
 
 ```bash
-for token in '40, 115' '(6, 8' '6.31e-04' '0.178' '103' 'right_step' 'GroupCount' '\[NX3;H2\]\[c\]' '0.680' '\[113\]'; do
+for token in '40, 115' '(6, 8' '6.31e-04' '0.178' '106' 'right_step' 'GroupCount' '\[NX3;H2\]\[c\]' '0.680' '\[113\]'; do
   k=$(grep -c "$token" korean_avb1_10day_blueprint.md)
   e=$(grep -c "$token" avb1_10day_blueprint.md)
   printf '%-22s ko=%-3s en=%-3s %s\n' "$token" "$k" "$e" "$([ "$e" -gt 0 ] && echo OK || echo MISSING)"
