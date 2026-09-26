@@ -34,10 +34,36 @@ class TestKnownScaffolds(unittest.TestCase):
         """
         known = known_scaffolds()
         for path in ("data/benchmark_panel.smi", "data/similarity_refs.smi",
-                     "data/actives_core.smi", "data/actives_extended.smi"):
+                     "data/actives_core.smi", "data/actives_core_B.smi",
+                     "data/actives_extended.smi"):
             for smiles, label in load_smi(path):
                 with self.subTest(path=path, label=label):
                     self.assertFalse(is_scaffold_novel(smiles, known))
+
+    def test_the_three_compounds_the_union_exists_for(self):
+        """Direct regression guard for the five-file reference set.
+
+        actives_extended.smi is "ChEMBL alphaVbeta1 actives <= 1 uM", which omits
+        these three: PLN-1474's structure came from a drug-development database
+        rather than a ChEMBL activity record, bexotegrast is a dual alphaVbeta6 /
+        alphaVbeta1 compound, and A1AFA sits below the potency cut. Asserting both
+        halves - absent from the single file, present in the union - is what fails
+        if REFERENCE_FILES is ever narrowed back to actives_extended alone.
+        """
+        extended_only = known_scaffolds(("data/actives_extended.smi",))
+        union = known_scaffolds()
+        compounds = {
+            "PLN-1474": "CC1(C(=O)NC(CCCCCCCc2ccc3c(n2)NCCC3)C(=O)O)CCOCC1",
+            "bexotegrast":
+                "COCCN(CCCCc1ccc2c(n1)NCCC2)CCC(Nc1ncnc2ccccc12)C(=O)O",
+            "A1AFA": "O=C(NC(Cc1ccccc1)C(=O)O)c1ccc(Cl)cc1Cl",
+        }
+        for label, smiles in compounds.items():
+            with self.subTest(label=label):
+                scaffold = murcko(canonical_tautomer(Chem.MolFromSmiles(smiles)))
+                self.assertNotIn(scaffold, extended_only)
+                self.assertIn(scaffold, union)
+                self.assertFalse(is_scaffold_novel(smiles, union))
 
     def test_empty_scaffold_is_not_in_the_known_set(self):
         """Review Focus 4: an acyclic molecule's Murcko scaffold is "".
