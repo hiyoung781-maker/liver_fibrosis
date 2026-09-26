@@ -138,6 +138,20 @@ def score(mols: list[Chem.Mol]) -> dict[str, np.ndarray]:
 
 
 def score_smiles(smiles_list: list[str]) -> dict[str, np.ndarray]:
-    """Score valid molecules. Unparseable SMILES are dropped, as REINVENT does."""
-    mols = [m for m in (Chem.MolFromSmiles(s) for s in smiles_list) if m is not None]
-    return score(mols)
+    """Score the parseable molecules, and report WHICH ones were scored.
+
+    Unparseable SMILES are dropped, so the returned arrays can be shorter than
+    `smiles_list`. The result therefore carries a "smiles" entry listing exactly
+    the SMILES that were scored, in order: a caller pairing its own labels with
+    these scores must zip against that, never against its original list, or a
+    single parse failure silently shifts every label after it onto the wrong score.
+    """
+    kept, mols = [], []
+    for smiles in smiles_list:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is not None:
+            kept.append(smiles)
+            mols.append(mol)
+    result = score(mols)
+    result["smiles"] = kept
+    return result
