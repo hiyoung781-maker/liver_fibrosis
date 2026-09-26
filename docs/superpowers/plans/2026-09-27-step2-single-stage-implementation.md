@@ -851,7 +851,7 @@ MSG
     - `geometric_mean(pairs: list[tuple[np.ndarray, float]]) -> np.ndarray`
     - `GATE_FLOOR: float` — 카르복실산 부재 시 총점 상한
     - `score(mols: list[Chem.Mol]) -> dict[str, np.ndarray]` — 키: `total`, `cooh`, `tpsa`, `sascore`, `alerts`
-    - `score_smiles(smiles_list: list[str]) -> dict[str, np.ndarray]`
+    - `score_smiles(smiles_list: list[str]) -> dict` — `score()`의 키 + `"smiles"`(채점된 SMILES 목록, 순서 보존)
     - `CARBOXYLATE_SMARTS: str`, `ALERT_SMARTS: list[str]`, `TPSA_WINDOW: tuple`, `SASCORE_WINDOW: tuple` — Task 5의 TOML 테스트가 config 값과 대조하는 단일 진실 원천
 
 - [ ] **Step 1: 실패하는 테스트를 쓴다**
@@ -868,7 +868,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from rdkit import Chem, RDLogger
+from rdkit import RDLogger
 
 RDLogger.DisableLog("rdApp.*")
 
@@ -892,8 +892,11 @@ class TestTransformsMatchReinvent(unittest.TestCase):
     """Validate against real REINVENT output in logs/cmp.vigHoB/new3.csv.
 
     That file was scored with SlogP reverse_sigmoid(2, 5, k=0.4) and TPSA
-    double_sigmoid(40, 120, 120, 20, 20). 19 rows are alert-filtered, and REINVENT
-    overwrites every component with 0 for those, so they are excluded.
+    double_sigmoid(40, 120, 120, 20, 20) - deliberately different windows from this
+    module's own, so agreement validates the ported math rather than restating the
+    config. REINVENT overwrites every component with 0 for a molecule its filter
+    rejects, so those rows cannot validate a transform; the "alerts" column
+    identifies them directly (19 rows in this file).
     """
 
     def setUp(self):
@@ -903,7 +906,7 @@ class TestTransformsMatchReinvent(unittest.TestCase):
     def _cols(self, raw_col, score_col):
         raw, got = [], []
         for row in self.rows:
-            if float(row["SlogP (raw)"]) == 0.0:  # alert-filtered rows
+            if float(row["alerts"]) == 0.0:  # REINVENT zeroed every component
                 continue
             raw.append(float(row[raw_col]))
             got.append(float(row[score_col]))
@@ -919,7 +922,7 @@ class TestTransformsMatchReinvent(unittest.TestCase):
         self.assertLess(np.abs(computed - got).max(), 1e-6)
 
     def test_geometric_mean_and_penalty_reproduce_total(self):
-        rows = [r for r in self.rows if float(r["SlogP (raw)"]) != 0.0]
+        rows = [r for r in self.rows if float(r["alerts"]) != 0.0]
         col = lambda name: np.array([float(r[name]) for r in rows])
         scored = [
             (col("sim A1AFA"), 1.0),
@@ -982,7 +985,13 @@ class TestSpecNumbers(unittest.TestCase):
     def test_benchmark_panel_scores(self):
         rows = load_smi("data/benchmark_panel.smi")
         result = score_smiles([s for s, _ in rows])
-        got = dict(zip([label for _, label in rows], result["total"]))
+        # Zip through result["smiles"], not `rows`: score_smiles drops unparseable
+        # input, so pairing labels with scores by position would silently shift
+        # every label after a parse failure onto the wrong molecule's score.
+        label_of = dict((smiles, label) for smiles, label in rows)
+        got = {label_of[s]: total
+               for s, total in zip(result["smiles"], result["total"])}
+        self.assertEqual(len(got), len(rows))
         expected = {
             "A1AFA": 1.000,
             "PLN-1474": 0.998,
@@ -1166,9 +1175,23 @@ def score(mols: list[Chem.Mol]) -> dict[str, np.ndarray]:
 
 
 def score_smiles(smiles_list: list[str]) -> dict[str, np.ndarray]:
-    """Score valid molecules. Unparseable SMILES are dropped, as REINVENT does."""
-    mols = [m for m in (Chem.MolFromSmiles(s) for s in smiles_list) if m is not None]
-    return score(mols)
+    """Score the parseable molecules, and report WHICH ones were scored.
+
+    Unparseable SMILES are dropped, so the returned arrays can be shorter than
+    `smiles_list`. The result therefore carries a "smiles" entry listing exactly
+    the SMILES that were scored, in order: a caller pairing its own labels with
+    these scores must zip against that, never against its original list, or a
+    single parse failure silently shifts every label after it onto the wrong score.
+    """
+    kept, mols = [], []
+    for smiles in smiles_list:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is not None:
+            kept.append(smiles)
+            mols.append(mol)
+    result = score(mols)
+    result["smiles"] = kept
+    return result
 ```
 
 - [ ] **Step 4: 테스트가 통과하는 것을 확인한다**
