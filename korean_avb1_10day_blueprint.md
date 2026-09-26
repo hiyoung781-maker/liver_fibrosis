@@ -134,7 +134,8 @@ RGD 툴 화합물 4개는 potency 신호를 위해 의도적으로 코어에 포
 
 ### 3.4 벤치마크 패널 (D2에 고정)
 - **양성:** `data/benchmark_panel.smi` — 8W30 리간드 A1AFA, 가장 강력한 비-RGD Sabat 화합물(cpd 25 계열), PLN-1474, bexotegrast, CWHM-12, GLPG0187. C8은 제외했다(§3.1 참조).
-- **음성:** 무작위 drug-like ChEMBL 분자 100개(MW 300–550, QED ≥ 0.3), random seed 고정.
+- **음성 패널은 폐기한다(2026-09-26).** 목적함수가 카르복실레이트를 게이트로 요구하므로(§5.1) 카르복실산이 없는 분자는 총점 상한이 6.31e-04다. 무작위 drug-like ChEMBL 분자는 대부분 카르복실산이 없으니 음성 패널은 그 바닥에 몰리고, "생성 집합이 음성 패널을 능가한다"는 **"생성 분자에 카르복실산이 있다"를 다시 재는 것**이 된다 — 목적함수가 강제하고 §5.5가 통과율로 이미 보고하는 사실이다. 정보량이 없으므로 만들지 않는다.
+- 의미 있는 비교는 양성 패널이며, **순환하지 않는 축**에서만 한다: §8.5 docking 기하, §9.2 ADMET-AI permeability, Murcko 신규성(§8.3), alert/counter-screen. **총점으로 비교하지 않는다** — 총점은 우리가 설계한 목적함수의 값이므로 순환이다(§5.4).
 - 이 패널은 생성 분자와 **완전히 동일한** scoring + triage funnel을 통과한다. 포스터의 모든 비교가 정직해지는 근거가 바로 이것이다.
 
 ---
@@ -239,14 +240,45 @@ K-BDS가 아니라 로컬 TITAN Xp(sm_61)에서 실행했다. 두 환경은 동�
 
 Diversity filter는 동일 Murcko scaffold당 몇 개의 분자까지 보상에 기여할 수 있는지를 제한하며, 이것이 scaffold hopping을 강제하는 기전이자 novelty 주장을 가능하게 하는 장치다. 선행연구 [113]은 diversity filter를 마지막 stage에만 걸어 enriched chemotype으로의 *수렴*을 유도했으나, 우리 목표는 반대 방향이므로 전 구간 적용을 유지한다.
 
-### 5.1 목적함수 — scored endpoint 3개 + filter
+### 5.1 목적함수 — scored endpoint 3개 + filter 1개
 
-| endpoint | 역할 | transform |
-|---|---|---|
-| `MatchingSubstructure` 카르복실레이트 | MIDAS anchor, 타협 불가 | 존재 1.0 / 부재 0.5 |
-| `TPSA` | 산성 리간드의 투과성 축(§9.2와 동일한 축) | `double_sigmoid`, `low=40`, `high=120` — 측정된 prior 분포로 보정 |
-| `SAScore` | **guard rail — 최적화 축이 아니다**(§5.3) | `reverse_sigmoid`, 포화 영역 유지 |
-| `CustomAlerts` (filter, endpoint 아님) | 구조적 liability | 아래 |
+| 항목 | 종류 | 역할 | transform |
+|---|---|---|---|
+| `GroupCount` 카르복실레이트 | **scored** (w=1.0) — **게이트** | MIDAS anchor, 타협 불가 | `right_step(high=1)` → 보유 1.0 / 부재 0.0 |
+| `TPSA` | **scored** (w=1.0) | 산성 리간드의 투과성 축 | `double_sigmoid(low=40, high=115, coef_div=120, coef_si=coef_se=20)` |
+| `SAScore` | **scored** (w=0.5) | **guard rail — 최적화 축이 아니다**(§5.4) | `reverse_sigmoid(low=6.0, high=8.0, k=0.5)` |
+| `CustomAlerts` | **filter**(0/1 마스크) | 구조적 liability | 아래 |
+
+```toml
+[[stage.scoring.component]]
+[stage.scoring.component.GroupCount]
+[[stage.scoring.component.GroupCount.endpoint]]
+name = "carboxylate MIDAS anchor"
+weight = 1.0
+params.smarts = ["[CX3](=O)[OX2H1,OX1-]"]
+transform.type = "right_step"
+transform.high = 1
+```
+
+**집계 구조 — REINVENT4 소스에서 확인하고 실제 출력으로 검증했다.** `reinvent/scoring/scorer.py:159-178`은 scored component만 `aggregate`에 넣고 penalty component는 결과에 곱한다. 채택 구성은 penalty를 쓰지 않으므로
+
+```
+total = geometric_mean([(COOH, 1.0), (TPSA, 1.0), (SAScore, 0.5)]) × alert_filter
+      = prod(max(scoreᵢ, 1e-8) ** (wᵢ / Σw)) × alert_filter          # aggregators/means.py
+```
+
+이 재구현을 `logs/cmp.vigHoB/new3.csv`의 실제 REINVENT 출력에 대조해 검증했다 — TPSA 2.2e-07, sigmoid 8.7e-08, **총점 1.9e-08**의 오차(filter에 걸린 19개 분자는 REINVENT가 모든 component를 0으로 덮으므로 제외).
+
+**왜 `MatchingSubstructure`가 아니라 게이트인가 — 기존 구성은 카르복실레이트를 버리라고 가르쳤다.** `comp_matching_substructure.py:63`은 점수를 `0.5 * (1.0 + match)`로 **하드코딩**한다(부재 ×0.5, 조정 불가). 그 구성으로 prior 샘플을 채점하면:
+
+| prior 샘플 | n | 총점 중앙값 | p90 | 최댓값 |
+|---|---|---|---|---|
+| 카르복실산 **있음** | 254 | **0.203** | 1.000 | 1.000 |
+| 카르복실산 **없음** | 189 | **0.500** | 0.500 | 0.500 |
+
+카르복실산이 없으면 0.500에 고정되는데 있으면 중앙값이 0.203이다 — 카르복실산이 TPSA를 약 37 올려 창 밖으로 밀어내기 때문이다. **agent의 기대보상 최적 전략이 MIDAS 카르복실레이트를 버리는 것**이었다. 이 프로젝트가 타협 불가라고 선언한 바로 그 구조다.
+
+`CustomAlerts`로는 해결되지 않는다 — 그것은 "매치되면 0"이므로 **부재**를 표현할 수 없고, SMARTS에는 분자 수준 부정이 없다. 따라서 `GroupCount` + `right_step`을 scored endpoint로 쓴다. `geometric_mean`이 0을 1e-8로 clamp하므로 카르복실산 부재 시 총점 상한은 **6.31e-04**이고(prior 샘플 219개 전부가 그 아래) DAP σ=128 기준 만점과 **약 128 nat** 차이다 — 문자 그대로 0은 아니지만 실질적 게이트다. `w_COOH`를 올리면 바닥은 더 내려가지만(w=3 → 4.6e-06) TPSA 지수가 희석되어 gradient가 평탄해지므로 **w=1**로 둔다.
 
 `CustomAlerts` 패턴:
 
@@ -303,20 +335,59 @@ C(=O)Cl
 
 ### 5.4 개별 component 판단 근거
 
-**`SlogP` 제거.** 세 파일이 서로 달랐다 — 이 문서는 "reverse_sigmoid, 약 3 초과 시 페널티", `reinvent4_avb1_scoring_config_sketch.toml`은 `double_sigmoid(low=1, high=4)`, 실제 실행된 `logs/cmp.vigHoB/new3.toml`은 `reverse_sigmoid(low=2, high=5, k=0.4)`. "3"은 마지막 것의 변곡점(score 0.5 지점)과 일치한다. 출처는 §1 pocket 표 4행("소수성 부피 수용 가능 → SlogP 약 3까지")이지만, 그 행은 접촉 거리에서 얻은 정성적 **허용 하한**("적어도 3까지는 괜찮다")이며 "3을 넘으면 벌점"이 아니다 — 허용 범위의 하한을 페널티의 상한으로 바꿔 쓴 오독이다. low/high 값 자체는 어느 문서에서도 유도되지 않는다. 더 중요한 것은 방향이다 — 이 프로젝트는 필수 카르복실레이트를 가진 **음이온**을 만들고 §9.2는 "예측 permeability에서 cpd 25를 능가"를 요구한다. 산성 화합물의 투과성 병목은 지질친화성 과다가 아니라 이온화된 카르복실레이트이므로, logP를 3 위에서 깎으면 개선하겠다고 선언한 축을 악화시킨다. 선행연구 [113]의 준거도 soft penalty가 아니라 hard filter(MW > 500 또는 logP > 5 제외)다. → §8.2 triage 창으로 이동.
+**`TPSA` 창 = `(40, 115)`, 근거는 경구 임상 화합물 두 개다.** 창의 근거로 cpd 25 계열을 쓸 수 없다 — 그 계열의 TPSA가 높은 것은(중앙 133.3, 최대 170.0) **애초에 경구용으로 제안된 구조가 아니기 때문**이고, 따라서 "cpd 25가 창 밖에 있다"는 §0의 전제를 다시 말한 것에 불과하다(순환). 외부 증거가 되는 앵커는 경구로 실제 진전된 αv 카르복실산 두 개뿐이다:
+
+| 화합물 | TPSA | 기록된 근거 |
+|---|---|---|
+| **PLN-1474** | **100.6** | 경구, αvβ1 선택적, Phase 1 무사 완료(84명, DLT 없음) [85] |
+| **bexotegrast** | **112.5** | 경구 αvβ6/αvβ1 이중 저해, Phase 2a INTEGRIS [98, 99] |
+| A1AFA | 66.4 | 8W30 결정 리간드 — 구조적 하한 |
+| cpd 25 계열(Sabat 25개) | 중앙 133.3 / 최대 170.0 | 경구 F 1.3%, MDCK < 0.1×10⁻⁶ [111] — 경구용 제안 아님 |
+| GLPG0187 / CWHM-12 | 158.7 / 172.4 | 비선택적 / 비경구 |
+
+하한 40은 결정 리간드(66.4)보다 낮아 아무것도 벌주지 않는다. 상한 115는 **경구 임상 화합물 중 TPSA가 높은 쪽(bexotegrast 112.5)에 마진을 둔 값**이다. 후보 비교(카르복실산 게이트 적용 상태, "산 부분집합"은 카르복실산 보유 prior 샘플 254개):
+
+| 창 | bexotegrast | PLN-1474 | A1AFA | 산 중앙값 | 산 > 0.5 | Sabat 중앙 |
+|---|---|---|---|---|---|---|
+| **(40, 115) — 채택** | 0.878 | 0.998 | 1.000 | **0.178** | 43% | **0.060** |
+| (40, 120) | 0.978 | 1.000 | 1.000 | 0.372 | 48% | 0.130 |
+| (45, 125) | 0.997 | 1.000 | 1.000 | 0.661 | 52% | 0.276 |
+| (50, 130) | 1.000 | 1.000 | 0.999 | 0.910 | 59% | 0.546 |
+| (60, 140) — 기각 | 1.000 | 1.000 | 0.968 | 0.976 | 63% | **0.968** |
+
+`(40, 115)`에서 산 중앙값이 0.178로 낮은 것은 **의도된 방향**이다 — TL이 남긴 산은 TPSA가 높고(보유 샘플 p25 102 / 중앙 128 / p75 158) RL의 일이 그것을 끌어내리는 것이기 때문이다. 동시에 **33%가 0.95를 넘고 43%가 0.5를 넘으므로** 0 step에서 모방할 양성 신호가 충분하다 — 소멸도 포화도 아니다. 창을 넓히면 산 중앙값은 올라가지만 벗어나려는 Sabat 계열이 함께 보상받는다: `(50, 130)`에서 이미 0.546, `(60, 140)`에서 0.968이다. bexotegrast를 "허용하되 경계"(0.878)로 두는 것은 폐 대상 이중 저해제가 αvβ1 간 화합물의 최적점은 아니라는 점에서 정직한 처우다. Sabat 계열이 창 밖에 떨어지는 것은 근거가 아니라 결과다.
+
+> **계산 정정(2026-09-27).** 이 표의 초기 버전은 부분집합 필터에 `총점 > 1e-3` 조건이 들어가 낮은 점수를 제외했고, 그 결과 산 중앙값을 (40,115)에서 0.647로 **과대 보고**했다. 위 수치가 정정된 값이다. 창 선택은 바뀌지 않는다 — 결정 근거는 경구 앵커 두 개와 Sabat 계열 배제이지 중앙값이 아니다.
+
+**이것이 포스터 문구를 제약한다.** "생성 분자가 cpd 25보다 TPSA가 낮다"는 구성상 보장된 결과이므로 발견으로 제시할 수 없다. 투과성 주장은 §9.2(ADMET-AI, 독립 모델)와 §8.5(docking 기하)가 지탱해야 한다.
+
+**같은 이유로 ADMET-AI를 RL 목적함수에 넣지 않는다.** 넣으면 §9.2도 순환이 된다. TPSA를 RL에, ADMET-AI를 사후 평가에 두는 분리가 투과성 주장을 비순환으로 유지하는 장치이며, 이는 §12의 "RL 내부 docking 미사용"과 같은 종류의 의도적 제약이다.
+
+**`SlogP` 제거.** 세 파일이 서로 달랐다 — 이 문서는 "reverse_sigmoid, 약 3 초과 시 페널티", `reinvent4_avb1_scoring_config_sketch.toml`은 `double_sigmoid(low=1, high=4)`, 실제 실행된 `logs/cmp.vigHoB/new3.toml`은 `reverse_sigmoid(low=2, high=5, k=0.4)`. `reverse_sigmoid(2, 5, 0.4)`의 0.5 교차점은 실제로 **3.5**이고(logP 3.0에서 이미 0.823, 3.25에서 0.683), "약 3"은 페널티가 눈에 띄기 시작하는 지점을 가리킨 것이다. 출처는 §1 pocket 표 4행("소수성 부피 수용 가능 → SlogP 약 3까지")이지만, 그 행은 접촉 거리에서 얻은 정성적 **허용 하한**("적어도 3까지는 괜찮다")이며 "3을 넘으면 벌점"이 아니다 — 허용 범위의 하한을 페널티의 상한으로 바꿔 쓴 오독이다. low/high 값 자체는 어느 문서에서도 유도되지 않는다. 더 중요한 것은 방향이다 — 이 프로젝트는 필수 카르복실레이트를 가진 **음이온**을 만들고 §9.2는 "예측 permeability에서 cpd 25를 능가"를 요구한다. 산성 화합물의 투과성 병목은 지질친화성 과다가 아니라 이온화된 카르복실레이트이므로, logP를 3 위에서 깎으면 개선하겠다고 선언한 축을 악화시킨다. 선행연구 [113]의 준거도 soft penalty가 아니라 hard filter(MW > 500 또는 logP > 5 제외)다. → §8.2 triage 창으로 이동.
 
 **`QED` 제거.** PLN-1474(αvβ1 저해제 중 유일하게 임상 착수)의 QED는 **0.4619**이고 TL-A prior 샘플의 QED 중앙값은 **0.468**이다. 유일한 임상 진입 화합물이 평범한 prior 샘플과 구별되지 않으므로 최적화 축으로 쓸 수 없다. (0.433은 비방향족 타우토머로 계산한 값이며 §8.0의 artifact다.) → §8.7 보고 지표로만 유지.
 
-**`SAScore`는 guard rail이다.** `reverse_sigmoid(low=3, high=6, k=0.5)` 적용 시 모든 세트가 변환의 포화 영역에 있다:
+**`SAScore`는 guard rail이며, 창은 `(6, 8, k=0.5)`다.** 먼저 SA 원값 분포:
 
-| 세트 | SA 중앙값 | SA p90 | SA 최대 | 변환 후 score 중앙값 | score < 0.05 |
-|---|---|---|---|---|---|
-| `actives_core` | 3.08 | 3.30 | 3.75 | 0.996 | 0% |
-| `actives_extended` | 3.48 | 4.27 | 5.10 | 0.981 | 0% |
-| `benchmark_panel` | 3.29 | 3.48 | 3.75 | 0.990 | 0% |
-| TL-A prior (488) | 2.91 | 3.72 | 5.02 | **0.998** | **0%** |
+| 세트 | SA 중앙값 | SA p90 | SA 최대 |
+|---|---|---|---|
+| `actives_core` | 3.08 | 3.30 | 3.75 |
+| `actives_extended` | 3.48 | 4.27 | **5.10** |
+| `benchmark_panel` | 3.29 | 3.48 | 3.75 |
+| TL-A prior (488) | 2.91 | 3.72 | **5.02** |
 
-`geometric_mean`에서 이 항은 항상 ×1이며 0 step에서 gradient에 기여하지 않는다. 창을 prior 중앙값(2.91) 쪽으로 좁혀 살리는 것은 불가하다 — actives 자신이 3.08/3.48이므로 알려진 active를 벌주게 된다. 그러나 600 step RL은 prior가 한 번도 샘플링하지 않는 화학으로 드리프트할 수 있고, 그때만 작동하는 보험으로서는 정확한 설정이므로 유지한다. **이 문서는 SAScore가 합성 가능성을 최적화한다고 주장하지 않는다.**
+sketch의 `(3, 6, k=0.5)`는 **guard rail로 부적합하다.** 중앙값에서는 무해해 보이지만(모든 세트 0.98 이상) 꼬리에서 물어버린다 — `actives_extended`의 최악 분자(SA 5.10)가 **0.093**, prior의 최악 분자가 **0.121**을 받는다. 알려진 ChEMBL αvβ1 active를 벌주는 것이므로 §5.4의 aniline 필터와 같은 종류의 오류다. 창 후보별 곡선:
+
+| 창 | SA=3.0 | SA=4.0 | SA=5.1 | SA=6.0 | SA=7.0 | SA=8.0 | 전 참조세트 최솟값 |
+|---|---|---|---|---|---|---|---|
+| `(3, 6, k=0.5)` — sketch | 0.997 | 0.872 | **0.091** | 0.003 | 0.000 | 0.000 | **0.093** |
+| `(5, 8, k=0.4)` | 1.000 | 1.000 | 0.987 | 0.823 | 0.177 | 0.010 | 0.987 |
+| `(6, 9, k=0.4)` | 1.000 | 1.000 | 0.999 | 0.990 | 0.823 | 0.177 | 0.999 |
+| **`(6, 8, k=0.5)` — 채택** | 1.000 | 1.000 | **1.000** | 0.997 | 0.500 | 0.003 | **1.000** |
+
+`(6, 8, k=0.5)`를 채택한다. 참조 세트와 prior 샘플 **전부가 정확히 1.000**을 받으므로 0 step에서 목적함수에 기여하지 않음이 증명되고, SA > 6(합성 난이도의 통상적 경계)부터 비로소 작동해 SA 7에서 0.5, SA 8에서 사실상 veto가 된다. `(6, 9, k=0.4)`는 SA 7에서도 0.823으로 너무 관용적이고, `(5, 8, k=0.4)`는 통상 경계보다 이른 SA 6에서 이미 물기 시작한다.
+
+**이 문서는 SAScore가 합성 가능성을 최적화한다고 주장하지 않는다** — 0 step에서 정확히 ×1이며, 600 step RL이 prior가 한 번도 샘플링하지 않는 영역으로 드리프트할 때만 작동하는 보험이다.
 
 **정직한 요약: 0 step 기준 살아 있는 최적화 축은 카르복실레이트 anchor와 TPSA 둘이다.** TL이 focusing을 이미 끝냈다는 전제를 받아들이면 이것이 일관된 귀결이다.
 
@@ -330,7 +401,7 @@ C(=O)Cl
 | `benchmark_panel` (6) | **5/6** | 0/6 |
 | TL-A prior 샘플 (488) | **118/488 (24%)** | 12/488 (2.5%) |
 
-`benchmark_panel`에서 0점이 되는 5개는 **PLN-1474, bexotegrast, CWHM-12, GLPG0187, CHEMBL4649232**이고 A1AFA만 살아남는다. 두 가지 귀결: **(a) 테트라히드로-1,8-나프티리딘(THN)이 걸린다** — 아릴에 붙은 NH가 H 1개라서 `[NH2,NH]`에 매치되며, THN은 인테그린 RGD 모방체의 표준 Arg-mimic head이므로 이 필터는 반응성 대사체를 막는 대신 이 타깃 클래스의 핵심 파마코포어를 금지하고 있었다. **(b) §7과 §9.5가 무효화될 상태였다** — 양성 패널 6개 중 5개가 0점이면 "생성 집합이 음성 패널을 능가하고 양성 패널에 준할 것"은 생성 분자가 아무리 나빠도 통과한다(false pass). `results/`가 비어 있어 발표될 수치가 오염된 것은 없다.
+`benchmark_panel`에서 0점이 되는 5개는 **PLN-1474, bexotegrast, CWHM-12, GLPG0187, CHEMBL4649232**이고 A1AFA만 살아남는다. 두 가지 귀결: **(a) 테트라히드로-1,8-나프티리딘(THN)이 걸린다** — 아릴에 붙은 NH가 H 1개라서 `[NH2,NH]`에 매치되며, THN은 인테그린 RGD 모방체의 표준 Arg-mimic head이므로 이 필터는 반응성 대사체를 막는 대신 이 타깃 클래스의 핵심 파마코포어를 금지하고 있었다. **(b) §7이 무효화될 상태였다** — 양성 패널 6개 중 5개가 **모든 component에서** 0점이 되면(filter는 전 항목을 덮는다) 기준 분포 자체가 소멸하고, 당시 §9.5 문구("생성 집합이 총점에서 음성 패널을 능가하고 양성 패널에 준할 것")는 생성 분자가 아무리 나빠도 통과한다. `results/`가 비어 있어 발표될 수치가 오염된 것은 없다. (§9.5는 이후 별개 사유 — 총점 비교의 순환성 — 로 비순환 축 비교로 개정했다.)
 
 아닐린 관련 반응성 대사체 위험 자체는 유효하지만(해당 series의 이력 [111]), 필요한 것은 1차 방향족 아민에 한정된 패턴이다. `[NX3;H2;!$(N[!#6]);!$(NC=O);!$(NS(=O)=O)][c]`와 `[NX3;H2][c]`는 모든 테스트에서 결과가 **완전히 동일**하다 — `H2`가 이미 N-acyl·N-sulfonyl·N-heteroatom 치환을 배제하기 때문이다(그 경우 H가 1개 이하). 세 exclusion은 중복이므로 단순한 쪽을 채택한다. 2-아미노피리딘/2-아미노피리미딘은 `[NX3;H2][c]`에 매치되며, 헤테로고리를 제외하려면 `[NX3;H2][c;!$(c~n);!$(c~o);!$(c~s)]`를 쓸 수 있으나 차이는 prior 샘플 12개 vs 9개(0.6%p)이고 참조 세트는 양쪽 모두 0이므로 더 엄격하고 단순한 쪽을 쓴다.
 
@@ -360,7 +431,7 @@ similarity가 목적함수에서 빠지므로 기존 모니터링 기대치("Sta
 
 - 고정된 벤치마크 패널에 **§5.1과 동일한 scoring function**을 적용해 `run_type = "scoring"` 실행
 - **선행 조건:** `CustomAlerts`가 §5.4의 교체된 aniline 패턴(`[NX3;H2][c]`)을 쓰고 있어야 한다. 기존 `[NH2,NH][c]`로는 양성 패널 6개 중 5개가 0점이 되어 §9.5가 false pass한다 — 이 검증 없이 §7을 실행하지 말 것
-- 출력: cpd 25, PLN-1474, bexotegrast, CWHM-12, GLPG0187 및 음성 100개에 대한 component별·총합 점수 — 포스터에 실릴 모든 비교의 배경이 되는 기준 분포
+- 출력: cpd 25, PLN-1474, bexotegrast, CWHM-12, GLPG0187에 대한 **component별** 점수(총점도 기록하되 비교 근거로 쓰지 않는다 — §3.4) — 포스터에 실릴 모든 비교의 배경이 되는 기준 분포
 
 ---
 
@@ -372,7 +443,7 @@ similarity가 목적함수에서 빠지므로 기존 모니터링 기대치("Sta
 
    `scripts/curate_actives.py:222-239`의 `standardize()`는 `Cleanup` + `LargestFragmentChooser` + `Uncharger`만 수행하고 타우토머 정규화를 하지 않았다. 이것이 §8.3과 §9.3에 false-positive 경로를 만든다. 노출 규모를 측정했다(정규화 시 표현이 바뀌는 비율, 그리고 바뀐 분자가 *자기 자신의 다른 타우토머*에 대해 갖는 Tanimoto):
 
-   | 세트 | 표현 변경 | 자기-Tanimoto 중앙값 | **0.710 미만** |
+   | 세트 | 표현 변경 | 자기-Tanimoto 중앙값 | **0.680 미만** |
    |---|---|---|---|
    | `actives_core` (29) | 0/29 | — | 0 |
    | `benchmark_panel` (6) | 0/6 | — | 0 |
@@ -383,8 +454,8 @@ similarity가 목적함수에서 빠지므로 기존 모니터링 기대치("Sta
 
    비대칭이 문제의 핵심이다: ChEMBL actives는 일관된 방향족 형태로 들어오지만(core 0%, bench 0%) 생성 분자는 모델이 내보내는 형태 그대로다 — 기준 쪽은 정규화돼 있고 측정 대상만 흔들린다. 같은 이유로 aniline alert도 타우토머 의존적이므로(비방향족 형태는 `[NH2,NH][c]`에 미매치) RL이 표현을 바꿔 필터를 회피하는 SMILES 수준 reward hacking이 가능했다. §5.4의 `[NX3;H2][c]`는 두 형태 모두 미매치라 이 경로가 닫히지만, 정규화를 상류에 두는 것이 근본 해결이다.
 
-   **적용 대상:** 생성/prior 샘플, `data/actives_extended.smi`, `data/actives_core.smi`, anti-target counter-screen 참조(§8.4), 그리고 `data/novelty_band.json` **재계산**(0.710이 이동할 수 있다 — extended 14개 영향).
-1. **Validity / 중복 제거 / CustomAlerts 재확인**(§5.4의 교체된 패턴으로)
+   **적용 대상:** 생성/prior 샘플, `data/actives_extended.smi`, `data/actives_core.smi`, anti-target counter-screen 참조(§8.4), 그리고 `data/novelty_band.json` **재계산 — 실행 완료, 아래 §8.3 표**(extended p25 0.710 → 0.680).
+1. **Validity / 중복 제거 / 카르복실레이트 재확인 / CustomAlerts 재확인**(§5.4의 교체된 패턴으로). 카르복실레이트는 RL에서 게이트지만 하한이 문자 그대로 0이 아니므로(6.31e-04) 여기서 **하드 컷**으로 다시 적용한다.
 2. **물성 범위:** TPSA는 RL에서 사용한 것과 동일한 창을 쓰고, RL 목적함수에서 제거된 축은 여기서 **넓은 창으로** 본다 — logP ≤ 5(선행연구 [113]의 hard filter 준거), MW 250–550, RotB. 목적함수를 좁히고 triage를 넓히는 것이 이 재설계의 취지다(§5.1)
 3. **Novelty — 빌려온 상수가 아니라 actives 자신으로 교정한다.** 학습에 쓴 29개가 아니라 **`data/actives_extended.smi`(190개 분자, Murcko scaffold 103개 — ChEMBL αvβ1 active ≤ 1 µM 전체)** 에 대한 nearest-neighbor Tanimoto를 Morgan radius 3, feature invariant, **count** 지문으로 잰다(§8.0의 타우토머 정규화를 거친 뒤에).
 
@@ -392,12 +463,23 @@ similarity가 목적함수에서 빠지므로 기존 모니터링 기대치("Sta
 
    대체 기준은 데이터가 정의하는 거리다 — 서로 다른 scaffold에 속한 두 known active가 얼마나 떨어져 있는가(`data/novelty_band.json`, `curate_actives.py`가 재계산):
 
-   | 기준 집합 | p25 | 중앙값 | p75 | p90 |
-   |---|---|---|---|---|
-   | `actives_core` (29) | 0.552 | 0.676 | 0.732 | 0.745 |
-   | `actives_extended` (190) | **0.710** | 0.775 | 0.831 | 0.922 |
+   | 기준 집합 | 타우토머 | p25 | 중앙값 | p75 | p90 |
+   |---|---|---|---|---|---|
+   | `actives_core` (29, scaffold 19) | 현행 | 0.552 | 0.676 | 0.732 | 0.745 |
+   | `actives_core` (29, scaffold 19) | **정규화** | 0.552 | 0.676 | 0.732 | 0.745 |
+   | `actives_extended` (190, scaffold 103) | 현행 | 0.710 | 0.775 | 0.831 | 0.922 |
+   | `actives_extended` (190, scaffold 103) | **정규화 — 채택** | **0.680** | 0.765 | 0.831 | 0.922 |
 
-   **"scaffold-novel" = NN-Tanimoto 0.710 미만**, 즉 그 대역의 25백분위수다. 해당 분자가 모든 known active로부터, 그 active들의 4분의 3이 다른 scaffold의 가장 가까운 active로부터 떨어진 것보다 더 멀리 있다는 뜻이다. 원값과 함께 **대역 내 백분위수**를 보고할 것 — 대역은 지문에 의존하며, 백분위수는 지문을 바꿔도 의미가 살아남지만 맨 절단값은 그렇지 않다. 학습 세트가 아니라 *공개 기록 전체*를 기준으로 재는 것이 이 주장을 방어 가능하게 만들며, ChEMBL 수집의 주된 이득이 바로 이것이다.
+   §8.0의 타우토머 정규화를 적용해 재계산했다(`curate_actives.py:627-641`의 로직을 그대로 재현 — 정규화 없이 돌리면 현행 `data/novelty_band.json`의 0.552 / 0.710을 정확히 복원하므로 재현이 검증된다). `actives_core`는 타우토머 변경 분자가 0개이므로 불변이고, `actives_extended`는 14개가 바뀌어 p25가 **0.710 → 0.680**으로 내려간다. 기준이 약간 **엄격해지는** 방향이다.
+
+   **그러나 거리 기준을 게이트로 쓰는 것도 철회한다(2026-09-26).** 측정해 보면 이 기준은 고장나 있다. Murcko scaffold가 공개 active 103개의 것과 **완전히 동일한** prior 샘플 63개에 `NN-Tanimoto < 0.680`을 적용하면 **39개(62%)가 "scaffold-novel"로 통과한다.** 공개된 골격 위에 올라간 분자를 신규 chemotype이라 부르는 셈이다. 거리는 연속량이고 골격 동일성은 이산량인데, 연속량의 절단값으로 이산적 질문("이 골격이 기존에 제안되었는가")에 답하려 한 것이 오류다.
+
+   **채택 기준 — Murcko scaffold 신규성(이진).** 생성 분자의 Murcko scaffold가 `data/actives_extended.smi`의 **103개 scaffold 집합에 없으면** scaffold-novel이다. 지문 의존이 없고 임계값이 없고 한 문장으로 기술된다. 그리고 목적함수의 diversity filter가 이미 `IdenticalMurckoScaffold`이므로, 보상 기전과 성공 기준이 **같은 단위**를 쓴다.
+
+   - TL-A prior 샘플 488개 중 **425개(87.1%)** 통과 — 느슨한 필터다. 구속력은 §8.5 docking 기하와 §9.2 permeability가 갖는다.
+   - **정확 구조 불일치만으로는 불충분하다.** TL-A 200 epoch는 암기한다(§4: 최대 NN-Tanimoto = 1.000, 학습 active를 그대로 재현한 샘플이 존재). 메틸 하나를 붙이면 "기존에 없던 구조"가 되므로, 이 기준으로는 "cpd 25에 메틸 붙인 것 아닌가"라는 공격을 막을 수 없다. Murcko는 막는다.
+   - **NN-Tanimoto는 게이트가 아니라 보고 수치로 유지한다.** Murcko가 새로운 425개 중 **5개가 NN ≥ 0.680(최대 0.738)** 이므로 analog 논란이 가능하다. 각 lead의 NN 값과 **가장 가까운 known active의 이름**을 함께 적으면 임계값 없이 독자가 판단할 수 있다. 위 대역 표는 그 값을 읽는 맥락으로만 남긴다 — `data/novelty_band.json`은 게이트가 아니다.
+   - **타우토머 정규화가 여기에 직접 걸린다(§8.0).** 검증했다: PLN-1474의 두 타우토머는 정규화 없이 **서로 다른 Murcko SMILES**를 낸다(`...C1=CC=C2CCCN=C2N1` vs `...c1ccc2c(n1)NCCC2`). 정규화 후 동일해진다. 정규화를 빼면 신규성 주장이 표현 차이로 뚫린다.
 4. **Counter-screen 플래그:** αvβ3/α5β1 active에 대해 Tanimoto ≥ 0.5 → 플래그만 부여하고 자동 폐기하지 않음(유사도 ≠ 활성). 단 플래그 비율은 보고한다
 5. **Docking — affinity 순위가 아니라 기하학적 필터:**
    - Receptor: 8W30의 chain A+B; 리간드 TR01225179와 물 분자 제거(물 처리 결정을 기록할 것. HOH2107은 민감도 분석에서 유지 후보)
@@ -406,7 +488,7 @@ similarity가 목적함수에서 빠지므로 기존 모니터링 기대치("Sta
      - **(a) 검증:** TR01225179를 redocking한다. 최상위 pose에서 carboxylate-O → Ca501 ≤ 3.2 Å를 요구한다(이상적으로는 결정 구조 pose 대비 heavy-atom RMSD < 2 Å도). **검증에 실패하면 어떤 것도 docking으로 순위 매기지 말 것** — similarity/QSAR 기반 triage로 후퇴하고 이를 포스터에 명시한다.
      - **(b) 사후 필터:** carboxylate O → Ca501 ≤ 3.2 Å **이면서** H-bond donor가 β1-Asn224 backbone O로부터 3.5 Å 이내에 있는 pose만 채택한다. Docking score는 동점 처리용으로만 사용한다.
 6. **ADMET:** 생존 분자에 ADMET-AI(또는 동등 도구) 적용 — permeability proxy, 용해도, microsome 안정성, hERG, CYP. 의사결정의 기준선은 cpd 25의 *실측* 약점이다(MDCK < 0.1×10⁻⁶ cm/s, oral F 1.3% [111]). 예측치는 방향성 면에서 이 기준을 넘어야 한다.
-7. **최종 선별:** 다음을 만족하는 lead 약 10–20개 — 기하학적 필터 통과, 예측 permeability가 cpd 25보다 우수, NN-Tanimoto가 §8.3 대역 기준 미만, alert 없음, QED ≥ cpd 25.
+7. **최종 선별:** 다음을 만족하는 lead 약 10–20개 — 기하학적 필터 통과, 예측 permeability가 cpd 25보다 우수, **Murcko scaffold가 §8.3의 103개 집합에 없음**, alert 없음, 카르복실레이트 보유. QED와 NN-Tanimoto(최근접 active 이름 포함)는 **게이트가 아니라 보고 지표**로 병기한다.
 
 ---
 
@@ -415,9 +497,9 @@ similarity가 목적함수에서 빠지므로 기존 모니터링 기대치("Sta
 **동일한** funnel을 통과시켰을 때, 다음을 만족하는 생성 분자가 최소 하나 있으면 제안은 성공이다:
 1. 기하학적 docking 필터 통과(MIDAS + Asn224 contact 보존),
 2. 예측 permeability 축에서 cpd 25를 능가,
-3. `data/actives_extended.smi`의 190개 분자 전체 대비 NN-Tanimoto **0.710 미만** — 해당 actives의 다른-scaffold 대역 25백분위수(§8.3), 대역 내 백분위수와 함께 보고. **양쪽 모두 §8.0의 타우토머 정규화를 거친 뒤에 측정한다**; 이 수치는 `data/novelty_band.json` 재계산 결과로 갱신한다,
+3. **Murcko scaffold가 `data/actives_extended.smi`의 103개 scaffold 집합에 없을 것**(§8.3). 양쪽 모두 §8.0의 타우토머 정규화를 거친 뒤에 판정한다 — 정규화 없이는 같은 분자가 다른 Murcko SMILES를 낸다. NN-Tanimoto와 가장 가까운 known active는 **게이트가 아니라 보고 수치**로 병기한다,
 4. counter-screen 또는 CustomAlerts 플래그 없음(§5.4의 교체된 aniline 패턴 기준),
-5. 그리고 생성 집합이 총점에서 음성 패널을 능가하고 양성 패널에 준하는 수준일 것 — §7의 선행 조건이 충족된 상태에서만 유효한 기준이다.
+5. 그리고 **양성 패널(PLN-1474, bexotegrast, CWHM-12, GLPG0187, cpd 25)과 동일한 funnel·동일한 도구로 채점했을 때, 순환하지 않는 축에서 비교 가능할 것** — docking 기하 필터를 동등하게 통과하고, ADMET-AI permeability에서 cpd 25를 능가하며, Murcko scaffold가 신규일 것. **총점으로는 비교하지 않는다**(우리가 설계한 목적함수의 값이므로 순환 — §3.4, §5.4). 음성 패널 절은 폐기했다(§3.4).
 
 **반증 조항:** 1–4를 만족하는 분자가 하나도 없으면, 그 사실을 그대로 보고한다. 이는 carboxylate–permeability 긴장이 **타깃 자체에 내재된 것**일 가능성을 시사하는 증거이며, 그 자체로 하나의 발견이자 이 프로젝트에 대한 가장 강한 공격에 대한 정직한 답이다.
 
@@ -428,7 +510,7 @@ similarity가 목적함수에서 빠지므로 기존 모니터링 기대치("Sta
 | 일자 | 작업 | 체크포인트 / fallback |
 |---|---|---|
 | D1 | **완료.** K-BDS 실측으로 환경 확정(§11), `setup_kbds.sh` + `slurm/00_smoke.sbatch` 준비, prior는 v4.5.11 동봉분을 체크섬 검증. **§3.1 큐레이션도 완료** — `scripts/curate_actives.py`, 산출물은 `data/`, 근거는 `data/CURATION_LOG.md` | 세트 고정: core 29 / core_B 200 / extended 197 / refs 6 / panel 6 |
-| D2 | Counter-screen set(**target ID 검증 완료, §3.2**), 음성 패널 | 모든 데이터 고정 |
+| D2 | Counter-screen set(**target ID 검증 완료, §3.2**) | 모든 데이터 고정. 음성 패널은 폐기(§3.4) |
 | D3 | TL-A·TL-B 실행 + 3개 arm 전체 진단 | D3 기준으로 arm 1개 선택, **화학형 이동이 결정적**. TL-B가 Arg 모방체 비율이나 TPSA를 올리면 다른 수치와 무관하게 탈락 |
 | D4 | **선행 작업:** 타우토머 정규화를 `curate_actives.py`에 추가 → `novelty_band.json` 재계산(§8.0); `CustomAlerts` aniline 패턴 교체 검증(§5.4). 그 후 RL 단일 stage 0–300 step | 참조 세트 0점 화합물이 0개임을 확인한 뒤 착수; 100 step마다 §5.5 진단 기록 |
 | D5 | RL 단일 stage 300–600 step | 최종 agent; 알려진 series로의 붕괴 감시(NN-Tanimoto가 0.6 초과로 상승 → DF `minscore` 0.4 → 0.5로 상향, 필요시 이전 체크포인트에서 재시작). **similarity 가중치 조정은 불가** — 그 component는 목적함수에 없다(§5.2) |
