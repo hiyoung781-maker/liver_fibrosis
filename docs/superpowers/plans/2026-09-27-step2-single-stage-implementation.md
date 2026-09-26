@@ -117,14 +117,57 @@ class TestCanonicalTautomer(unittest.TestCase):
         twice = canonical_tautomer_smiles(once)
         self.assertEqual(once, twice)
 
-    def test_failure_is_recorded_not_swallowed(self):
-        """Review Focus 2: a normalization failure must leave a trace."""
+    def test_success_records_no_failure(self):
         import normalize
 
         before = len(normalize.TAUTOMER_FAILURES)
-        # A valid molecule that the enumerator handles: no new failure.
         canonical_tautomer_smiles(PLN_AROMATIC)
         self.assertEqual(len(normalize.TAUTOMER_FAILURES), before)
+
+
+class TestTautomerFailurePath(unittest.TestCase):
+    """Review Focus 2: a normalization failure must leave a trace.
+
+    RDKit's TautomerEnumerator does not raise on any of this project's 424
+    reference molecules, so the only way to exercise the except branch is to
+    substitute an enumerator that raises. Without this the branch is untested
+    and deleting the append would not fail any test.
+    """
+
+    def setUp(self):
+        import normalize
+
+        self.normalize = normalize
+        self.original = normalize._TAUTOMER
+        self.before = list(normalize.TAUTOMER_FAILURES)
+
+    def tearDown(self):
+        self.normalize._TAUTOMER = self.original
+        self.normalize.TAUTOMER_FAILURES[:] = self.before
+
+    def _install_failing_enumerator(self):
+        class Raising:
+            def Canonicalize(self, mol):
+                raise RuntimeError("enumerator failed")
+
+        self.normalize._TAUTOMER = Raising()
+
+    def test_failure_is_appended_to_the_failure_list(self):
+        self._install_failing_enumerator()
+        canonical_tautomer(Chem.MolFromSmiles("CC(=O)O"))
+        self.assertEqual(len(self.normalize.TAUTOMER_FAILURES),
+                         len(self.before) + 1)
+        self.assertEqual(self.normalize.TAUTOMER_FAILURES[-1], "CC(=O)O")
+
+    def test_failure_returns_the_flattened_molecule_not_none(self):
+        """Deliberate: a dropped REFERENCE molecule would silently weaken the
+        novelty gate, which is worse than comparing its un-canonicalized form.
+        Task 3 asserts the reference sets produce zero failures, so this
+        fallback never silently applies to the reference side."""
+        self._install_failing_enumerator()
+        result = canonical_tautomer(Chem.MolFromSmiles("CC(=O)O"))
+        self.assertIsNotNone(result)
+        self.assertEqual(Chem.MolToSmiles(result), "CC(=O)O")
 
 
 if __name__ == "__main__":
@@ -208,20 +251,19 @@ def canonical_tautomer_smiles(smiles: str | None) -> str | None:
     return Chem.MolToSmiles(mol)
 ```
 
-그리고 `scripts/curate_actives.py`의 `standardize()` 정의 바로 뒤(현재 239행 다음)에 다음 주석과 재노출을 추가한다:
+그리고 `scripts/curate_actives.py`의 `standardize()` 정의 바로 뒤(현재 239행 다음)에 다음 주석을 추가한다. **import는 넣지 않는다** — 이 파일은 `canonical_tautomer`를 직접 쓰지 않으므로 unused import가 된다(Task 2가 `cross_scaffold_band`만 import한다):
 
 ```python
 # Tautomer canonicalization lives in scripts/normalize.py, NOT here. standardize()
 # feeds data/actives_core.smi, which is the TL-A training input and the RL inception
 # memory; changing it would invalidate the D3 result. Every Tanimoto and Murcko
-# comparison imports canonical_tautomer from normalize instead.
-from normalize import canonical_tautomer, canonical_tautomer_smiles  # noqa: E402
+# comparison goes through normalize.canonical_tautomer instead.
 ```
 
 - [ ] **Step 4: 테스트가 통과하는 것을 확인한다**
 
 Run: `python3 -m unittest discover -s tests -t . -v`
-Expected: PASS — 7 tests
+Expected: PASS — 9 tests
 
 `curate_actives.py`의 import가 깨지지 않는지도 확인한다:
 Run: `python3 -c "import sys; sys.path.insert(0,'scripts'); import curate_actives; print('import ok')"`
@@ -462,10 +504,31 @@ Expected: `actives_core.p25 == 0.552`, `actives_extended.p25 == 0.68`
              f"{q['p75']:.3f} | {q['p90']:.3f} |")
 ```
 
-파일 상단 import 블록에 추가한다:
+파일 상단 import 블록(현재 44행 `from rdkit.Chem.Scaffolds import MurckoScaffold` 다음)에 추가한다:
 
 ```python
 from novelty import cross_scaffold_band
+```
+
+**그리고 같은 함수의 threshold 안내문을 고친다(현재 `curate_actives.py:648-654`).** 그 `note(...)` 호출이 `data/CURATION_LOG.md`에 "**Novelty threshold = p25 of the `actives_extended` band**"를 써 넣는데, 이는 §8.3이 거리 기준을 게이트에서 철회하고 Murcko scaffold 소속으로 교체한 것과 정면으로 모순된다. 다음으로 교체한다:
+
+```python
+    note("**This band is REPORTING CONTEXT, not the novelty gate.** The gate is "
+         "Murcko scaffold membership - see `data/known_scaffolds.smi` and blueprint "
+         "section 8.3. A distance cut-off was withdrawn because it passes 62% of "
+         "molecules whose Murcko scaffold is IDENTICAL to a published active's. "
+         "Report each lead's nearest-neighbour Tanimoto and its percentile within "
+         "this band alongside the binary scaffold verdict: the percentile survives "
+         "a change of fingerprint in a way a bare cut-off does not.")
+```
+
+위 블록 바로 앞의 설명 주석(현재 620-623행, "The band below replaces it with something the data defines ... which is what \"a new chemotype\" has to mean here")도 같은 이유로 낡았다. 그 네 줄을 다음으로 교체한다:
+
+```python
+    # The band below is calibration context: how far apart are two known actives that
+    # belong to different scaffolds? It is NOT the gate - see section 8.3. The gate is
+    # binary Murcko scaffold membership, because a distance cut-off passes molecules
+    # that sit on a published scaffold.
 ```
 
 - [ ] **Step 7: 테스트를 다시 돌리고 커밋한다**
@@ -600,6 +663,19 @@ class TestGateOnPriorSamples(unittest.TestCase):
         self.assertAlmostEqual(novel / total, 0.861, places=2)
 
 
+class TestReferenceSetsNormalizeCleanly(unittest.TestCase):
+    def test_no_reference_molecule_hits_the_tautomer_fallback(self):
+        """canonical_tautomer falls back to the un-canonicalized molecule when the
+        enumerator raises. On the reference side that would silently weaken the
+        gate, so it must never happen: all 424 reference molecules normalize.
+        """
+        import normalize
+
+        before = len(normalize.TAUTOMER_FAILURES)
+        known_scaffolds()
+        self.assertEqual(len(normalize.TAUTOMER_FAILURES), before)
+
+
 class TestInvalidInput(unittest.TestCase):
     def test_unparseable_smiles_returns_none(self):
         """Review Focus 1: never crash the triage funnel on generator output."""
@@ -713,7 +789,7 @@ def write_known_scaffolds(out_path: str = DEFAULT_OUTPUT) -> int:
 - [ ] **Step 4: 테스트가 통과하는 것을 확인한다**
 
 Run: `python3 -m unittest tests.test_known_scaffolds -v`
-Expected: PASS — 9 tests
+Expected: PASS — 10 tests
 
 - [ ] **Step 5: `data/known_scaffolds.smi`를 생성한다**
 
