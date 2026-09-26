@@ -474,7 +474,9 @@ similarity가 목적함수에서 빠지므로 기존 모니터링 기대치("Sta
 
    **그러나 거리 기준을 게이트로 쓰는 것도 철회한다(2026-09-26).** 측정해 보면 이 기준은 고장나 있다. Murcko scaffold가 공개 active 103개의 것과 **완전히 동일한** prior 샘플 63개에 `NN-Tanimoto < 0.680`을 적용하면 **39개(62%)가 "scaffold-novel"로 통과한다.** 공개된 골격 위에 올라간 분자를 신규 chemotype이라 부르는 셈이다. 거리는 연속량이고 골격 동일성은 이산량인데, 연속량의 절단값으로 이산적 질문("이 골격이 기존에 제안되었는가")에 답하려 한 것이 오류다.
 
-   **채택 기준 — Murcko scaffold 신규성(이진).** 생성 분자의 Murcko scaffold가 `data/actives_extended.smi`의 **103개 scaffold 집합에 없으면** scaffold-novel이다. 지문 의존이 없고 임계값이 없고 한 문장으로 기술된다. 그리고 목적함수의 diversity filter가 이미 `IdenticalMurckoScaffold`이므로, 보상 기전과 성공 기준이 **같은 단위**를 쓴다.
+   **채택 기준 — Murcko scaffold 신규성(이진).** 생성 분자의 Murcko scaffold가 `data/known_scaffolds.smi`의 **106개 집합에 없으면** scaffold-novel이다. 지문 의존이 없고 임계값이 없고 한 문장으로 기술된다. 그리고 목적함수의 diversity filter가 이미 `IdenticalMurckoScaffold`이므로, 보상 기전과 성공 기준이 **같은 단위**를 쓴다.
+
+   **기준 집합은 `actives_extended` 단독이 아니라 큐레이션된 참조 파일 5개의 합집합이다**(`actives_core`, `actives_core_B`, `actives_extended`, `benchmark_panel`, `similarity_refs` → 106개, `scripts/known_scaffolds.py`가 산출). `actives_extended` 단독(103개)에는 **PLN-1474, bexotegrast, A1AFA의 scaffold가 없다** — 그 파일이 "ChEMBL αvβ1 active ≤ 1 µM"으로 정의되기 때문이다. PLN-1474 구조는 ChEMBL 활성 레코드가 아니라 AdisInsight 출처이고[88], A1AFA는 pIC50 5.30으로 효력 컷 아래다. 단독 집합을 쓰면 **PLN-1474의 골격을 재현한 생성 분자가 "scaffold-novel"로 통과한다** — 유일한 임상 αvβ1 선택적 화합물이고 2023년 8월부터 구조가 공개된 화합물인데도. 포스터가 비교 대상으로 내세우는 공개 화합물의 골격은 기준에 반드시 들어가야 한다. `tests/test_known_scaffolds.py`가 세 화합물 각각에 대해 "단독 집합에는 없고 합집합에는 있다"를 단언한다.
 
    - TL-A prior 샘플 488개 중 **425개(87.1%)** 통과 — 느슨한 필터다. 구속력은 §8.5 docking 기하와 §9.2 permeability가 갖는다.
    - **정확 구조 불일치만으로는 불충분하다.** TL-A 200 epoch는 암기한다(§4: 최대 NN-Tanimoto = 1.000, 학습 active를 그대로 재현한 샘플이 존재). 메틸 하나를 붙이면 "기존에 없던 구조"가 되므로, 이 기준으로는 "cpd 25에 메틸 붙인 것 아닌가"라는 공격을 막을 수 없다. Murcko는 막는다.
@@ -488,7 +490,7 @@ similarity가 목적함수에서 빠지므로 기존 모니터링 기대치("Sta
      - **(a) 검증:** TR01225179를 redocking한다. 최상위 pose에서 carboxylate-O → Ca501 ≤ 3.2 Å를 요구한다(이상적으로는 결정 구조 pose 대비 heavy-atom RMSD < 2 Å도). **검증에 실패하면 어떤 것도 docking으로 순위 매기지 말 것** — similarity/QSAR 기반 triage로 후퇴하고 이를 포스터에 명시한다.
      - **(b) 사후 필터:** carboxylate O → Ca501 ≤ 3.2 Å **이면서** H-bond donor가 β1-Asn224 backbone O로부터 3.5 Å 이내에 있는 pose만 채택한다. Docking score는 동점 처리용으로만 사용한다.
 6. **ADMET:** 생존 분자에 ADMET-AI(또는 동등 도구) 적용 — permeability proxy, 용해도, microsome 안정성, hERG, CYP. 의사결정의 기준선은 cpd 25의 *실측* 약점이다(MDCK < 0.1×10⁻⁶ cm/s, oral F 1.3% [111]). 예측치는 방향성 면에서 이 기준을 넘어야 한다.
-7. **최종 선별:** 다음을 만족하는 lead 약 10–20개 — 기하학적 필터 통과, 예측 permeability가 cpd 25보다 우수, **Murcko scaffold가 §8.3의 103개 집합에 없음**, alert 없음, 카르복실레이트 보유. QED와 NN-Tanimoto(최근접 active 이름 포함)는 **게이트가 아니라 보고 지표**로 병기한다.
+7. **최종 선별:** 다음을 만족하는 lead 약 10–20개 — 기하학적 필터 통과, 예측 permeability가 cpd 25보다 우수, **Murcko scaffold가 §8.3의 106개 집합(`data/known_scaffolds.smi`)에 없음**, alert 없음, 카르복실레이트 보유. QED와 NN-Tanimoto(최근접 active 이름 포함)는 **게이트가 아니라 보고 지표**로 병기한다.
 
 ---
 
@@ -497,7 +499,7 @@ similarity가 목적함수에서 빠지므로 기존 모니터링 기대치("Sta
 **동일한** funnel을 통과시켰을 때, 다음을 만족하는 생성 분자가 최소 하나 있으면 제안은 성공이다:
 1. 기하학적 docking 필터 통과(MIDAS + Asn224 contact 보존),
 2. 예측 permeability 축에서 cpd 25를 능가,
-3. **Murcko scaffold가 `data/actives_extended.smi`의 103개 scaffold 집합에 없을 것**(§8.3). 양쪽 모두 §8.0의 타우토머 정규화를 거친 뒤에 판정한다 — 정규화 없이는 같은 분자가 다른 Murcko SMILES를 낸다. NN-Tanimoto와 가장 가까운 known active는 **게이트가 아니라 보고 수치**로 병기한다,
+3. **Murcko scaffold가 `data/known_scaffolds.smi`의 106개 집합에 없을 것**(§8.3 — 큐레이션된 참조 파일 5개의 합집합이며, `actives_extended` 단독 103개는 PLN-1474·bexotegrast·A1AFA를 빠뜨린다). 양쪽 모두 §8.0의 타우토머 정규화를 거친 뒤에 판정한다 — 정규화 없이는 같은 분자가 다른 Murcko SMILES를 낸다. NN-Tanimoto와 가장 가까운 known active는 **게이트가 아니라 보고 수치**로 병기한다,
 4. counter-screen 또는 CustomAlerts 플래그 없음(§5.4의 교체된 aniline 패턴 기준),
 5. 그리고 **양성 패널(PLN-1474, bexotegrast, CWHM-12, GLPG0187, cpd 25)과 동일한 funnel·동일한 도구로 채점했을 때, 순환하지 않는 축에서 비교 가능할 것** — docking 기하 필터를 동등하게 통과하고, ADMET-AI permeability에서 cpd 25를 능가하며, Murcko scaffold가 신규일 것. **총점으로는 비교하지 않는다**(우리가 설계한 목적함수의 값이므로 순환 — §3.4, §5.4). 음성 패널 절은 폐기했다(§3.4).
 

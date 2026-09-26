@@ -438,7 +438,12 @@ p90 1.000, **33%가 0.95 초과, 43%가 0.5 초과**. 카르복실산 부재 분
 기존에 제안되었는가")에 답한 것이 오류다.
 
 **채택 — Murcko scaffold 신규성(이진).** 생성 분자의 Murcko scaffold가
-`actives_extended`의 103개 집합에 없으면 scaffold-novel. 지문 의존 없음, 임계값 없음,
+`data/known_scaffolds.smi`의 106개 집합에 없으면 scaffold-novel — 큐레이션된 참조 파일
+5개(`actives_core`, `actives_core_B`, `actives_extended`, `benchmark_panel`,
+`similarity_refs`)의 합집합이다. `actives_extended` 단독(103개)에는 PLN-1474,
+bexotegrast, A1AFA의 scaffold가 없어(그 파일은 "ChEMBL αvβ1 active ≤ 1 µM" 정의이고
+PLN-1474는 AdisInsight 출처[88], A1AFA는 pIC50 5.30으로 컷 아래) 단독으로 쓰면
+PLN-1474의 골격을 재현한 분자가 novel로 통과한다. 지문 의존 없음, 임계값 없음,
 한 문장으로 기술됨. diversity filter가 이미 `IdenticalMurckoScaffold`이므로 보상 기전과
 성공 기준이 **같은 단위**를 쓴다.
 
@@ -496,4 +501,4 @@ drug-like ChEMBL 분자는 대부분 카르복실산이 없으니 음성 패널�
 - `configs/_stage1_scoring.frag` 삭제, `_stage2_scoring.frag` 갱신
 - `scripts/curate_actives.py`: `standardize()`에 타우토머 정규화 추가, band 계산도 정규화 후로
 - `data/novelty_band.json` 재생성(게이트는 아니지만 보고 맥락으로 유지)
-- Murcko scaffold 집합(103개)을 `data/known_scaffolds.smi`로 고정 산출
+- Murcko scaffold 집합(참조 파일 5개 합집합, 106개)을 `data/known_scaffolds.smi`로 고정 산출
