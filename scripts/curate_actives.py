@@ -43,6 +43,8 @@ from rdkit.Chem import Crippen, Descriptors, QED, rdFingerprintGenerator
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.Scaffolds import MurckoScaffold
 
+from novelty import cross_scaffold_band
+
 RDLogger.DisableLog("rdApp.*")
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -617,41 +619,34 @@ def main() -> int:
     # from an active with a DIFFERENT Murcko scaffold, so the rule would call almost
     # every published alphaVbeta1 series un-novel with respect to the others.
     #
-    # The band below replaces it with something the data defines: how far apart are
-    # two known actives that belong to different scaffolds? A generated molecule
-    # below that band is at least as distant from the actives as one published series
-    # is from another, which is what "a new chemotype" has to mean here.
+    # The band below is calibration context: how far apart are two known actives that
+    # belong to different scaffolds? It is NOT the gate - see section 8.3. The gate is
+    # binary Murcko scaffold membership, because a distance cut-off passes molecules
+    # that sit on a published scaffold.
     note("## Novelty calibration band")
     note()
     note("Nearest-neighbour Tanimoto from each active to an active with a *different*")
     note("Murcko scaffold, under the same fingerprint the scoring components use")
-    note("(Morgan radius 3, feature invariants, counts).")
+    note("(Morgan radius 3, feature invariants, counts), AFTER tautomer")
+    note("canonicalization (blueprint 8.0).")
     note()
     note("| reference set | n | p25 | median | p75 | p90 |")
     note("|---|---|---|---|---|---|")
     band = {}
     for label, keys in (("actives_core", core), ("actives_extended", extended)):
-        fps = [_FPGEN.GetCountFingerprint(Chem.MolFromSmiles(records[k]["smiles_flat"]))
-               for k in keys]
-        scaffolds = [records[k]["murcko_scaffold"] for k in keys]
-        cross = []
-        for i in range(len(keys)):
-            sims = DataStructs.BulkTanimotoSimilarity(fps[i], fps)
-            other = [sims[j] for j in range(len(keys)) if scaffolds[j] != scaffolds[i]]
-            if other:
-                cross.append(max(other))
-        q = {f"p{p_}": round(float(np.percentile(cross, p_)), 3) for p_ in (25, 50, 75, 90)}
-        band[label] = {"n": len(cross), **q}
-        note(f"| `{label}` | {len(cross)} | {q['p25']:.3f} | {q['p50']:.3f} | "
+        smiles_list = [records[k]["smiles_flat"] for k in keys]
+        q = cross_scaffold_band(smiles_list, normalize=True)
+        band[label] = q
+        note(f"| `{label}` | {q['n']} | {q['p25']:.3f} | {q['p50']:.3f} | "
              f"{q['p75']:.3f} | {q['p90']:.3f} |")
     note()
-    note(f"**Novelty threshold = p25 of the `actives_extended` band = "
-         f"{band['actives_extended']['p25']:.3f}.** A generated molecule below it is "
-         "further from every known active than three quarters of those actives are from "
-         "the nearest active of a different scaffold. Report the full distribution and "
-         "each lead's percentile within this band, not only the pass/fail count - the "
-         "band is fingerprint-specific and the percentile survives a change of "
-         "fingerprint in a way a bare cut-off does not.")
+    note("**This band is REPORTING CONTEXT, not the novelty gate.** The gate is "
+         "Murcko scaffold membership - see `data/known_scaffolds.smi` and blueprint "
+         "section 8.3. A distance cut-off was withdrawn because it passes 62% of "
+         "molecules whose Murcko scaffold is IDENTICAL to a published active's. "
+         "Report each lead's nearest-neighbour Tanimoto and its percentile within "
+         "this band alongside the binary scaffold verdict: the percentile survives "
+         "a change of fingerprint in a way a bare cut-off does not.")
     note()
     (DATA / "novelty_band.json").write_text(json.dumps(band, indent=2) + "\n")
 
