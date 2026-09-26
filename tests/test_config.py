@@ -39,16 +39,34 @@ class TestSingleStage(unittest.TestCase):
         self.assertEqual(config["diversity_filter"]["type"],
                          "IdenticalMurckoScaffold")
         self.assertEqual(config["diversity_filter"]["bucket_size"], 25)
+        self.assertEqual(config["diversity_filter"]["minscore"], 0.4)
         self.assertEqual(config["stage"][0]["scoring"]["type"], "geometric_mean")
+
+    def test_diversity_filter_is_not_per_stage(self):
+        """A per-stage filter would apply to part of the run, not the whole of it."""
+        config = load()
+        self.assertIn("diversity_filter", config)
+        self.assertNotIn("diversity_filter", config["stage"][0])
+
+    def test_inception_seeds_the_training_actives(self):
+        config = load()
+        self.assertEqual(config["inception"]["smiles_file"],
+                         "data/actives_core.smi")
+        self.assertEqual(config["inception"]["memory_size"], 100)
+        self.assertEqual(config["inception"]["sample_size"], 10)
 
 
 class TestComponents(unittest.TestCase):
     def test_component_set_is_exactly_four(self):
-        names = set(endpoints(load()))
+        config = load()
+        names = set(endpoints(config))
         self.assertEqual(
             names,
             {"carboxylate MIDAS anchor", "TPSA", "SA score", "unwanted groups"},
         )
+        # endpoints() keys by name, so a duplicate name would be swallowed and the
+        # set above would still match. Count the raw blocks too.
+        self.assertEqual(len(config["stage"][0]["scoring"]["component"]), 4)
 
     def test_removed_components_are_absent(self):
         types = {t for t, _ in endpoints(load()).values()}
@@ -72,6 +90,8 @@ class TestComponents(unittest.TestCase):
         self.assertEqual(transform["low"], 40.0)
         self.assertEqual(transform["high"], 115.0)
         self.assertEqual(transform["coef_div"], 120.0)
+        self.assertEqual(transform["coef_si"], 20.0)
+        self.assertEqual(transform["coef_se"], 20.0)
         self.assertEqual(endpoint["weight"], 1.0)
 
     def test_sascore_guard_rail_window(self):
@@ -159,16 +179,67 @@ class TestReinventAcceptsTheNames(unittest.TestCase):
         self.assertEqual(list(transform([0, 1, 2])), [0.0, 1.0, 1.0])
 
 
+COMPONENT_MODULES = {
+    "GroupCount": "reinvent_plugins.components.RDKit.comp_group_count",
+    "TPSA": "reinvent_plugins.components.RDKit.comp_tpsa",
+    "SAScore": "reinvent_plugins.components.SAScore.comp_sascore",
+    "CustomAlerts": "reinvent_plugins.components.comp_custom_alerts",
+}
+
+
+class TestReinventAcceptsTheComponents(unittest.TestCase):
+    """The transform tests cover transform tables. This covers the components.
+
+    REINVENT's plugin components live in `reinvent_plugins`, a package separate
+    from `reinvent`, so they import without torch. Each declares a pydantic
+    `Parameters` dataclass; a `params` key it does not declare is a startup
+    failure. Without this, a typo like `param.smarts` or a renamed component
+    class would reach a GPU run unchallenged.
+    """
+
+    def setUp(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent
+                               / "REINVENT4"))
+
+    def test_every_component_class_resolves(self):
+        for name, module_path in COMPONENT_MODULES.items():
+            with self.subTest(component=name):
+                module = __import__(module_path, fromlist=[name])
+                self.assertIsNotNone(getattr(module, name, None))
+
+    def test_every_params_key_is_declared_by_its_component(self):
+        config = load()
+        seen = set()
+        for block in config["stage"][0]["scoring"]["component"]:
+            for component_type, body in block.items():
+                seen.add(component_type)
+                module = __import__(COMPONENT_MODULES[component_type],
+                                    fromlist=["Parameters"])
+                declared = getattr(module, "Parameters", None)
+                allowed = (set(declared.__dataclass_fields__)
+                           if declared is not None else set())
+                for endpoint in body["endpoint"]:
+                    with self.subTest(component=component_type,
+                                      endpoint=endpoint["name"]):
+                        self.assertLessEqual(set(endpoint.get("params", {})),
+                                             allowed)
+        self.assertEqual(seen, set(COMPONENT_MODULES))
+
+
 class TestFragments(unittest.TestCase):
     def test_stage_fragments_are_gone(self):
         self.assertFalse(Path("configs/_stage1_scoring.frag").exists())
         self.assertFalse(Path("configs/_stage2_scoring.frag").exists())
 
     def test_sketch_ends_with_the_fragment_verbatim(self):
-        """The sketch is header + fragment, so the two cannot drift apart."""
+        """The sketch is header + fragment, so the two cannot drift apart.
+
+        endswith, not assertIn: containment would also pass if the fragment were
+        duplicated or buried mid-file with unrelated content after it.
+        """
         fragment = Path("configs/_rl_scoring.frag").read_text()
         sketch = Path(SKETCH).read_text()
-        self.assertIn(fragment.strip(), sketch)
+        self.assertTrue(sketch.rstrip().endswith(fragment.strip()))
 
 
 if __name__ == "__main__":
