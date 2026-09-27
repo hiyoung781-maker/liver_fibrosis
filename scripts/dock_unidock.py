@@ -50,12 +50,31 @@ __all__ = ["DEFAULTS", "box_from_ligand", "build_command", "split_index",
 RDLogger.DisableLog("rdApp.*")
 
 # Pinned to the smina redocking run that section 8.5(a) validated.
+# Pinned to the smina redocking run that section 8.5(a) validated, EXCEPT for the two
+# pose-retention knobs, which are widened from Uni-Dock's defaults (energy_range 3,
+# min_rmsd 1) because those defaults return fewer poses than section 8.5b's design
+# needs - it selects on geometry precisely because the scoring function has no metal
+# term, so a handful of energy-ranked poses defeats it.
+#
+# These two knobs are NOT the explanation for the control failure, though. That was
+# the first hypothesis and it was tested and refuted: widening energy_range 3 -> 10
+# took the crystal ligand from 2 poses to 3, and all three sat within 0.11 kcal/mol
+# and 0.86 A of each other. The search had converged, not been filtered.
+#
+# The live diagnosis is search depth. With the SAME scoring function, smina found
+# -6.91 at exhaustiveness 16 while Uni-Dock found -6.30, and Uni-Dock's pose
+# reproduced Ca501 (2.378 A) but not beta1-Asn224 (4.830 A against a crystal 2.63 A).
+# A worse optimum from an identical function is a search problem, so exhaustiveness is
+# the lever - see scripts/tune_control.sh, which sweeps it on the control alone. Until
+# that sweep picks a level, EXHAUSTIVENESS BELOW IS THE UNVALIDATED VALUE.
 DEFAULTS = {
     "autobox_add": 6.0,
     "exhaustiveness": 16,
     "num_modes": 20,
     "seed": 42,
     "scoring": "vina",
+    "energy_range": 10.0,
+    "min_rmsd": 0.5,
 }
 
 
@@ -83,6 +102,8 @@ def build_command(receptor: str, ligand_index: str, out_dir: str, box: dict,
                   num_modes: int = DEFAULTS["num_modes"],
                   seed: int = DEFAULTS["seed"],
                   scoring: str = DEFAULTS["scoring"],
+                  energy_range: float = DEFAULTS["energy_range"],
+                  min_rmsd: float = DEFAULTS["min_rmsd"],
                   search_mode: str | None = None) -> list[str]:
     """The Uni-Dock argv. Separated from execution so a test can read it."""
     cmd = [
@@ -93,6 +114,8 @@ def build_command(receptor: str, ligand_index: str, out_dir: str, box: dict,
         "--scoring", scoring,
         "--exhaustiveness", str(exhaustiveness),
         "--num_modes", str(num_modes),
+        "--energy_range", str(energy_range),
+        "--min_rmsd", str(min_rmsd),
         "--seed", str(seed),
     ]
     for key in ("center_x", "center_y", "center_z", "size_x", "size_y", "size_z"):
@@ -179,6 +202,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--exhaustiveness", type=int,
                         default=DEFAULTS["exhaustiveness"])
     parser.add_argument("--num-modes", type=int, default=DEFAULTS["num_modes"])
+    parser.add_argument("--energy-range", type=float,
+                        default=DEFAULTS["energy_range"],
+                        help="kcal/mol window of poses to keep. Uni-Dock's default of "
+                             "3 left 2 poses for the crystal ligand where smina gave 20")
+    parser.add_argument("--min-rmsd", type=float, default=DEFAULTS["min_rmsd"],
+                        help="minimum RMSD between retained poses; Uni-Dock's default "
+                             "of 1 clusters away poses the geometry filter needs")
     parser.add_argument("--seed", type=int, default=DEFAULTS["seed"])
     parser.add_argument("--search-mode", default=None)
     parser.add_argument("--gpus", type=int, default=1,
@@ -198,6 +228,7 @@ def main(argv: list[str] | None = None) -> int:
 
     cmd = build_command(args.receptor, args.ligand_index, args.out_dir, box,
                         args.exhaustiveness, args.num_modes, args.seed,
+                        energy_range=args.energy_range, min_rmsd=args.min_rmsd,
                         search_mode=args.search_mode)
     print("\ncommand:")
     print("  " + " ".join(cmd))
@@ -220,6 +251,7 @@ def main(argv: list[str] | None = None) -> int:
             args.receptor, args.ligand_index, args.out_dir, box, args.gpus,
             args.shard_dir, exhaustiveness=args.exhaustiveness,
             num_modes=args.num_modes, seed=args.seed,
+            energy_range=args.energy_range, min_rmsd=args.min_rmsd,
             search_mode=args.search_mode)
         failed = [d for d, r in results.items() if r["status"] != 0]
         if failed:

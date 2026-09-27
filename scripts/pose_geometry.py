@@ -129,6 +129,12 @@ def crystal_rmsd(pose: Chem.Mol, reference: Chem.Mol) -> float:
 
 
 def _score(mol: Chem.Mol) -> float:
+    """Docking energy, kcal/mol. nan when the pose carries none.
+
+    `affinity` is what scripts/poses_to_sdf.py writes from Uni-Dock's
+    `REMARK VINA RESULT`; the smina tags come first because a pose SDF produced
+    directly by smina/gnina uses those instead.
+    """
     for tag in ("minimizedAffinity", "CNNaffinity", "affinity"):
         if mol.HasProp(tag):
             try:

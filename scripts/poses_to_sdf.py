@@ -46,6 +46,12 @@ def poses_from_pdbqt(path: str, label: str | None = None) -> list[Chem.Mol]:
         with rdBase.BlockLogs():
             pdbqt = PDBQTMolecule.from_file(path, skip_typing=True)
             mols = RDKitMolCreate.from_pdbqt_mol(pdbqt)
+            # Uni-Dock records each pose's energy as `REMARK VINA RESULT: <kcal/mol>`.
+            # Meeko does not put it on the RDKit molecule, but exposes it as
+            # PDBQTMolecule pose.score, so it is collected here and written as an SDF
+            # property. Section 8.5b uses docking score only to break ties among poses
+            # that already passed the geometry filter - without this it was nan.
+            scores = [getattr(pose, "score", None) for pose in pdbqt]
     except Exception:
         return []
 
@@ -59,6 +65,8 @@ def poses_from_pdbqt(path: str, label: str | None = None) -> list[Chem.Mol]:
             single.AddConformer(mol.GetConformer(index), assignId=True)
             single.SetProp("_Name", name)
             single.SetProp("pose", str(index + 1))
+            if index < len(scores) and scores[index] is not None:
+                single.SetProp("affinity", f"{float(scores[index]):.3f}")
             poses.append(single)
     return poses
 
