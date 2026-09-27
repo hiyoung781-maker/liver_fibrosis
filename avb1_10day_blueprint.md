@@ -644,7 +644,7 @@ Order matters — cheap to expensive:
 
    **These are features reported as correlated with selectivity; they are not evidence of selectivity.** αvβ1 selectivity is determined by **both** the β subunit (against αvβ3/αvβ5/αvβ6/αvβ8) and the α subunit (against α5β1/α4β1/α8β1) [114], and this work addresses none of the latter — the same review names α5's Trp157, Gln221 and Ser224 as candidates and we do not analyse them. Nor has the contact said to confer selectivity ever been observed crystallographically: no αvβ1 structure existed as of 2020 [114], and the ligand in the first one, 8W30, has pIC50 5.30 and sits 7.00 Å from Asp218. **Measured cross-integrin IC50s are the only basis on which selectivity can be judged, and that is future work.**
 5. **Docking — a geometric filter, not an affinity ranking:**
-   - Receptor: 8W30 chains A+B; strip ligand TR01225179 and waters (record the water decision; HOH2107 is the candidate to retain in a sensitivity run)
+   - Receptor: 8W30 chains A+B; strip ligand TR01225179 and **all** waters (that is the method; the HOH2107 sensitivity run is withdrawn — reasons under *Water treatment* below)
    - Tool: smina / AutoDock Vina; ~20 Å box on the ligand centroid
    - **Known limitation:** Vina-class scoring functions do not model metal coordination — the single most important interaction (carboxylate → MIDAS Ca²⁺) is invisible to the scorer. Therefore:
      - **(a) Validation:** redock TR01225179. Require carboxylate-O → Ca501 ≤ 3.2 Å in the top pose (ideally also heavy-atom RMSD < 2 Å against the crystal pose). **If validation fails, do not rank anything by docking** — fall back to similarity/QSAR-based triage and state that on the poster.
@@ -675,7 +675,23 @@ Order matters — cheap to expensive:
 
    *Pose generation parameters* — `--exhaustiveness 16 --num_modes 20`, `--seed 42`. With no metal term there is no reason to expect the correct geometry to rank first, so **generating many poses and filtering them geometrically** is the design of (b). The redocking put the top three within 2 Å, so 20 modes suffice.
 
-   *Water treatment* — the default receptor strips all waters. A second receptor retaining **HOH A2107** alone (4.68 Å from the ligand, at the subunit interface) is built for sensitivity analysis, because Sabat 2024 reports obtaining selectivity by engaging that **interface crystallographic water** instead of αv-Asp218. Report the difference between the two receptors.
+   *Water treatment* — **the receptor strips all waters. That is the method; the sensitivity analysis is withdrawn (2026-09-27).**
+
+   The original plan was a second receptor retaining `HOH A2107` alone (4.68 Å from the ligand, at the subunit interface), run as a sensitivity analysis. The rationale was that Sabat 2024 reports obtaining selectivity by engaging that **interface crystallographic water** instead of αv-Asp218 — that is, it was an analysis in service of the selectivity claim. When §8.4 demoted selectivity from a claim to an observation, this analysis lost the thing it served.
+
+   The measurements behind the withdrawal (distance to the atoms §8.5's three criteria actually measure):
+
+   | Criterion | Target atom | from `HOH A2107` |
+   |---|---|---|
+   | Criterion 1 (≤ 3.2 Å) | MIDAS Ca **B/501** | **16.45 Å** |
+   | Criterion 2 (≤ 3.5 Å) | β1-Asn224 backbone O | **9.04 Å** |
+   | Criterion 3 | αv-Tyr178 OH | **10.66 Å** |
+
+   All three criteria are judged against atoms 9–16 Å from this water, so adding one oxygen at that remove cannot change a verdict. **The filter is structurally insensitive to it.** Moreover the water makes no direct ligand contact even in the crystal (nearest atom 4.68 Å, beyond H-bonding range) — what it bridges is αv-Glu121 (2.6 Å) and β1-Ser177 (3.0 Å), a protein–protein bridge. "Engaging this water" therefore means **designing a new contact the reference ligand does not make**, which is not a property a rigid-receptor redock of our library tests. The receptor being rigid, the water cannot be displaced either, so its only possible effect is a slight affinity shift from peripheral occlusion — and §8.5b **does not rank on affinity**.
+
+   The decisive argument is priority. This model's first-order defect is that **Vina has no metal coordination term at all**; we accepted that and built the geometry filter to compensate. Spending effort on a second-order water term while knowing the first-order one is absent is a misallocation.
+
+   `docking/receptor_with_HOH2107.pdb` is **kept, not deleted.** If selectivity is ever raised back to a claim, Sabat's mechanism is the only concrete selectivity handle our pocket actually has, and this receptor is where that would start.
 6. **ADMET:** apply ADMET-AI (or equivalent) to survivors — permeability proxy, solubility, microsomal stability, hERG, CYPs. **The baseline is PLN-1474, predicted with the same tool and compared prediction-to-prediction.** The earlier wording used cpd 25's *measured* liabilities (MDCK < 0.1×10⁻⁶ cm/s, oral F 1.3% [111]) as the baseline; it was revised for two reasons (§7.5).
 7. **Final selection:** roughly 10–20 leads satisfying: geometric filter pass, predicted permeability **better than PLN-1474**, **Murcko scaffold absent from §8.3's 106-member set (`data/known_scaffolds.smi`)**, clean alerts, carboxylate present. QED and NN-Tanimoto (with the name of the nearest active) are reported alongside as **metrics, not gates**.
 
