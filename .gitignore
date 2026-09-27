@@ -40,6 +40,23 @@ logs/*
 results/*
 !results/score_panel.csv
 !results/panel_curated.smi
+!results/geometry.csv
+
+# 도킹 중간 산출물. §8.5 실행이 만드는 것들이며 재생성 가능하다.
+#   docking/poses/          리간드별 출력 PDBQT 7,763개
+#   docking/poses.sdf       전체 pose 42,419개, 179 MB
+#   docking/passing.sdf     통과 pose 4,065개, 18 MB — §8.4 측정 입력이므로
+#                           KBDS에 두고 그곳에서 측정한 뒤 요약만 가져온다
+#   docking/ligands*/       3D SDF 샤드와 리간드 PDBQT 7,763개
+# 추적되는 것은 receptor(.pdb/.pdbqt), 대조 리간드, redocking 검증 결과,
+# 그리고 results/geometry.csv다 — 즉 입력과 요약만 남긴다.
+docking/poses/
+docking/poses.sdf
+docking/passing.sdf
+docking/ligands/
+docking/ligands_pdbqt/
+docking/ligand_shards/
+docking/*.log
 
 # W&B 로컬 캐시, ChEMBL/PubChem API 응답 캐시
 wandb/

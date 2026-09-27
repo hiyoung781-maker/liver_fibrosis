@@ -692,6 +692,95 @@ Order matters — cheap to expensive:
    The decisive argument is priority. This model's first-order defect is that **Vina has no metal coordination term at all**; we accepted that and built the geometry filter to compensate. Spending effort on a second-order water term while knowing the first-order one is absent is a misallocation.
 
    `docking/receptor_with_HOH2107.pdb` is **kept, not deleted.** If selectivity is ever raised back to a claim, Sabat's mechanism is the only concrete selectivity handle our pocket actually has, and this receptor is where that would start.
+
+### 8.5.1 Full run — complete (2026-09-28), on GPU
+
+**Engine: Uni-Dock v1.1.3, `--scoring vina`.** Not smina, for cost. Measured: the 7,767 survivors take 547 s/ligand under smina, i.e. **18.4 h on cpu64-only's 64 cores** (18 node-hours); Uni-Dock across 8 A100s takes **about 20 minutes** (2 node-hours). 75× faster at a ninth of the allocation.
+
+**What makes the swap defensible is not the speed.** §8.5b does not rank on affinity — it generates many poses and judges them by distance. The geometry filter measures distances, so it transfers across scoring functions untouched: all the engine has to do is *generate* the right pose, and its score need not be trusted. Uni-Dock also implements AutoDock Vina's scoring function as-is, so §8.5(a)'s 0.63 Å result with smina still characterizes the method.
+
+**Run shape.** `unidock` uses one GPU per process and does not spread itself across several. The `8gpu` partition charges 8 node-hours per wall hour however many GPUs are busy, so splitting the ligand index eight ways and launching eight processes is **8× faster at identical cost**. The split is round-robin: Uni-Dock groups ligands by size internally (measured: small 4,627 / medium 3,128 / large 8, at torsion ceilings of 8 / 16 / 20), so contiguous shards would pile the large ligands into one and leave that GPU straggling.
+
+**Validation passed.** The crystal ligand was docked **in the same batch** as the generated ligands, labelled `CONTROL_crystal`.
+
+| | Crystal | smina (§8.5a) | **Uni-Dock, batch** |
+|---|---|---|---|
+| carboxylate O → Ca501 | 2.62 Å | 2.72 | **2.682** |
+| far carboxylate O | 4.54 | — | 4.403 |
+| donor → Asn224 O | 2.63 | 2.89 | **2.920** |
+| affinity | — | −6.909 | −6.753 |
+
+Even the monodentate coordination is reproduced. Raising `exhaustiveness` from 16 to 512 leaves the geometry identical and the affinity flat at −6.75, so **16 is fixed**.
+
+**Results.**
+
+| | |
+|---|---|
+| poses | 42,419 (5.5 per ligand) |
+| passing poses | 4,065 |
+| **ligands passing geometry** | **1,587 / 7,763 = 20.4%** |
+
+The whole funnel: 19,485 sampled → 7,767 §8.2 survivors → 7,762 embedded (5 failed) → 7,763 docked (with the control) → **1,587 passing §8.5b**. §8 targets 10–20 leads, so there is ample headroom.
+
+### 8.5.2 The control failed once, and that is this section's most important record
+
+On the first run the control **reproduced Ca501 (2.378 Å) and missed Asn224 (4.830 Å)**. §8.5(a) had pre-registered "if validation fails, rank nothing by docking", so work stopped and the cause was traced. Two hypotheses were refuted.
+
+**Refuted hypothesis 1 — `energy_range` was pruning poses.** Uni-Dock's default of 3 kcal/mol was leaving only 2. Widening it to 10 took that from 2 to 3, and all three sat within **0.11 kcal/mol and 0.86 Å** of each other. The search had converged, not been filtered.
+
+**Refuted hypothesis 2 — the search was too shallow.** `exhaustiveness` went 16 → 512, a factor of 32. Affinity read −6.301 → −6.313 → −6.313 → −6.313 → −6.309, flat, and wall time moved only 21 → 27 s. Not a search-depth problem.
+
+**Diagnosis.** When the same scoring function gives different scores, what differs is the representation being scored. The variables were isolated one at a time.
+
+| Configuration | affinity |
+|---|---|
+| smina + `receptor.pdb` | **−6.9** ← the value §8.5(a) validated |
+| smina + `receptor.pdbqt` (no H) | −6.4 |
+| Uni-Dock + `receptor.pdbqt` (no H) | −6.31 |
+| Uni-Dock + `receptor.pdb` (raw) | −5.79 |
+| smina + Meeko ligand PDBQT | −6.9 / −6.4 (ligand irrelevant) |
+
+**The engine accounts for 0.1 kcal/mol and the receptor for 0.5. Uni-Dock was innocent.**
+
+**Cause.** `receptor.pdb` carries no hydrogens, and `obabel -xr` typed **1,170 of its 1,212 nitrogens as `NA`**, AutoDock's H-bond **acceptor**. Protein nitrogens are mostly backbone amide NH — **donors** — and Open Babel cannot tell without hydrogens, so it defaulted to acceptor. That rewrites the H-bond landscape of the entire protein.
+
+**Fix.** `obabel -xr -h`. Typing flips from **1,170 NA / 42 N to 101 NA / 1,111 N**, 1,592 polar hydrogens appear, and smina returns to −6.9.
+
+**What the mis-typing did to the control is subtle.** On the corrected receptor smina's ranking is
+
+| pose | affinity | Ca501 | Asn224 | verdict |
+|---|---|---|---|---|
+| 1 | −6.909 | 2.740 | 2.895 | passes |
+| 4 | −6.670 | 2.357 | **4.832** | fails |
+
+and **pose 4 is exactly what Uni-Dock had been returning as its best.** The engine was never *finding* a wrong pose; the mis-typed receptor was **promoting the fourth-best to first**.
+
+**Feeding the raw PDB is not the fix.** Uni-Dock given `receptor.pdb` directly scored −5.787 with the carboxylate 4.59 Å off the calcium. The hydrogenated PDBQT is the input to use.
+
+**The lesson — an anchor check is not a sufficient validation.** `scripts/prepare_receptor_pdbqt.py` confirmed Ca501's presence and coordinates and **passed it, correctly**: the calcium really was in place. But what changed the scoring was **atom typing**, and there was no check for it. The script now reports the nitrogen donor/acceptor ratio and fails its verdict when acceptors are the majority, and `tests/test_prepare_receptor_pdbqt.py` **asserts that the anchor checks do not catch this defect** — so they are never mistaken for a sufficient validation.
+
+Three errors of this shape have now occurred in this project: a 5-character CCD residue name overflowing PDB columns and zeroing every affinity; a naive RMSD reporting 0.63 Å as a 6.13 Å failure; and this one. What they share is that **the pipeline runs to completion without error and produces a plausible number.**
+
+### 8.5.3 pH and protonation state
+
+**The receptor is at pH 7.4.** `obabel -h` takes no pH argument, but the receptor it produces is already correct where it matters: Asp and Glu carry **zero** polar hydrogens on their carboxyl oxygens, and **Glu229** — the residue coordinating the MIDAS calcium — comes out with OE1 and OE2 both typed `OA`, the deprotonated form.
+
+**`obabel -p 7.4` must not be used.** It **drops all six calcium ions** and both §8.5b anchors. And on that calcium-free receptor smina still scored **−6.9** — the score alone looks healthy. The anchor check is what caught it.
+
+**The ligand is docked as the neutral acid, and that is a choice.** Stated explicitly because this blueprint repeatedly describes the project as building an anion. Measured on the control:
+
+| Ligand | affinity | Ca501 | Asn224 | passing poses |
+|---|---|---|---|---|
+| neutral COOH | **−6.896** | 2.719 | 2.900 | 6 / 20 |
+| anion COO⁻ | −6.738 | 2.811 | 2.903 | 4 / 20 |
+
+Both reproduce the crystal contacts and the neutral form scores slightly better. **Vina has no electrostatic term**, so an anion gains nothing from its charge and loses one HD donor. The neutral form is also what §8.5(a)'s −6.9 was measured on, what §8.0's `Uncharger` produces, and what §5.1's carboxylate SMARTS expects. Switching to anions would mean revalidating all of it for no measurable gain.
+
+### 8.5.4 Two defects found in the measurement code
+
+**The carboxylate SMARTS was too narrow.** `pose_geometry.py` used §5.1's `[CX3](=O)[OX2H1,OX1-]`. PDBQT writes both carboxylate oxygens as `OA` and carries no charge, so an oxygen returning through that route has **neither a hydrogen nor a charge and matches neither branch**. A deprotonated control reported `ca_dist = inf` and every pose duly "failed" the MIDAS criterion — **a result that looked chemical.** The run that mattered survived only because Meeko restores the neutral COOH from its `REMARK SMILES`. → broadened to `[CX3](=[OX1])[OX2H1,OX1]`. **§5.1's SMARTS is left alone** — it scores generated SMILES and §5.1 pins it.
+
+**A regression that made score extraction fatal.** Uni-Dock's pose energies live in `REMARK VINA RESULT`; Meeko does not put them on the RDKit molecule, so they must be read from `PDBQTMolecule`'s `pose.score`. Collecting them inside the same `try` as the structure parse made a missing energy fatal: a PDBQT with no `VINA RESULT` — a freshly prepared ligand rather than a docked output — **returned zero poses**. Eight tests caught it. An absent score must cost the score, never the pose.
 6. **ADMET:** apply ADMET-AI (or equivalent) to survivors — permeability proxy, solubility, microsomal stability, hERG, CYPs. **The baseline is PLN-1474, predicted with the same tool and compared prediction-to-prediction.** The earlier wording used cpd 25's *measured* liabilities (MDCK < 0.1×10⁻⁶ cm/s, oral F 1.3% [111]) as the baseline; it was revised for two reasons (§7.5).
 7. **Final selection:** roughly 10–20 leads satisfying: geometric filter pass, predicted permeability **better than PLN-1474**, **Murcko scaffold absent from §8.3's 106-member set (`data/known_scaffolds.smi`)**, clean alerts, carboxylate present. QED and NN-Tanimoto (with the name of the nearest active) are reported alongside as **metrics, not gates**.
 
@@ -720,8 +809,8 @@ Through the **identical** funnel, the proposal succeeds if at least one generate
 | D4 | **Preceding work:** add tautomer normalization to the comparison layer (`scripts/normalize.py`) → recompute `novelty_band.json` (§8.0); verify the `CustomAlerts` aniline pattern replacement (§5.4). **`curate_actives.standardize()` is deliberately left untouched** — its output is written to `data/actives_core.smi`, the TL-A training input and RL inception seed, and adding tautomer canonicalization there would invalidate the completed D3 run; normalization lives only in the comparison layer (`scripts/normalize.py:8-9`, `scripts/curate_actives.py:243-246`). Then RL single stage, steps 0–300 | start only after confirming no reference-set molecule scores 0 **beyond the one recorded in §5.4** — the eight SMARTS the RL run applies zero `CHEMBL4756602` in `actives_extended` via `[Nr0][Nr0]` (acyclic N–N, the hydrazine class). That pattern is a legitimate reactive alert and 1 of 190 is not the aniline catastrophe of 164/190, so it is accepted rather than hidden. PAINS is absent from the RL config and applies only in `objective.py` / the §8 triage, where the count is 3 (`CHEMBL244434` and `CHEMBL244013` via `mannich_A(296)`). Log §5.5 diagnostics every 100 steps |
 | D5 | RL single stage, steps 300–600 | final agent; watch for collapse onto known series (NN-Tanimoto rising above 0.6 → raise DF `minscore` 0.4 → 0.5, restart from an earlier checkpoint if needed). **No similarity-weight adjustment is possible** — that component is not in the objective (§5.2) |
 | D6 | Sampling 20k **(complete)**; benchmark panel scoring **(complete, §7.1)** | `data/library.smi` 19,485 + `data/library_prior.smi` 18,346 (§6.1); reference score distributions |
-| D7 | Docking setup + TR01225179 redocking validation | validated protocol **or** documented fallback to similarity/QSAR-only triage |
-| D8 | Dock + geometric filter + ADMET + counter-screens | triage table |
+| D7 | Docking setup + TR01225179 redocking validation **(complete)** | smina passed at 0.63 Å RMSD (§8.5a); Uni-Dock revalidated — Ca501 2.682 / Asn224 2.920 Å (§8.5.1). No fallback needed |
+| D8 | Dock + geometric filter **(complete)** + ADMET **(provisional)** + counter-screens **(withdrawn, §8.4)** | 1,587 of 7,763 = 20.4% pass geometry (`results/geometry.csv`, §8.5.1); provisional ADMET in `logs/admet_summary.txt`. Outstanding: §8.4's three selectivity observations, §8 item 7 final selection |
 | D9 | Benchmark comparison, lead selection, results table + figures | top 10–20 leads |
 | D10 | Buffer: poster assembly (pocket figures already done), 7-min talk rehearsal, attack-surface prep | — |
 
