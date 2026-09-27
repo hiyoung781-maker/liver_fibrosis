@@ -14,7 +14,13 @@ Step 2의 목표는 **TL-A focused prior가 이미 확보한 영역 안에서 �
 1. RL 0 step에서 목적함수가 well-conditioned하다 — prior 샘플의 총점 중앙값이
    포화(≈1.0)도 아니고 소멸(≈0)도 아닌 중간 대역에 있다.
 2. 어떤 scoring component도 참조 세트(`actives_core`, `actives_extended`,
-   `similarity_refs`, `benchmark_panel`)를 구조적으로 0점 처리하지 않는다.
+   `similarity_refs`, `benchmark_panel`)를 **구조적으로** 0점 처리하지 않는다 — 즉
+   계열 전체를 지우는 패턴이 없어야 한다(교체 전 aniline 패턴은 `actives_extended`의
+   86%를 지웠다). 측정된 잔여 비용은 **1/190**이다: RL이 적용하는 여덟 SMARTS가
+   `CHEMBL4756602`를 `[Nr0][Nr0]`(비고리 N–N, 하이드라진류)로 0점 처리한다. 정당한
+   reactive alert이므로 받아들이되 §5.4와 §10 D4에 명시해 숨기지 않는다. PAINS는 RL에
+   없고 `objective.py`/§8 triage에서만 적용되므로 거기서는 3건이다(`CHEMBL244434`,
+   `CHEMBL244013`이 `mannich_A(296)`).
 3. §9의 사전 등록 기준이 **false pass를 허용하지 않는다** — 특히 신규성 판정이
    표현(representation) 차이로 통과되지 않는다.
 4. scored endpoint 수가 선행연구 수준(3개 내외)을 넘지 않는다.
