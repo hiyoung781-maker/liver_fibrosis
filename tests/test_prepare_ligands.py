@@ -65,15 +65,22 @@ class TestControlShard(unittest.TestCase):
 
     def test_control_keeps_its_crystal_coordinates(self):
         """It is a control precisely because it is the experimentally observed pose;
-        re-embedding it would destroy the comparison."""
+        re-embedding it would destroy the comparison.
+
+        The invariant is the HEAVY-ATOM coordinates, not the atom count: hydrogens are
+        added (with coordinates) so Meeko will accept the molecule, which takes it from
+        22 atoms to 35. An earlier version of this test asserted equal atom counts and
+        so conflated two different things.
+        """
         original = Chem.MolFromMolFile(CONTROL, removeHs=False)
         write_shards(self.smi, self.out, shard_size=10, control_sdf=CONTROL)
         copied = next(iter(Chem.SDMolSupplier(str(Path(self.out) / CONTROL_SHARD),
                                               removeHs=False)))
-        self.assertEqual(original.GetNumAtoms(), copied.GetNumAtoms())
+        heavy = Chem.RemoveHs(copied)
+        self.assertEqual(original.GetNumAtoms(), heavy.GetNumAtoms())
         delta = abs(original.GetConformer().GetPositions()
-                    - copied.GetConformer().GetPositions()).max()
-        self.assertAlmostEqual(float(delta), 0.0, places=3)
+                    - heavy.GetConformer().GetPositions()).max()
+        self.assertAlmostEqual(float(delta), 0.0, places=6)
 
     def test_control_shard_is_first_in_the_shard_list(self):
         counts = write_shards(self.smi, self.out, shard_size=10, control_sdf=CONTROL)
@@ -120,3 +127,58 @@ class TestSharding(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestControlLigandConvertsToPdbqt(unittest.TestCase):
+    """The control was the one ligand that failed PDBQT conversion while all 7,762
+    generated ones succeeded. Cause: the crystal ligand arrives from the PDB with
+    heavy atoms only, and Meeko requires explicit hydrogens; generated ligands get
+    them from embed(), and the control bypassed it."""
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.out = str(Path(self.tmp.name) / "ligands")
+
+    def test_control_shard_has_explicit_hydrogens(self):
+        from prepare_ligands import write_control_shard
+
+        write_control_shard(self.out, CONTROL)
+        mol = next(iter(Chem.SDMolSupplier(str(Path(self.out) / CONTROL_SHARD),
+                                          removeHs=False)))
+        hydrogens = sum(1 for a in mol.GetAtoms() if a.GetSymbol() == "H")
+        self.assertGreater(hydrogens, 0)
+
+    def test_heavy_atom_coordinates_are_bit_identical(self):
+        """addCoords=True must place hydrogens without moving anything else - the
+        crystal pose is the whole value of this molecule."""
+        import numpy as np
+        from prepare_ligands import write_control_shard
+
+        original = Chem.MolFromMolFile(CONTROL, removeHs=False)
+        write_control_shard(self.out, CONTROL)
+        written = next(iter(Chem.SDMolSupplier(str(Path(self.out) / CONTROL_SHARD),
+                                              removeHs=False)))
+        heavy = Chem.RemoveHs(written)
+        self.assertEqual(heavy.GetNumAtoms(), original.GetNumAtoms())
+        delta = np.abs(original.GetConformer().GetPositions()
+                       - heavy.GetConformer().GetPositions()).max()
+        self.assertAlmostEqual(float(delta), 0.0, places=6)
+
+    @unittest.skipUnless(
+        __import__("importlib").util.find_spec("meeko") is not None,
+        "meeko not installed")
+    def test_control_now_survives_meeko_conversion(self):
+        """The regression this fix exists for, asserted end to end."""
+        from ligands_to_pdbqt import prepare_one
+        from prepare_ligands import write_control_shard
+
+        write_control_shard(self.out, CONTROL)
+        mol = next(iter(Chem.SDMolSupplier(str(Path(self.out) / CONTROL_SHARD),
+                                          removeHs=False)))
+        self.assertIsNotNone(prepare_one(mol))
+
+    def test_the_unhydrogenated_crystal_ligand_would_have_failed(self):
+        """Documents the cause so the AddHs call is not 'simplified' away later."""
+        raw = Chem.MolFromMolFile(CONTROL, removeHs=False)
+        self.assertEqual(sum(1 for a in raw.GetAtoms() if a.GetSymbol() == "H"), 0)

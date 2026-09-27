@@ -25,7 +25,8 @@ from rdkit import Chem, RDLogger
 from rdkit.Chem import AllChem
 
 
-__all__ = ["CONTROL_LABEL", "CONTROL_SHARD", "embed", "write_shards"]
+__all__ = ["CONTROL_LABEL", "CONTROL_SHARD", "embed", "write_control_shard",
+           "write_shards"]
 
 RDLogger.DisableLog("rdApp.*")
 
@@ -59,6 +60,37 @@ def embed(smiles: str, seed: int = 42) -> Chem.Mol | None:
     return mol
 
 
+def write_control_shard(out_dir: str, control_sdf: str) -> str:
+    """Write the control shard alone, relabelled and hydrogenated. Returns its path.
+
+    Hydrogens are why this is not a file copy. The crystal ligand comes from the PDB
+    with heavy atoms only - 22 of them, no H - and Meeko refuses a molecule without
+    explicit hydrogens. So the control was the ONE ligand that failed PDBQT conversion
+    while all 7,762 generated ones succeeded: those pass through embed(), which adds
+    hydrogens, and the control bypassed it.
+
+    `addCoords=True` places the hydrogens geometrically rather than re-embedding.
+    Measured heavy-atom displacement afterwards is 0.000000 A, which is the point:
+    this molecule is a control precisely because it holds the experimentally observed
+    pose, and re-embedding it would destroy the comparison.
+
+    Separated from write_shards so it can be regenerated on its own - one molecule,
+    where re-running write_shards re-embeds every survivor (~30 min for 7,767).
+    """
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    control = Chem.MolFromMolFile(control_sdf, removeHs=False)
+    if control is None:
+        raise ValueError(f"{control_sdf}: control ligand could not be read")
+    control = Chem.AddHs(control, addCoords=True)
+    control.SetProp("_Name", CONTROL_LABEL)
+    path = out / CONTROL_SHARD
+    writer = Chem.SDWriter(str(path))
+    writer.write(control)
+    writer.close()
+    return str(path)
+
+
 def write_shards(survivors_path: str, out_dir: str,
                  shard_size: int = DEFAULT_SHARD_SIZE,
                  control_sdf: str | None = None) -> dict:
@@ -71,13 +103,7 @@ def write_shards(survivors_path: str, out_dir: str,
 
     shards: list[str] = []
     if control_sdf:
-        control = Chem.MolFromMolFile(control_sdf, removeHs=False)
-        if control is None:
-            raise ValueError(f"{control_sdf}: control ligand could not be read")
-        control.SetProp("_Name", CONTROL_LABEL)
-        writer = Chem.SDWriter(str(out / CONTROL_SHARD))
-        writer.write(control)
-        writer.close()
+        write_control_shard(out_dir, control_sdf)
         shards.append(CONTROL_SHARD)
 
     failures: list[str] = []
@@ -118,7 +144,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--shard-size", type=int, default=DEFAULT_SHARD_SIZE)
     parser.add_argument("--control", default="docking/ligand_ref.sdf",
                         help="crystal ligand for the redocking control shard")
+    parser.add_argument("--control-only", action="store_true",
+                        help="rewrite only the control shard, leaving the embedded "
+                             "survivor shards alone (re-embedding 7,767 costs ~30 min)")
     args = parser.parse_args(argv)
+
+    if args.control_only:
+        path = write_control_shard(args.out_dir, args.control)
+        print(f"control shard rewritten: {path}")
+        print(f"  label: {CONTROL_LABEL}")
+        return 0
 
     counts = write_shards(args.survivors, args.out_dir, args.shard_size,
                           args.control)
