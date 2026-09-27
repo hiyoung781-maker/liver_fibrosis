@@ -22,17 +22,30 @@ What is checked:
   6. The nitrogen donor/acceptor split, because checks 1-5 all PASSED on a receptor
      that was energetically wrong.
 
-MEASURED FAILURE, kept here because checks 1-5 did not catch it. Converting the
-hydrogen-free receptor.pdb with `obabel -xr` typed 1,170 of its 1,212 nitrogens as
-`NA`, AutoDock's H-bond ACCEPTOR type. In a protein with no hydrogens Open Babel
-cannot tell a backbone amide NH (a donor) from an acceptor, so it defaulted almost
-all of them to acceptor. That rewrites the H-bond landscape of the whole protein, and
-it cost 0.5 kcal/mol: the same smina, ligand, box and settings scored -6.9 against
-receptor.pdb and -6.4 against receptor.pdbqt. Uni-Dock's -6.31 matched the PDBQT
-number, which is how the engine came to look guilty when the receptor was at fault.
+MEASURED FAILURE AND ITS FIX, kept here because checks 1-5 did not catch it.
 
-Uni-Dock accepts `--receptor` as PDB as well as PDBQT, so the route that avoids this
-entirely is to hand it the same receptor.pdb smina was validated on.
+`obabel -xr` on the hydrogen-free receptor.pdb typed 1,170 of its 1,212 nitrogens as
+`NA`, AutoDock's H-bond ACCEPTOR. In a protein without hydrogens Open Babel cannot
+tell a backbone amide NH (a donor) from an acceptor, so it defaulted nearly all of
+them to acceptor, rewriting the H-bond landscape of the whole protein. Cost: the same
+smina, ligand, box and settings scored -6.9 against receptor.pdb and -6.4 against that
+receptor.pdbqt.
+
+The fix is `-h`: add hydrogens before writing the PDBQT, so donor and acceptor become
+decidable. Typing flips from 1,170 NA / 42 N to 101 NA / 1,111 N, with 1,592 HD polar
+hydrogens, and smina scores -6.9 again - identical to the PDB.
+
+What that mis-typing did to the section 8.5(a) control is worth stating exactly,
+because it is subtle. On the corrected receptor smina's pose ranking is
+  pose 1  -6.909  Ca 2.740  Asn224 2.895  PASSES
+  pose 4  -6.670  Ca 2.357  Asn224 4.832  fails
+and pose 4 is precisely what Uni-Dock had been returning as its best. The engine was
+not finding a wrong pose; the mis-typed receptor was promoting the fourth-best pose to
+first. smina and Uni-Dock agree to within 0.1 kcal/mol on the same receptor file.
+
+Feeding Uni-Dock the raw PDB is NOT the fix - it scored -5.787 with the carboxylate
+4.59 A off the calcium, worse than either PDBQT. The hydrogenated PDBQT is the input
+to use.
 """
 
 from __future__ import annotations
@@ -121,18 +134,24 @@ def compare_anchors(source: list[dict], converted: list[dict]) -> list[dict]:
     return rows
 
 
-def convert_with_obabel(pdb_path: str, out_path: str) -> None:
-    """obabel -xr: rigid receptor, no torsions. Raises on a nonzero exit.
+def convert_with_obabel(pdb_path: str, out_path: str,
+                        add_hydrogens: bool = True) -> None:
+    """obabel -xr -h: rigid receptor, hydrogens added. Raises on a nonzero exit.
 
-    `-xr` matters: without it Open Babel tries to find rotatable bonds in the
-    protein and emits a flexible-residue PDBQT that Vina-family engines reject.
+    `-xr` matters: without it Open Babel looks for rotatable bonds in the protein and
+    emits a flexible-residue PDBQT that Vina-family engines reject.
+
+    `-h` matters more, and is the whole subject of this module's docstring: without
+    hydrogens the donor/acceptor typing is undecidable and Open Babel calls 97% of the
+    nitrogens acceptors, which costs 0.5 kcal/mol and reorders the poses. It is a
+    parameter rather than a constant only so a test can reproduce the broken receptor.
     """
     if shutil.which("obabel") is None:
         raise RuntimeError("obabel not on PATH - activate the docking/unidock env")
-    result = subprocess.run(
-        ["obabel", pdb_path, "-opdbqt", "-O", out_path, "-xr"],
-        capture_output=True, text=True,
-    )
+    cmd = ["obabel", pdb_path, "-opdbqt", "-O", out_path, "-xr"]
+    if add_hydrogens:
+        cmd.append("-h")
+    result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"obabel failed: {result.stderr.strip()[:400]}")
 
@@ -206,11 +225,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", default="docking/receptor.pdbqt")
     parser.add_argument("--verify-only", action="store_true",
                         help="skip conversion; just check an existing PDBQT")
+    parser.add_argument("--no-hydrogens", action="store_true",
+                        help="omit obabel -h. Reproduces the broken receptor that "
+                             "mistyped 97%% of nitrogens as acceptors; for tests only")
     args = parser.parse_args(argv)
 
     if not args.verify_only:
-        convert_with_obabel(args.pdb, args.out)
-        print(f"obabel: {args.pdb} -> {args.out}")
+        convert_with_obabel(args.pdb, args.out,
+                            add_hydrogens=not args.no_hydrogens)
+        print(f"obabel: {args.pdb} -> {args.out}"
+              f"{'' if args.no_hydrogens else ' (hydrogens added)'}")
     return _report(args.pdb, args.out)
 
 

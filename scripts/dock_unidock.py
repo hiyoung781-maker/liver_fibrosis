@@ -193,11 +193,12 @@ def run_multi_gpu(receptor: str, index_path: str, out_dir: str, box: dict,
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    # PDB, not PDBQT. Uni-Dock accepts either, and the PDBQT conversion of this
-    # hydrogen-free receptor mistypes 97% of its nitrogens as H-bond acceptors, worth
-    # 0.5 kcal/mol - see scripts/prepare_receptor_pdbqt.py. The PDB is also the exact
-    # representation section 8.5(a)'s -6.9 validation was measured on.
-    parser.add_argument("--receptor", default="docking/receptor.pdb")
+    # The HYDROGENATED PDBQT, written by scripts/prepare_receptor_pdbqt.py. Measured:
+    # Uni-Dock on the raw PDB scored -5.787 with the carboxylate 4.59 A off the
+    # calcium; on a PDBQT built without hydrogens, -6.31 with the Asn224 contact lost;
+    # on the hydrogenated PDBQT smina recovers -6.909 with both contacts, and smina and
+    # Uni-Dock agree to within 0.1 kcal/mol given the same file.
+    parser.add_argument("--receptor", default="docking/receptor.pdbqt")
     parser.add_argument("--ligand-index", default="docking/ligands_pdbqt/ligands.txt")
     parser.add_argument("--out-dir", default="docking/poses")
     parser.add_argument("--autobox-ligand", default="docking/ligand_ref.sdf")
