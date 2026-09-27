@@ -813,6 +813,78 @@ Both reproduce the crystal contacts and the neutral form scores slightly better.
 6. **ADMET:** apply ADMET-AI (or equivalent) to survivors — permeability proxy, solubility, microsomal stability, hERG, CYPs. **The baseline is PLN-1474, predicted with the same tool and compared prediction-to-prediction.** The earlier wording used cpd 25's *measured* liabilities (MDCK < 0.1×10⁻⁶ cm/s, oral F 1.3% [111]) as the baseline; it was revised for two reasons (§7.5).
 7. **Final selection:** roughly 10–20 leads satisfying: geometric filter pass, predicted permeability **better than PLN-1474**, **Murcko scaffold absent from §8.3's 106-member set (`data/known_scaffolds.smi`)**, clean alerts, carboxylate present. QED and NN-Tanimoto (with the name of the nearest active) are reported alongside as **metrics, not gates**.
 
+### 8.7.1 Executed — complete (2026-09-28)
+
+**389 molecules satisfy the pre-registered criteria (§9's 1–4).** All 1,586 geometry survivors are Murcko-novel and alert-free by construction (both are part of the §8.2 survivor definition), so the remaining condition is permeability, and 389 beat PLN-1474 by **more than 0.5 log**. §9 required at least one.
+
+Narrowing those to 20 leads takes two further steps that are **not in §9**. They do not change the success verdict; they choose which of the 389 to present. The distinction is recorded rather than blurred.
+
+| Step | Count | Status |
+|---|---|---|
+| Geometry pass (§8.5b) | 1,586 | **pre-registered** §9.1 |
+| Murcko-novel + alert-free | (in the survivor definition) | **pre-registered** §9.3, 9.4 |
+| Permeability beats PLN-1474 by > 0.5 log | **389** | **pre-registered** §9.2 (floor from §7.5) |
+| + affinity < −6.953 | 216 (213 distinct scaffolds) | post hoc (2026-09-28) |
+| + hepatic-weighted toxicity rank, distinct scaffolds | **20 leads** | post hoc (2026-09-28) |
+
+#### The hard filter's reference value
+
+`scripts/dock_panel.py` docks the six benchmark compounds with the **identical protocol** — engine, receptor, box and parameters imported from `dock_unidock`. smina and Uni-Dock differ by 0.16 kcal/mol on the same receptor, which is the width of a hard filter's margin, so mixing engines would let that difference decide verdicts.
+
+| Compound | poses | passing | best (all) | best (passing) |
+|---|---|---|---|---|
+| A1AFA | 2 | 2 | −7.074 | −7.074 |
+| CHEMBL4649232 | 4 | **0** | −7.962 | — |
+| CWHM-12 | 5 | 1 | −8.059 | −6.994 |
+| GLPG0187 | 9 | **0** | **−8.635** | — |
+| **PLN-1474** | 11 | 2 | −6.998 | **−6.953** |
+| bexotegrast | 16 | 8 | −6.546 | −6.546 |
+
+The reference is **−6.953**, PLN-1474's best **passing** pose. Candidates are evaluated on their passing poses too, so that is the like-for-like comparison; using the unfiltered minimum of −6.998 would compare against a pose that does not satisfy the geometry.
+
+**The panel's two best affinities produce no passing pose** — GLPG0187 at −8.635 and CHEMBL4649232 at −7.962. That is evidence the filter selects on **binding mode** rather than score, and it fits the panel's composition: four of the six carry Arg-mimic heads (THN or a cyclic amidine) and bind in the RGD zwitterionic mode. It also fits §3.4's description of GLPG0187 as pan-αv. **Failing to pass is not a defect of the compound.**
+
+#### Toxicity is a rank, not a gate
+
+The reason no absolute cutoff is usable has been measured. This chemotype runs high on DILI throughout: **the most potent published non-RGD active (CHEMBL4649232) scores 0.980 and the crystal ligand A1AFA scores 0.825.** An absolute threshold rejects the published compounds before it rejects ours.
+
+Endpoint choice and weighting follow ADMET-AI's **own reported performance**, bundled in the package. Training-set size was a misleading proxy — DILI has 475 compounds and still reaches AUROC 0.881.
+
+| Axis | Endpoint (AUROC/AUPRC) | Weight |
+|---|---|---|
+| **Hepatic** | DILI 0.881/0.878, **SR-MMP 0.925**, SR-p53 0.880, NR-AhR 0.904 | **2.0** |
+| General | hERG 0.839/0.906, AMES 0.882/0.896 | 1.0 |
+| DDI | CYP3A4 0.912, CYP2C9 0.908, CYP2D6 0.886 | 0.5 |
+
+**The hepatic weighting is an indication argument**: a liver-fibrosis drug is given to a liver that is already damaged, so hepatotoxicity is not one liability among many. And **SR-MMP (mitochondrial membrane potential disruption) is both a principal mechanism of DILI and the best-performing endpoint in the panel (0.925)**.
+
+Excluded, with the number that excludes them: ClinTox **AUPRC 0.607** (its AUROC of 0.928 is class-imbalance inflation — on a rare-positive endpoint AUPRC is the honest metric), carcinogenicity 0.608, LD50 R² 0.596, Bioavailability 0.716, Skin_Reaction 0.718. They are kept out of the score and reported beside every lead.
+
+#### An all-endpoint hard filter was measured and rejected
+
+Requiring a molecule to beat PLN-1474 on **every** toxicity endpoint leaves **zero**. PLN-1474 already scores **0.0093 on NR-AhR, 0.0208 on SR-MMP, 0.0393 on SR-p53 and 0.0437 on CYP2C9**; only 2–7% of the 216 permeability survivors beat each individually, and none beats all.
+
+The stronger reason is resolution. **Deciding that 0.0089 is "better than" 0.0093 is beyond an AUROC-0.90 classifier.** That is the same principle the 0.5 log permeability floor encodes, and an all-endpoint conjunction would violate it nine times over.
+
+#### Enforcing permeability inverts the toxicity comparison
+
+With only the affinity filter, all 20 leads beat all six panel compounds. With permeability enforced as well, only **2 of 216** beat PLN-1474's composite of 0.144.
+
+| | Toxicity | Affinity | Caco-2 | DILI |
+|---|---|---|---|---|
+| **gen_07401** | **0.116** | −7.13 | −4.979 | 0.465 |
+| **gen_07068** | **0.129** | −6.96 | −5.026 | 0.161 |
+| PLN-1474 (reference) | 0.144 | −6.95 | −5.586 | 0.455 |
+| The other 18 leads | 0.155–0.229 | −6.96 … −8.00 | −4.69 … −5.08 | 0.25–0.97 |
+
+**The two axes pull against each other.** A more permeable molecule is more lipophilic, and that raises the hERG, CYP and DILI predictions. Of the 389 satisfying §9's criteria 1–4, **11** also beat PLN-1474 on the toxicity composite.
+
+**This is §9's pre-registered "carboxylate–permeability tension", measured.** It appears as a **gradient** rather than as outright failure: molecules satisfying the conditions are plentiful, but tightening one condition degrades another. The same effect shows in the earlier figures — 45.3% of the §8.2 set beat PLN-1474 past the noise floor on permeability, against 24.5% of the geometry survivors.
+
+Every lead is printed with **its per-endpoint values beside PLN-1474's**, so a reader sees which endpoints are better and which are worse rather than trusting one composite. Several leads exceed 0.9 on DILI (gen_06181 0.950, gen_02263 0.951, gen_07100 0.967).
+
+The artifacts are `results/leads.csv` and `logs/leads.txt`, produced by `scripts/dock_panel.py` and `scripts/select_leads.py`.
+
 ---
 
 ## 9. Pre-registered success criteria (freeze before D6 sampling)
@@ -825,6 +897,44 @@ Through the **identical** funnel, the proposal succeeds if at least one generate
 5. and, scored with the identical funnel and tools as the six positive-panel compounds (A1AFA, PLN-1474, bexotegrast, CWHM-12, GLPG0187, CHEMBL4649232), is comparable on **non-circular axes** — passes the docking geometric filter on equal footing, **beats PLN-1474 on ADMET-AI permeability**, and has a novel Murcko scaffold. **Total score is not used for comparison** (it is the value of an objective function we designed, so it is circular — §3.4, §5.4; §7.2 confirms this numerically). The negative-panel clause is dropped (§3.4).
 
 **Falsification clause:** if nothing satisfies 1–4, report exactly that. It is evidence the carboxylate–permeability tension may be **target-intrinsic** — which is itself a finding, and the honest answer to the strongest attack on this project.
+### 9.6 Verdict — met (2026-09-28)
+
+**389 generated molecules satisfy criteria 1–4.** §9 required at least one.
+
+| Criterion | Verdict | Basis |
+|---|---|---|
+| 1. Geometric filter (MIDAS + Asn224) | ✅ | 1,586 / 7,763 = 20.4% (§8.5.1) |
+| 2. Predicted permeability beats PLN-1474 | ✅ | 1,321 beat it; **389 beat it by more than 0.5 log** |
+| 3. Murcko scaffold absent from the 106-member set | ✅ | part of the §8.2 survivor definition |
+| 4. No CustomAlerts flag | ✅ | part of the §8.2 survivor definition |
+| 5. Non-circular comparison against the positive panel | ✅ (with a caveat) | below |
+
+**Criterion 2 is judged with a 0.5 log margin.** That is §7.5's floor: model error (Caco-2 MAE 0.26–0.28) is the size of inter-laboratory disagreement on the same compound (median 0.57 log), so a smaller gap cannot be called beating. Counted without the margin the figure is 1,321, but **the usable number is 389.**
+
+**The caveat on criterion 5.** The comparison holds on three axes — the geometric filter was applied to the panel with the identical protocol (§8.7.1), permeability was compared prediction-to-prediction within one ADMET run, and Murcko novelty holds by definition. But **two of the six panel compounds (GLPG0187, CHEMBL4649232) produce no passing pose.** That is expected, since four of the six are RGD zwitterions and our filter describes a non-RGD binding mode, but taken literally "passes on equal footing" does not hold against those two on that axis. Recorded rather than hidden.
+
+### 9.7 What §7.5's revisions do to this section
+
+§7.5 changed two things, and they change how this section reads.
+
+**The benchmark compound moved from cpd 25 to PLN-1474.** Criteria 2 and 5 are already updated. cpd 25 was never proposed as a lead, so beating it was not a finding, and the old wording set **our prediction against cpd 25's measured** liabilities — not a like-for-like comparison. It is now prediction-to-prediction with ADMET-AI applied to both sides.
+
+**ADMET is a screen, not a gate.** Permeability remains a pre-registered criterion under item 2, but **no toxicity endpoint is a §9 criterion at all.** That is why §8.7.1 uses toxicity only as a rank. The basis is what §7.5 investigated: an independent audit found TDC leaderboard positions largely unreproducible; ADMET-AI itself reports R² ≤ 0.6 on five of its ten regression endpoints; and its Caco-2 prediction correlates with TPSA at r = −0.553, so **an axis we put into the objective ourselves accounts for roughly a third of the signal.**
+
+How the poster treats toxicity follows from this — as far as saying that liabilities were screened at the lead stage, with any unfavourable endpoint given one short line: the AI predicted a risk, the model's performance does not reach a level that can be relied on, so wet-lab verification is required. No deeper interpretation.
+
+### 9.8 The falsification clause did not fire — but the tension was measured
+
+With 389 molecules satisfying criteria 1–4, the falsification clause above does not fire. Yet the **carboxylate–permeability tension it pointed at is real, and it appeared as a gradient rather than as outright failure.**
+
+| Set | Beating PLN-1474 on permeability by more than 0.5 log |
+|---|---|
+| §8.2 survivors, 7,767 | **45.3%** |
+| Geometry survivors, 1,586 | **24.5%** |
+
+**Passing the geometric filter itself costs predicted permeability.** Making the MIDAS Ca²⁺ contact and the Asn224 hydrogen bond at once requires polar functionality in specific positions, and that raises TPSA. The toxicity axis then runs opposite to permeability: of the 389 satisfying criteria 1–4, **11** also beat PLN-1474 on the toxicity composite.
+
+So the three axes — geometry, permeability, toxicity — push against one another. Tightening any one degrades the others, and molecules satisfying all of them still remain. **That is the most honest form of result this project can report**: the tension is real but not insurmountable — a weaker conclusion than the "intrinsic to the target" outcome the falsification clause anticipated.
 
 ---
 
@@ -839,7 +949,7 @@ Through the **identical** funnel, the proposal succeeds if at least one generate
 | D5 | RL single stage, steps 300–600 | final agent; watch for collapse onto known series (NN-Tanimoto rising above 0.6 → raise DF `minscore` 0.4 → 0.5, restart from an earlier checkpoint if needed). **No similarity-weight adjustment is possible** — that component is not in the objective (§5.2) |
 | D6 | Sampling 20k **(complete)**; benchmark panel scoring **(complete, §7.1)** | `data/library.smi` 19,485 + `data/library_prior.smi` 18,346 (§6.1); reference score distributions |
 | D7 | Docking setup + TR01225179 redocking validation **(complete)** | smina passed at 0.63 Å RMSD (§8.5a); Uni-Dock revalidated — Ca501 2.682 / Asn224 2.920 Å (§8.5.1). No fallback needed |
-| D8 | Dock + geometric filter **(complete)** + ADMET **(provisional)** + counter-screens **(withdrawn, §8.4)** | 1,587 of 7,763 = 20.4% pass geometry (`results/geometry.csv`, §8.5.1); provisional ADMET in `logs/admet_summary.txt`. Outstanding: §8.4's three selectivity observations, §8 item 7 final selection |
+| D8 | Dock + geometric filter + §8.4 observations + ADMET + final selection **(all complete)** | 1,586 geometry-passing candidates (§8.5.1) → **389** satisfying §9's criteria 1–4 (§9.6) → **20 leads** after the affinity filter and toxicity rank (§8.7.1). Artifacts: `results/{geometry,selectivity,panel_geometry,admet_survivors,leads}.csv`, `logs/leads.txt`. Counter-screens withdrawn (§8.4) |
 | D9 | Benchmark comparison, lead selection, results table + figures | top 10–20 leads |
 | D10 | Buffer: poster assembly (pocket figures already done), 7-min talk rehearsal, attack-surface prep | — |
 
