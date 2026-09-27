@@ -495,7 +495,32 @@ Pass rates for each cut alone: `logP ≤ 5` is 46.5% agent / 90.1% prior; `TPSA 
 
 Tautomer duplicates: **0** in the agent arm, **1** in the prior; zero normalization failures in both. Normalization therefore **did no work as a deduplicator.** This does not weaken §8.0, whose claim was never deduplication but comparison symmetry — the reference and measured sides must pass through the same normalization, evidenced by §8.3's finding that PLN-1474's two tautomers yield different Murcko SMILES. But **the claim "normalization filters out duplicates" is unsupported by this measurement and is not made.**
 
-Column 1 vs column 2: 19,179 of 19,485 are identical; the carboxylate verdict differs on **4** and the alert verdict on **31** (prior: 9 and 347). The total-score shift is 0.000 through p90, so **percentiles alone read as zero** and the whole effect sits in the tail. That is why `library_report.py` reports `n_shifted` and `max_shift` beside the percentiles.
+### 6.5 Column 1 vs column 2 — the objective's verdict flips with the representation
+
+| | agent (19,485) | prior (18,346) |
+|---|---|---|
+| columns identical | 19,179 | 16,488 |
+| columns differ | 306 | 1,858 |
+| total score moves at all | **205** | **1,207** |
+| shift > 0.5 | 24 | 21 |
+| **shift = 1.000 (full reversal)** | **19** | **10** |
+
+The shift percentiles read 0.000 through p90. **Percentiles alone make the effect look like zero.** In fact 205 agent molecules (1.05%) move, and 19 of them swing between a perfect objective score and zero. That is why `library_report.py` reports `n_shifted` and `max_shift` beside the percentiles — recording this first as "31 alerts differ" understated it.
+
+**Mechanism: amidine ↔ 2-aminoazole tautomerism.** The generator writes the exocyclic-imine form (`Cc1[nH]c(=NC(=O)Cc2ccccc2F)sc1CCC(=O)O`); normalization returns the aromatic 2-aminothiazole (`Cc1nc(NC(=O)Cc2ccccc2F)sc1CCC(=O)O`). In every large case **TPSA and SAScore read 1.000 on both sides**, and the component that flips is the **alert/PAINS filter alone**. PAINS by itself accounts for 15 of the agent's 31 flips and 43 of the prior's 347.
+
+**Direction: normalization is stricter, not looser.**
+
+| | gains alert-free | loses alert-free |
+|---|---|---|
+| agent | 11 | **20** |
+| prior | 30 | **317** |
+
+**Caution — the tail sample shows the direction backwards.** Among the six largest shifts, five *gain* alert-free status on normalization and only one loses it. The aggregate runs the other way (11 gained, 20 lost). Only a molecule whose other components all read 1.000 can produce a shift of 1.000, so the extreme tail does not represent the whole. This document's draft misread the mechanism's direction from those top six; counting the aggregate corrected it.
+
+**The carboxylate verdict differs too.** Normalization costs the agent the MIDAS anchor on **4** molecules and gains it on none; for the prior it gains **9** and loses none. This is exactly the case `library_report.py`'s docstring flags as the serious one — small at 0.02% (agent), but real.
+
+**Two conclusions.** First, applying §8.1's alert and carboxylate hard cuts to **column 1, as currently designed, is correct** — 2-aminothiazole is a common, benign medicinal-chemistry motif, and PAINS catching its exocyclic-imine spelling is an artefact of representation, not chemistry. Second, **the RL run log's alert statistics are column-2 statistics and cannot be quoted as the library's alert rate.** §6.2's 96.9% is the column-1 figure, and that is the one to cite.
 
 ## 7. Step 4 — Scoring the benchmark panel (D6, after sampling)
 
