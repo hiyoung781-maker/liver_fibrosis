@@ -1,11 +1,58 @@
 # 외부 도구 (각자 원래 저장소가 따로 있음)
 Geneformer/
 REINVENT4/
+
 # 원본·다운로드 데이터
 opentarget/
 geo_data/
+msigdb/
 *.tar
 *.rds
-#claude
+
+# 배포 문서 (저작권이 있거나 외부에서 받은 PDF)
+papers/
+*.pdf
+
+# claude
 CLAUDE.md
 geo_data.ipynb
+
+# ─── 실행 산출물 ───────────────────────────────────────────────────────
+# 아래는 모두 재생성 가능하거나 캐시이며, 합계가 460 MB를 넘는다.
+# 의미 있는 파생물은 별도로 추적한다 — data/library.smi, data/survivors.smi,
+# data/known_scaffolds.smi, data/novelty_band.json, docking/*.pdb(qt)/sdf.
+
+# 모델 가중치 156 MB. scripts/run_d3.sh가 prior를 재생성하고, RL 체크포인트는
+# configs/의 sampling config가 가리키는 대상이다.
+priors/
+*.prior
+*.chkpt
+
+# 실행 로그 204 MB. 두 예외를 남긴다:
+#   logs/cmp.vigHoB/  — tests/test_known_scaffolds.py가 samples_prior.csv를 읽고
+#                       §5.4가 new3.csv를 목적함수 재구현 검증 근거로 인용한다
+#   logs/*.txt        — §6·§7·§8 측정 요약. 수 KB이며 블루프린트가 인용한다
+logs/*
+!logs/cmp.vigHoB/
+!logs/*.txt
+
+# 실행 출력 100 MB. §7 산출물만 남긴다.
+results/*
+!results/score_panel.csv
+!results/panel_curated.smi
+
+# W&B 로컬 캐시, ChEMBL/PubChem API 응답 캐시
+wandb/
+data/.cache/
+
+# 파이썬 바이트코드
+__pycache__/
+*.pyc
+*.pyo
+
+# 이전 프로젝트의 실행 추적 — plan.md와 같은 시기의 산물이다
+execution_trace/
+
+# 스크래치
+*.swp
+.DS_Store

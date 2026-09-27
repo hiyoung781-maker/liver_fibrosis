@@ -1,0 +1,17 @@
+label,dist,kind,note
+b1  Asn224,2.63,H-bond,backbone O <- ligand amide NH
+b1  Leu225,2.95,H-bond region,backbone O; H-bond donor designed in later analogs
+b1  Ser134,3.04,polar (MIDAS loop),OG near carboxylate
+b1  Pro186,3.16,hydrophobic,dichlorophenyl subpocket
+b1  Tyr133,3.17,hydrophobic,dichlorophenyl subpocket
+b1  Ser132,3.21,polar (MIDAS loop),OG near carboxylate
+b1  Glu229,3.3,polar,OE2 near carboxylate
+b1  Gly223,3.39,close contact,
+b1  Ser227,3.63,polar,
+aV  Tyr178,3.7,aromatic (T-shaped),"phenol vs ligand phenyl; centroid 6.2 A, 75 deg"
+b1  Asp226,3.78,polar,
+b1  Lys182,3.82,polar,NZ near aryl chloride
+b1  Cys187,3.88,hydrophobic,dichlorophenyl subpocket
+b1  Ca501 (MIDAS),2.62,metal coordination,"carboxylate OXT, monodentate"
+aV  HOH2107 (interface),4.68,interface water,bridges aV-Glu121 / b1-Ser177; design target
+aV  Asp218 (not engaged),7.0,growth vector,engaged by benzimidazolone NH in cpd 25

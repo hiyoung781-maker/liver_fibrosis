@@ -1,0 +1,51 @@
+known scaffolds: 106 from data/known_scaffolds.smi
+
+=== data/library.smi  (19485 molecules) ===
+-- properties --
+  MW             p10=331.37 p25=378.43 med=431.44 p75=487.36 p90=543.61
+  cLogP          p10=2.93 p25=4.00 med=5.15 p75=6.28 p90=7.34
+  TPSA           p10=50.86 p25=62.22 med=74.25 p75=87.49 p90=101.21
+  HBD            p10=1.00 p25=1.00 med=1.00 p75=2.00 p90=2.00
+  HBA            p10=2.00 p25=3.00 med=4.00 p75=4.00 p90=5.00
+  RotB           p10=4.00 p25=5.00 med=7.00 p75=9.00 p90=12.00
+  AromaticRings  p10=2.00 p25=3.00 med=4.00 p75=4.00 p90=5.00
+  HeavyAtoms     p10=24.00 p25=28.00 med=31.00 p75=35.00 p90=40.00
+  QED            p10=0.20 p25=0.29 med=0.44 p75=0.62 p90=0.77
+-- RL objective (section 5.1) --
+  carboxylate     0.967
+  alert-free      0.969
+  SAScore        p10=2.22 p25=2.42 med=2.73 p75=3.09 p90=3.45
+  total          p10=0.75 p25=1.00 med=1.00 p75=1.00 p90=1.00
+-- novelty (section 8.3) --
+  Murcko-novel    0.997   unique scaffolds 17268   acyclic 3
+  NN-Tanimoto    p10=0.29 p25=0.31 med=0.34 p75=0.36 p90=0.39
+-- normalization discrepancy (column 1 vs column 2) --
+  identical       19179/19485
+  carboxylate differs  4   alerts differ  31
+  |score shift|  p10=0.00 p25=0.00 med=0.00 p75=0.00 p90=0.00
+  shifted at all  205/19485   max shift 1.000
+
+=== data/library_prior.smi  (18346 molecules) ===
+-- properties --
+  MW             p10=277.28 p25=336.39 med=417.36 p75=494.29 p90=576.93
+  cLogP          p10=0.33 p25=1.43 med=2.62 p75=3.85 p90=4.99
+  TPSA           p10=53.09 p25=73.33 med=102.35 p75=136.96 p90=167.69
+  HBD            p10=1.00 p25=2.00 med=3.00 p75=4.00 p90=5.00
+  HBA            p10=3.00 p25=3.00 med=5.00 p75=6.00 p90=7.00
+  RotB           p10=3.00 p25=5.00 med=7.00 p75=9.00 p90=13.00
+  AromaticRings  p10=1.00 p25=2.00 med=2.00 p75=3.00 p90=4.00
+  HeavyAtoms     p10=19.00 p25=23.00 med=29.00 p75=34.00 p90=40.00
+  QED            p10=0.19 p25=0.32 med=0.50 p75=0.69 p90=0.80
+-- RL objective (section 5.1) --
+  carboxylate     0.515
+  alert-free      0.917
+  SAScore        p10=2.14 p25=2.46 med=2.85 p75=3.21 p90=3.60
+  total          p10=0.00 p25=0.00 med=0.00 p75=0.11 p90=1.00
+-- novelty (section 8.3) --
+  Murcko-novel    0.875   unique scaffolds 11875   acyclic 254
+  NN-Tanimoto    p10=0.24 p25=0.29 med=0.35 p75=0.45 p90=0.58
+-- normalization discrepancy (column 1 vs column 2) --
+  identical       16488/18346
+  carboxylate differs  9   alerts differ  347
+  |score shift|  p10=0.00 p25=0.00 med=0.00 p75=0.00 p90=0.00
+  shifted at all  1207/18346   max shift 1.000

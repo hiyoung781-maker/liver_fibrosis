@@ -1,0 +1,36 @@
+
+=== as-curated (data/benchmark_panel.smi) ===
+compound            COOH    TPSA  SAScore  alerts |   total
+A1AFA              1.000   1.000    1.000       1 |   1.000
+bexotegrast        1.000   0.723    1.000       1 |   0.878
+CWHM-12            1.000   0.000    1.000       1 |   0.001
+GLPG0187           1.000   0.000    1.000       1 |   0.001
+PLN-1474           1.000   0.996    1.000       1 |   0.998
+CHEMBL4649232      1.000   0.001    1.000       1 |   0.060
+  total is recorded, NOT a basis for comparison (§3.4, §5.4)
+
+=== normalized (§8.0) - the arm §9.5 compares against ===
+compound            COOH    TPSA  SAScore  alerts |   total
+A1AFA              1.000   1.000    1.000       1 |   1.000
+bexotegrast        1.000   0.723    1.000       1 |   0.878
+CWHM-12            1.000   0.000    1.000       1 |   0.001
+GLPG0187           1.000   0.000    1.000       1 |   0.001
+PLN-1474           1.000   0.996    1.000       1 |   0.998
+CHEMBL4649232      1.000   0.001    1.000       1 |   0.060
+  total is recorded, NOT a basis for comparison (§3.4, §5.4)
+
+=== normalization moves which compounds? ===
+  A1AFA            unchanged
+  bexotegrast      unchanged
+  CWHM-12          unchanged
+  GLPG0187         unchanged
+  PLN-1474         unchanged
+  CHEMBL4649232    unchanged
+
+=== cross-check vs REINVENT (as-curated): max |difference| ===
+  total      2.519e-09
+  cooh       0.000e+00
+  tpsa       1.635e-08
+  sascore    0.000e+00
+  alerts     0.000e+00
+  worst component: 1.635e-08  -> AGREE

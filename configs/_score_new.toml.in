@@ -1,0 +1,93 @@
+run_type = "scoring"
+device = "cuda:0"
+
+[parameters]
+smiles_file = "{SMILES}"
+output_csv = "{OUT}"
+
+[scoring]
+type = "geometric_mean"
+
+[[scoring.component]]
+[scoring.component.TanimotoSimilarity]
+[[scoring.component.TanimotoSimilarity.endpoint]]
+name = "sim A1AFA"
+weight = 1
+params.smiles = ["O=C(NC(Cc1ccccc1)C(=O)O)c1ccc(Cl)cc1Cl"]
+params.radius = 3
+params.use_counts = true
+params.use_features = true
+transform.type = "sigmoid"
+transform.low = 0.25
+transform.high = 0.45
+transform.k = 0.5
+
+[[scoring.component]]
+[scoring.component.TanimotoSimilarity]
+[[scoring.component.TanimotoSimilarity.endpoint]]
+name = "sim CHEMBL4649232"
+weight = 1
+params.smiles = ["CCNC(=O)Nc1cnnc(-c2ccc(CC(NC(=O)c3c(Cl)cccc3Cl)C(=O)O)cc2)c1"]
+params.radius = 3
+params.use_counts = true
+params.use_features = true
+transform.type = "sigmoid"
+transform.low = 0.25
+transform.high = 0.45
+transform.k = 0.5
+
+[[scoring.component]]
+[scoring.component.TanimotoSimilarity]
+[[scoring.component.TanimotoSimilarity.endpoint]]
+name = "sim CHEMBL5532604"
+weight = 1
+params.smiles = ["Cc1ccc(Cl)c(C(=O)NC(CNC(=O)Cn2c(=O)[nH]c3nc(C)c(F)cc32)C(=O)O)c1F"]
+params.radius = 3
+params.use_counts = true
+params.use_features = true
+transform.type = "sigmoid"
+transform.low = 0.25
+transform.high = 0.45
+transform.k = 0.5
+
+[[scoring.component]]
+[scoring.component.MatchingSubstructure]
+[[scoring.component.MatchingSubstructure.endpoint]]
+name = "carboxylic acid"
+weight = 2
+params.smarts = "[CX3](=O)[OX2H1,OX1-]"
+params.use_chirality = false
+
+[[scoring.component]]
+[scoring.component.TPSA]
+[[scoring.component.TPSA.endpoint]]
+name = "TPSA"
+weight = 1
+transform.type = "double_sigmoid"
+transform.high = 120.0
+transform.low = 40.0
+transform.coef_div = 120.0
+transform.coef_si = 20.0
+transform.coef_se = 20.0
+
+[[scoring.component]]
+[scoring.component.SlogP]
+[[scoring.component.SlogP.endpoint]]
+name = "SlogP"
+weight = 1
+transform.type = "reverse_sigmoid"
+transform.low = 2.0
+transform.high = 5.0
+transform.k = 0.4
+
+[[scoring.component]]
+[scoring.component.Qed]
+[[scoring.component.Qed.endpoint]]
+name = "QED"
+weight = 1
+
+[[scoring.component]]
+[scoring.component.CustomAlerts]
+[[scoring.component.CustomAlerts.endpoint]]
+name = "alerts"
+params.smarts = ["[*;r8]", "[*;r9]", "[*;r10]", "N=[N+]=[N-]", "C(=O)Cl", "[SH]", "[Nr0][Nr0]"]

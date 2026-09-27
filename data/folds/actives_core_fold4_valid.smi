@@ -1,0 +1,8 @@
+# TL diagnostic fold 4/5, valid (5/29), scaffold-disjoint, seed 20260925.
+# For choosing num_epochs only. The production prior trains on the
+# full actives_core.smi with the epoch count these folds identify.
+O=C(NC(Cc1ccccc1)C(=O)O)c1ccc(Cl)cc1Cl	A1AFA
+CC(=O)NCC(NC(=O)c1c(Cl)cccc1Cl)C(=O)O	CHEMBL5557674
+CCNC(=O)Nc1cnnc(-c2ccc(CC(NC(=O)c3c(Cl)cccc3Cl)C(=O)O)cc2)c1	CHEMBL4649232
+O=C(CN1C(=O)NCc2ccccc21)NCC(NC(=O)c1ccccc1Cl)C(=O)O	CHEMBL5558562
+O=C(CN1Cc2ccccc2NC1=O)NCC(NC(=O)c1ccccc1Cl)C(=O)O	CHEMBL5527950

@@ -1,0 +1,99 @@
+run_type = "scoring"
+device = "cuda:0"
+
+[parameters]
+smiles_file = "logs/cmp.vigHoB/molecules.smi"
+output_csv = "logs/cmp.vigHoB/new.csv"
+
+[scoring]
+type = "geometric_mean"
+
+[[scoring.component]]
+[scoring.component.TanimotoSimilarity]
+[[scoring.component.TanimotoSimilarity.endpoint]]
+name = "sim A1AFA"
+weight = 1
+params.smiles = ["O=C(NC(Cc1ccccc1)C(=O)O)c1ccc(Cl)cc1Cl"]
+params.radius = 3
+params.use_counts = true
+params.use_features = true
+transform.type = "double_sigmoid"
+transform.low = 0.20
+transform.high = 0.70
+transform.coef_div = 0.70
+transform.coef_si = 15
+transform.coef_se = 15
+[[scoring.component]]
+[scoring.component.TanimotoSimilarity]
+[[scoring.component.TanimotoSimilarity.endpoint]]
+name = "sim CHEMBL4649232"
+weight = 1
+params.smiles = ["CCNC(=O)Nc1cnnc(-c2ccc(CC(NC(=O)c3c(Cl)cccc3Cl)C(=O)O)cc2)c1"]
+params.radius = 3
+params.use_counts = true
+params.use_features = true
+transform.type = "double_sigmoid"
+transform.low = 0.20
+transform.high = 0.70
+transform.coef_div = 0.70
+transform.coef_si = 15
+transform.coef_se = 15
+[[scoring.component]]
+[scoring.component.TanimotoSimilarity]
+[[scoring.component.TanimotoSimilarity.endpoint]]
+name = "sim PLN-1474"
+weight = 1
+params.smiles = ["CC1(C(=O)NC(CCCCCCCc2ccc3c(n2)NCCC3)C(=O)O)CCOCC1"]
+params.radius = 3
+params.use_counts = true
+params.use_features = true
+transform.type = "double_sigmoid"
+transform.low = 0.20
+transform.high = 0.70
+transform.coef_div = 0.70
+transform.coef_si = 15
+transform.coef_se = 15
+[[scoring.component]]
+[scoring.component.MatchingSubstructure]
+[[scoring.component.MatchingSubstructure.endpoint]]
+name = "carboxylic acid"
+weight = 2
+params.smarts = "[CX3](=O)[OX2H1,OX1-]"
+params.use_chirality = false
+[[scoring.component]]
+[scoring.component.TPSA]
+[[scoring.component.TPSA.endpoint]]
+name = "TPSA"
+weight = 1
+transform.type = "double_sigmoid"
+transform.high = 120.0
+transform.low = 40.0
+transform.coef_div = 120.0
+transform.coef_si = 20.0
+transform.coef_se = 20.0
+
+[[scoring.component]]
+[scoring.component.SlogP]
+[[scoring.component.SlogP.endpoint]]
+name = "SlogP"
+weight = 1
+# Measured: the sampled median SlogP is 3.29, and the previous window (low 1, high 4,
+# k 0.5) scored 0.13 at SlogP 3.0 - a near-permanent veto, median component score 0.041.
+# This window keeps the same direction with a usable gradient: 3.0 -> 0.82, 3.5 -> 0.50,
+# 4.0 -> 0.18.
+transform.type = "reverse_sigmoid"
+transform.low = 2.0
+transform.high = 5.0
+transform.k = 0.4
+
+[[scoring.component]]
+[scoring.component.Qed]
+[[scoring.component.Qed.endpoint]]
+name = "QED"
+weight = 1
+
+[[scoring.component]]
+[scoring.component.CustomAlerts]
+[[scoring.component.CustomAlerts.endpoint]]
+name = "alerts"
+params.smarts = ["[*;r8]", "[*;r9]", "[*;r10]", "N=[N+]=[N-]", "C(=O)Cl", "[SH]", "[Nr0][Nr0]"]

@@ -1,0 +1,35 @@
+02:47:21 <INFO> Started REINVENT 4.5.11 (C) AstraZeneca 2017, 2023 on 2026-09-26
+02:47:21 <INFO> Command line: /home/seyoung/miniconda3/envs/reinvent/bin/reinvent -l logs/cmp.vigHoB/sample_prior.log logs/cmp.vigHoB/sample_prior.toml
+02:47:21 <INFO> Reading run configuration from /home/seyoung/academic_symposium/liver_fibrosis/logs/cmp.vigHoB/sample_prior.toml using format toml
+02:47:21 <INFO> User seyoung on host webserver1
+02:47:21 <INFO> Python version 3.11.16
+02:47:21 <INFO> PyTorch version 2.5.1+cu118, git a8d6afb511a69687bbb2b7e88a3cf67917e1697e
+02:47:21 <INFO> PyTorch compiled with CUDA version 11.8
+02:47:21 <INFO> RDKit version 2026.03.6
+02:47:21 <INFO> Platform Linux-5.4.0-216-generic-x86_64-with-glibc2.35
+02:47:21 <INFO> Number of PyTorch CUDA devices 1
+02:47:21 <INFO> Using CUDA device:0 NVIDIA TITAN Xp
+02:47:24 <INFO> GPU memory: 11687 MiB free, 12196 MiB total
+02:47:24 <INFO> Starting Sampling
+02:47:24 <INFO> /home/seyoung/academic_symposium/liver_fibrosis/priors/focused_A.prior has valid hash:
+{ 'comments': ['TL'],
+  'creation_date': 0,
+  'date_format': 'UNIX epoch',
+  'hash_id': 'deee916890f3bfc25094b82fe1fc51c2',
+  'hash_id_format': 'xxhash.xxh3_128_hex 3.8.1',
+  'model_id': '55d68f8a81c04f5a86304ebe1723a0ea',
+  'model_id_format': 'uuid.uuid4 3.10.12',
+  'origina_data_source': 'ChEMBL 25',
+  'updates': [1790357496.3998592]}
+02:47:24 <INFO> Number of network parameters: 5,805,602
+02:47:24 <INFO> Network architecture:
+RNN(
+  (_embedding): Embedding(34, 256)
+  (_rnn): LSTM(256, 512, num_layers=3, batch_first=True)
+  (_linear): Linear(in_features=512, out_features=34, bias=True)
+)
+02:47:24 <INFO> Using generator Reinvent
+02:47:24 <INFO> Writing sampled SMILES to CSV file logs/cmp.vigHoB/samples_prior.csv
+02:47:24 <INFO> Sampling 500 SMILES from model priors/focused_A.prior
+02:47:25 <INFO> Peak main memory usage: 2264.512 MiB
+02:47:25 <INFO> Finished REINVENT on 2026-09-26
