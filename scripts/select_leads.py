@@ -107,6 +107,14 @@ REFERENCE = "PLN-1474"
 PERMEABILITY_FLOOR = 0.5
 PERMEABILITY_ENDPOINT = "Caco2_Wang"
 
+# Vina-family scores for drug-like ligands fall in roughly -4 to -13 kcal/mol. 218 of
+# the 7,763 docked molecules (1.07% of poses) carry values outside that - down to
+# -226.61 and up to +50.08 - from poses that clashed or sat 7-14 A off the site. None of
+# them has a geometry-passing pose, so nothing downstream was affected; this guard makes
+# that a property of the code rather than a fact about one run. An affinity-ranked
+# selection would have put -226.61 first.
+AFFINITY_RANGE = (-15.0, 0.0)
+
 TOXICITY_WEIGHTS = {
     # hepatic - the indication is liver fibrosis
     "DILI": 2.0,
@@ -168,6 +176,9 @@ def best_pose_per_ligand(geometry_csv: str) -> dict[str, dict]:
             try:
                 affinity = float(row["affinity"])
             except (KeyError, TypeError, ValueError):
+                continue
+            low, high = AFFINITY_RANGE
+            if not low <= affinity <= high:
                 continue
             label = row["label"]
             if label not in best or affinity < float(best[label]["affinity"]):
