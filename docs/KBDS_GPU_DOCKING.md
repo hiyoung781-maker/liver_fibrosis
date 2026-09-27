@@ -12,10 +12,22 @@ remote fails with `Permission denied (publickey)`. The repository is public, so
 read-only HTTPS needs no credentials at all — no key to generate, no token:
 
 ```bash
+# ON THE LOGIN NODE. A compute node cannot resolve github.com at all:
+#   fatal: unable to access ... Could not resolve host: github.com
 cd /home01/<user>/liver_fibrosis
 git remote set-url origin https://github.com/hiyoung781-maker/liver_fibrosis.git
 git pull
 ```
+
+Then return to the compute node — `/home01` is shared Lustre, so the pull is already
+visible there:
+
+```bash
+srun --jobid=<your running jobid> --pty bash
+```
+
+The division is absolute on this cluster: **anything that moves code or packages runs
+on the login node; only computation runs on the compute node.**
 
 Pushing from K-BDS is not set up and is not needed: code travels K-BDS-ward through
 git, and results come back by ordinary file transfer. The pose SDF is ~350 MB and
