@@ -37,10 +37,15 @@ logs/*
 !logs/*.txt
 
 # 실행 출력 100 MB. §7 산출물만 남긴다.
+# 실행 출력 100 MB. 요약 산출물만 남긴다 — 이들이 하류 단계의 입력이고
+# 수 MB 이하다. 큰 것(rl_1.csv 24 MB, rl_final.chkpt 32 MB)은 위의 *.chkpt와
+# 이 패턴이 막는다.
 results/*
 !results/score_panel.csv
 !results/panel_curated.smi
 !results/geometry.csv
+!results/selectivity.csv
+!results/admet_survivors.csv
 
 # 도킹 중간 산출물. §8.5 실행이 만드는 것들이며 재생성 가능하다.
 #   docking/poses/          리간드별 출력 PDBQT 7,763개

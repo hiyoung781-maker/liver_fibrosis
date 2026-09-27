@@ -653,6 +653,23 @@ Order matters — cheap to expensive:
    **What (ii)'s 7.00 Å refers to is also made explicit.** §1's pocket table row 5, "the 8W30 hit does not engage (7.0 Å)", is the distance to the nearest ligand atom of ANY kind — an aromatic CH. The nearest neutral donor is **12.35 Å**. `scripts/selectivity_observations.py` reports both, so the documented number is reproducible from the script.
 
    The measurement is `scripts/selectivity_observations.py`, and `tests/test_selectivity_observations.py` asserts that it reproduces every recorded 8W30 value (nearest 3.70, centroid 6.21, ring angle 74.5°, Asp218 7.00, Leu225 3.69) and that **the crystal structure passes (i) and (iii)**. That the old centroid criterion rejected it is kept as a test too, so the criterion cannot drift back.
+
+### 8.4.1 Measured — 4,065 passing poses (2026-09-28)
+
+| Observation | poses | rate |
+|---|---|---|
+| (i) β1-Leu225 side-chain contact | 2,612 | **64.3%** |
+| (iii) αv-Tyr178 stack | 1,076 | **26.5%** |
+| (i) and (iii) together | — | `results/selectivity.csv` |
+| (ii) **reaches** Asp218 within 4.0 Å | **5** | **0.1%** |
+| of those, neutral donor | 2 | |
+| of those, basic head | 3 | |
+
+**Almost nothing reaches Asp218, and that agrees with the crystal structure**, whose ligand also sits 7.00 Å away. It is the expected result given §1's pocket table leaves Asp218 as a "growth vector, **deliberately not encoded** as a substructure filter" — the objective never asked for that contact, so generated molecules had no reason to make it.
+
+**No "all three" conjunction is reported.** Criterion (ii) asks about the **character** of a contact, and its **basic** case is the one literature ties to pan-αv activity (GSK3008348's 1,8-naphthyridine salt bridge [114]; Sabat's THN introduction [111]). Multiplying that into a merit score points the wrong way, and it makes a molecule that never reaches Asp218 look like it failed something. With a 0.1% reach rate, any conjunction including (ii) is ~0 by arithmetic and says nothing about the molecules. (i) and (iii) are reported together; (ii) is reported as the **character distribution among the poses that do reach**.
+
+This is still **not evidence of selectivity**. Every caveat above applies unchanged: the α-subunit axis is untouched, no selectivity-conferring contact has been observed crystallographically for this target, and measured cross-isoform IC50 remains the only basis.
 5. **Docking — a geometric filter, not an affinity ranking:**
    - Receptor: 8W30 chains A+B; strip ligand TR01225179 and **all** waters (that is the method; the HOH2107 sensitivity run is withdrawn — reasons under *Water treatment* below)
    - Tool: smina / AutoDock Vina; ~20 Å box on the ligand centroid
@@ -728,9 +745,11 @@ Even the monodentate coordination is reproduced. Raising `exhaustiveness` from 1
 |---|---|
 | poses | 42,419 (5.5 per ligand) |
 | passing poses | 4,065 |
-| **ligands passing geometry** | **1,587 / 7,763 = 20.4%** |
+| **ligands passing geometry** | **1,587 / 7,763 = 20.4%** (control included) |
 
 The whole funnel: 19,485 sampled → 7,767 §8.2 survivors → 7,762 embedded (5 failed) → 7,763 docked (with the control) → **1,587 passing §8.5b**. §8 targets 10–20 leads, so there is ample headroom.
+
+**The candidate count is 1,586.** The 1,587 above includes the `CONTROL_crystal` control, which is the redocking reference rather than a candidate; `scripts/admet_input.py` excludes it, so the population §8 item 7 selects from is **1,586 generated molecules**.
 
 ### 8.5.2 The control failed once, and that is this section's most important record
 

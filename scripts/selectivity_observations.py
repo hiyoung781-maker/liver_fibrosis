@@ -192,6 +192,7 @@ def asp218_character(mol: Chem.Mol, features: dict) -> dict:
     any_dist = _min_distance(xyz, features["asp218"])
     return {
         "asp218_any_atom_dist": any_dist,
+        "asp218_reached": int(any_dist <= ASP218_CUTOFF),
         "asp218_donor_dist": donor_dist,
         "asp218_neutral_donor": int(donor_dist <= ASP218_CUTOFF),
         "asp218_basic_dist": basic_dist,
@@ -262,7 +263,8 @@ def observe(mol: Chem.Mol, features: dict) -> dict:
 COLUMNS = [
     "label", "pose", "affinity",
     "leu225_min_dist", "leu225_contact", "n_hydrophobic",
-    "asp218_any_atom_dist", "asp218_donor_dist", "asp218_neutral_donor",
+    "asp218_any_atom_dist", "asp218_reached",
+    "asp218_donor_dist", "asp218_neutral_donor",
     "asp218_basic_dist", "asp218_basic_contact", "arg_mimic_heads",
     "tyr178_centroid_dist", "tyr178_nearest_atom", "tyr178_ring_angle",
     "tyr178_geometry", "tyr178_stack", "n_aromatic_rings",
@@ -272,8 +274,14 @@ COLUMNS = [
 def observe_file(poses_path: str, receptor_path: str, out_csv: str) -> dict:
     """Measure every pose in an SDF and write one row each."""
     features = receptor_features(receptor_path)
-    counts = {"poses": 0, "leu225": 0, "asp218_neutral": 0, "asp218_basic": 0,
-              "tyr178": 0, "all_three": 0}
+    # No "all three" conjunction. (ii) asks about the CHARACTER of an Asp218 contact,
+    # not whether one is made, and the basic case is the one literature ties to
+    # pan-alphaV activity - so multiplying it into a merit score points the wrong way,
+    # and a ligand that never reaches Asp218 has failed nothing. The crystal ligand
+    # itself sits 7.00 A away. (i) and (iii) are merit-like and are reported together;
+    # (ii) is reported as the character of those poses that do reach.
+    counts = {"poses": 0, "leu225": 0, "tyr178": 0, "leu225_and_tyr178": 0,
+              "asp218_reached": 0, "asp218_neutral": 0, "asp218_basic": 0}
     with open(out_csv, "w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=COLUMNS,
                                 extrasaction="ignore")
@@ -295,12 +303,12 @@ def observe_file(poses_path: str, receptor_path: str, out_csv: str) -> dict:
                 row[key] = "" if value != value else f"{value:.3f}"
             writer.writerow(row)
             counts["leu225"] += row["leu225_contact"]
+            counts["tyr178"] += row["tyr178_stack"]
+            counts["leu225_and_tyr178"] += int(bool(row["leu225_contact"])
+                                               and bool(row["tyr178_stack"]))
+            counts["asp218_reached"] += row["asp218_reached"]
             counts["asp218_neutral"] += row["asp218_neutral_donor"]
             counts["asp218_basic"] += row["asp218_basic_contact"]
-            counts["tyr178"] += row["tyr178_stack"]
-            counts["all_three"] += int(bool(row["leu225_contact"])
-                                       and bool(row["asp218_neutral_donor"])
-                                       and bool(row["tyr178_stack"]))
     return counts
 
 
@@ -315,10 +323,21 @@ def main(argv: list[str] | None = None) -> int:
     counts = observe_file(args.poses, args.receptor, args.out_csv)
     print(f"{args.poses} -> {args.out_csv}")
     total = counts["poses"] or 1
-    for key in ("poses", "leu225", "asp218_neutral", "asp218_basic", "tyr178",
-                "all_three"):
-        pct = "" if key == "poses" else f"  ({counts[key] / total:5.1%})"
-        print(f"  {key:16s} {counts[key]:7d}{pct}")
+    print(f"  poses             {counts['poses']:7d}")
+    print("  -- (i) and (iii): the merit-like observations --")
+    for key in ("leu225", "tyr178", "leu225_and_tyr178"):
+        print(f"  {key:16s}  {counts[key]:7d}  ({counts[key] / total:5.1%})")
+    print("  -- (ii) Asp218: the CHARACTER of a contact, where one is made --")
+    reached = counts["asp218_reached"]
+    print(f"  {'reached at all':16s}  {reached:7d}  ({reached / total:5.1%})")
+    inner = reached or 1
+    print(f"  {'  neutral donor':16s}  {counts['asp218_neutral']:7d}"
+          f"  ({counts['asp218_neutral'] / inner:5.1%} of those reaching)")
+    print(f"  {'  basic head':16s}  {counts['asp218_basic']:7d}"
+          f"  ({counts['asp218_basic'] / inner:5.1%} of those reaching)")
+    print("\n  A pose that does not reach Asp218 has failed nothing - the 8W30 crystal")
+    print("  ligand sits 7.00 A away. And a BASIC contact is the case literature ties")
+    print("  to pan-alphaV activity, so it is a flag, not a merit.")
     print("\n  Observations, not selectivity. See section 8.4: only the beta side is")
     print("  analysed, no selectivity contact has been observed crystallographically")
     print("  for this target, and measured cross-isoform IC50 is future work.")

@@ -171,9 +171,29 @@ class TestObserveFile(unittest.TestCase):
     def test_counts_never_exceed_the_pose_count(self):
         with TemporaryDirectory() as tmp:
             counts = observe_file(REDOCK, RECEPTOR, str(Path(tmp) / "s.csv"))
-            for key in ("leu225", "asp218_neutral", "asp218_basic", "tyr178",
-                        "all_three"):
+            for key in ("leu225", "tyr178", "leu225_and_tyr178", "asp218_reached",
+                        "asp218_neutral", "asp218_basic"):
                 self.assertLessEqual(counts[key], counts["poses"], key)
+
+    def test_there_is_no_all_three_conjunction(self):
+        """(ii) asks about the CHARACTER of an Asp218 contact, and the basic case is the
+        one tied to pan-alphaV activity - so multiplying it into a merit score points
+        the wrong way. A pose that never reaches Asp218 has failed nothing; the crystal
+        ligand sits 7.00 A away. Measured on the real passing set, only 5 of 4,065
+        poses reach it at all, so any conjunction including (ii) is ~0 by arithmetic
+        and says nothing about the molecules."""
+        with TemporaryDirectory() as tmp:
+            counts = observe_file(REDOCK, RECEPTOR, str(Path(tmp) / "s.csv"))
+            self.assertNotIn("all_three", counts)
+            self.assertIn("leu225_and_tyr178", counts)
+
+    def test_asp218_reached_is_the_any_atom_test_not_the_donor_test(self):
+        """Whether a ligand reaches Asp218 at all is an any-atom question; whether it
+        does so with a donor or a basic head is the character question."""
+        row = observe(Chem.MolFromMolFile(CRYSTAL, removeHs=False),
+                      receptor_features(RECEPTOR))
+        self.assertEqual(row["asp218_reached"], 0)
+        self.assertGreater(row["asp218_any_atom_dist"], 4.0)
 
     def test_the_filter_discriminates_among_redocked_poses(self):
         """All 20 poses passing, or none, would mean the measurement is not measuring."""
