@@ -46,6 +46,30 @@ first. smina and Uni-Dock agree to within 0.1 kcal/mol on the same receptor file
 Feeding Uni-Dock the raw PDB is NOT the fix - it scored -5.787 with the carboxylate
 4.59 A off the calcium, worse than either PDBQT. The hydrogenated PDBQT is the input
 to use.
+
+PROTONATION STATE, stated because the blueprint repeatedly describes this project as
+building an ANION and the docking does not model one.
+
+`-h` takes no pH argument, but the receptor it produces is already correct where it
+matters: Asp and Glu carry ZERO polar hydrogens on their carboxyl oxygens, and
+Glu229 - the residue coordinating the MIDAS calcium - comes out with OE1 and OE2 both
+typed `OA`. That is the deprotonated pH 7.4 form.
+
+`obabel -p 7.4` must NOT be used. It drops all six calcium ions and both section 8.5b
+anchors. Measured, and worth keeping in mind: smina still scored -6.9 against that
+calcium-free receptor, so the score alone looks healthy. The anchor check is what
+caught it.
+
+The LIGAND is docked as the neutral acid, and that is a choice rather than an
+oversight. Measured on the control, neutral COOH against deprotonated COO-:
+  neutral  -6.896  Ca 2.719  Asn224 2.900  6 of 20 poses pass
+  anion    -6.738  Ca 2.811  Asn224 2.903  4 of 20 poses pass
+Both reproduce the crystal contacts; the neutral form scores slightly better. Vina's
+function has no electrostatic term, so an anion gains nothing from its charge and
+loses one HD donor. The neutral form is also what section 8.5(a)'s -6.9 validation was
+measured on, what section 8.0's Uncharger produces, and what the RL objective's
+carboxylate SMARTS expects. Docking anions would mean revalidating all of it for no
+measurable gain.
 """
 
 from __future__ import annotations

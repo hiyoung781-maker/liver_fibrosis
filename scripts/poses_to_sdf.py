@@ -46,14 +46,23 @@ def poses_from_pdbqt(path: str, label: str | None = None) -> list[Chem.Mol]:
         with rdBase.BlockLogs():
             pdbqt = PDBQTMolecule.from_file(path, skip_typing=True)
             mols = RDKitMolCreate.from_pdbqt_mol(pdbqt)
-            # Uni-Dock records each pose's energy as `REMARK VINA RESULT: <kcal/mol>`.
-            # Meeko does not put it on the RDKit molecule, but exposes it as
-            # PDBQTMolecule pose.score, so it is collected here and written as an SDF
-            # property. Section 8.5b uses docking score only to break ties among poses
-            # that already passed the geometry filter - without this it was nan.
-            scores = [getattr(pose, "score", None) for pose in pdbqt]
     except Exception:
         return []
+
+    # Uni-Dock records each pose's energy as `REMARK VINA RESULT: <kcal/mol>`. Meeko
+    # does not put it on the RDKit molecule but exposes it as PDBQTMolecule pose.score,
+    # so it is collected here and written as an SDF property; section 8.5b uses docking
+    # score to break ties among poses that already passed the geometry filter.
+    #
+    # In its OWN try, deliberately. Collecting scores inside the block above made a
+    # missing energy fatal: a PDBQT with no VINA RESULT remark - a freshly prepared
+    # ligand rather than a docked output - returned zero poses instead of poses with a
+    # nan score. An absent score must cost the score, never the pose.
+    try:
+        with rdBase.BlockLogs():
+            scores = [getattr(pose, "score", None) for pose in pdbqt]
+    except Exception:
+        scores = []
 
     poses: list[Chem.Mol] = []
     for mol in mols:

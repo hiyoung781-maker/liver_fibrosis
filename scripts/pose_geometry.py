@@ -52,7 +52,17 @@ DONOR_CUTOFF = 3.5
 MIDAS = ("B", "501")
 ASN224 = ("B", "224")
 
-_CARBOXYLATE_O = Chem.MolFromSmarts("[CX3](=O)[OX2H1,OX1-]")
+# Deliberately more permissive than objective.py's `[CX3](=O)[OX2H1,OX1-]`, which
+# scores GENERATED SMILES where protonation is explicit and which section 5.1 pins.
+# A DOCKED pose arrives through PDBQT, where both carboxylate oxygens are written `OA`
+# with no hydrogen and no charge - so an oxygen that is neither `OX2H1` nor `OX1-`
+# is exactly what comes back, and the stricter pattern matched nothing.
+#
+# Measured: a deprotonated control ligand round-tripped through smina reported
+# ca_dist = inf, i.e. no carboxylate found, and every pose duly "failed" the MIDAS
+# criterion for a reason that looked chemical. The run that mattered happened to
+# survive only because Meeko restores the neutral COOH from its REMARK SMILES.
+_CARBOXYLATE_O = Chem.MolFromSmarts("[CX3](=[OX1])[OX2H1,OX1]")
 # Donor heavy atoms: N or O carrying at least one hydrogen. The poses come from
 # smina with hydrogens present, but total-H counting also works if they are implicit.
 _DONOR = Chem.MolFromSmarts("[#7,#8;!H0]")

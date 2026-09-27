@@ -131,3 +131,46 @@ class TestConvertDir(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAVE_MEEKO, "meeko not installed")
+class TestScoreExtractionIsNotFatal(unittest.TestCase):
+    """A PDBQT with no `REMARK VINA RESULT` must still yield its poses.
+
+    Regression: collecting pose energies inside the same try block as the structure
+    parse made a missing energy fatal, so a freshly prepared ligand PDBQT - which has
+    no docking energies - returned zero poses instead of poses with a nan score. An
+    absent score must cost the score, never the pose.
+    """
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = write_pose_pdbqt(self.tmp.name, "gen_00001")
+
+    def test_poses_returned_without_any_vina_result_remark(self):
+        self.assertNotIn("VINA RESULT", Path(self.path).read_text())
+        poses = poses_from_pdbqt(self.path)
+        self.assertTrue(poses)
+
+    def test_affinity_property_is_simply_absent(self):
+        pose = poses_from_pdbqt(self.path)[0]
+        self.assertFalse(pose.HasProp("affinity"))
+
+    def test_geometry_filter_reports_nan_rather_than_failing(self):
+        import math
+
+        from pose_geometry import _score
+
+        pose = poses_from_pdbqt(self.path)[0]
+        self.assertTrue(math.isnan(_score(pose)))
+
+    def test_a_vina_result_remark_is_picked_up_when_present(self):
+        text = Path(self.path).read_text()
+        doc = ["MODEL 1", "REMARK VINA RESULT:    -6.327      0.000      0.000"]
+        doc += text.splitlines() + ["ENDMDL"]
+        scored = Path(self.tmp.name) / "scored_out.pdbqt"
+        scored.write_text("\n".join(doc) + "\n")
+        pose = poses_from_pdbqt(str(scored))[0]
+        self.assertTrue(pose.HasProp("affinity"))
+        self.assertAlmostEqual(float(pose.GetProp("affinity")), -6.327, places=3)
