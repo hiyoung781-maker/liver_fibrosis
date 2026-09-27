@@ -12,6 +12,8 @@ RDLogger.DisableLog("rdApp.*")
 
 from select_leads import (
     CONTEXT_ENDPOINTS,
+    PERMEABILITY_ENDPOINT,
+    PERMEABILITY_FLOOR,
     EXCLUDED_ENDPOINTS,
     PANEL_PREFIX,
     REFERENCE,
@@ -160,12 +162,14 @@ class TestSelectLeads(unittest.TestCase):
             (f"{PANEL_PREFIX}{REFERENCE}", 1, -7.0, 1),
             (f"{PANEL_PREFIX}A1AFA", 1, -6.7, 1),
         ])
+        # Caco-2 values clear the 0.5 log floor against the reference's -5.6, so these
+        # tests exercise the affinity filter and the ranking rather than permeability.
         self.admet = write_admet(d / "admet.csv", [
-            ("gen_00001", {"DILI": 0.9}),          # worst hepatic
-            ("gen_00002", {"DILI": 0.1}),          # best
-            ("gen_00003", {"DILI": 0.2}),
-            ("gen_00004", {"DILI": 0.05}),
-            (f"{PANEL_PREFIX}{REFERENCE}", {"DILI": 0.455}),
+            ("gen_00001", {"DILI": 0.9, "Caco2_Wang": -4.9}),   # worst hepatic
+            ("gen_00002", {"DILI": 0.1, "Caco2_Wang": -4.9}),   # best
+            ("gen_00003", {"DILI": 0.2, "Caco2_Wang": -4.9}),
+            ("gen_00004", {"DILI": 0.05, "Caco2_Wang": -4.9}),
+            (f"{PANEL_PREFIX}{REFERENCE}", {"DILI": 0.455, "Caco2_Wang": -5.6}),
         ])
 
     def _run(self, n=20):
@@ -208,6 +212,60 @@ class TestSelectLeads(unittest.TestCase):
         panel = self._run()["panel"]
         self.assertTrue(panel)
         self.assertIn(REFERENCE, [p["label"] for p in panel])
+
+    def test_permeability_is_a_hard_filter_with_a_margin(self):
+        """§9.2 (as revised by §7.5) pre-registers "beats PLN-1474 on predicted
+        permeability", and §9 was frozen before sampling - a lead that misses it is not
+        a lead. The margin is the resolvable floor: model MAE 0.26-0.28 against a median
+        inter-laboratory spread of 0.57 log on the same compound."""
+        self.assertEqual(PERMEABILITY_FLOOR, 0.5)
+        self.assertEqual(PERMEABILITY_ENDPOINT, "Caco2_Wang")
+
+    def test_a_candidate_inside_the_noise_floor_is_dropped(self):
+        """Better, but not by more than the floor, is not a difference."""
+        admet = write_admet(Path(self.tmp.name) / "narrow.csv", [
+            ("gen_00002", {"Caco2_Wang": -5.3}),        # 0.3 better than -5.6
+            (f"{PANEL_PREFIX}{REFERENCE}", {"Caco2_Wang": -5.6}),
+        ])
+        result = select_leads(self.geometry, self.panel, admet, self.survivors,
+                              None, 20)
+        self.assertEqual(result["after_permeability"], 0)
+        self.assertEqual(result["leads"], [])
+
+    def test_a_candidate_past_the_floor_survives(self):
+        admet = write_admet(Path(self.tmp.name) / "wide.csv", [
+            ("gen_00002", {"Caco2_Wang": -4.9}),        # 0.7 better
+            (f"{PANEL_PREFIX}{REFERENCE}", {"Caco2_Wang": -5.6}),
+        ])
+        result = select_leads(self.geometry, self.panel, admet, self.survivors,
+                              None, 20)
+        self.assertEqual(result["after_permeability"], 1)
+        self.assertEqual([l["label"] for l in result["leads"]], ["gen_00002"])
+
+    def test_the_funnel_reports_each_stage_separately(self):
+        """Affinity and permeability are distinct filters and their counts are what
+        make the trade-off between them visible."""
+        result = self._run()
+        self.assertIn("after_affinity", result)
+        self.assertIn("after_permeability", result)
+        self.assertLessEqual(result["after_permeability"], result["after_affinity"])
+
+    def test_leads_beating_the_reference_toxicity_are_flagged(self):
+        """Most leads do NOT, once permeability is enforced - the two axes pull against
+        each other. The flag is what keeps that visible instead of implied."""
+        result = self._run()
+        for lead in result["leads"]:
+            self.assertIn("beats_reference_toxicity", lead)
+            self.assertEqual(lead["beats_reference_toxicity"],
+                             int(lead["toxicity_score"] < result["reference_toxicity"]))
+
+    def test_missing_admet_reference_row_raises(self):
+        """Without PLN-1474's ADMET row there is no permeability or toxicity reference,
+        and silently ranking against nothing would look like a result."""
+        admet = write_admet(Path(self.tmp.name) / "nopanel_admet.csv",
+                            [("gen_00002", {})])
+        with self.assertRaises(ValueError):
+            select_leads(self.geometry, self.panel, admet, self.survivors, None, 20)
 
     def test_missing_reference_raises_rather_than_guessing(self):
         empty = write_geometry(Path(self.tmp.name) / "nopanel.csv",

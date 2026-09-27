@@ -1,0 +1,79 @@
+Section 8.7 final selection
+========================================================================================================
+  All three references are PLN-1474, the only alphaVbeta1 inhibitor to reach
+  the clinic (section 7.5). Affinity comes from scripts/dock_panel.py with the
+  identical protocol; permeability and toxicity from the same ADMET run.
+
+  reference affinity   -6.953 kcal/mol   (best PASSING pose - a pose that misses the anchors is not a binding mode)
+  reference Caco-2     -5.586 log cm/s
+  reference toxicity   0.144  (composite)
+
+  geometry survivors   1587
+  after affinity       985   (strictly better than PLN-1474)
+  after permeability   216   (better by more than 0.5 log - section 9.2)
+  distinct scaffolds   213
+  beating PLN-1474 on the toxicity composite too: 2
+  leads selected       20 of 20 requested, one per Murcko scaffold
+
+Affinity and permeability are HARD FILTERS: the first is what docking measures
+directly, both sides from one engine and box; the second is pre-registered in
+section 9.2, with a 0.5 log margin because model error (MAE 0.26-0.28) is the
+size of inter-laboratory spread on the same compound (median 0.57 log).
+
+Extending the filter to every toxicity endpoint was measured and rejected: it
+leaves ZERO molecules. PLN-1474 already scores 0.0093 on NR-AhR and 0.0208 on
+SR-MMP, and calling 0.0089 'better' than 0.0093 is a resolution an AUROC-0.90
+classifier does not have - the same objection the 0.5 log floor encodes.
+
+Toxicity is therefore a RANK. Weights: hepatic endpoints (DILI, SR-MMP,
+SR-p53, NR-AhR) x2 because the indication is liver fibrosis; hERG and AMES x1;
+CYP inhibition x0.5 as interaction risk. Lower is better. ClinTox,
+carcinogenicity, LD50, bioavailability and skin reaction are excluded on their
+own reported performance - see the module docstring.
+
+========================================================================================================
+BENCHMARK PANEL on the same composite - what 'least toxic' is measured against
+========================================================================================================
+  compound                    tox score     DILI  SR-MMP    hERG    AMES
+  CWHM-12                         0.130  0.265  0.022  0.531  0.050
+  PLN-1474                        0.144  0.455  0.021  0.392  0.067
+  bexotegrast                     0.157  0.330  0.006  0.672  0.175
+  A1AFA                           0.184  0.825  0.037  0.136  0.040
+  CHEMBL4649232                   0.246  0.980  0.041  0.177  0.063
+  GLPG0187                        0.286  0.758  0.034  0.865  0.099
+
+========================================================================================================
+LEADS   * = also beats PLN-1474 on the toxicity composite
+        Per-endpoint values are printed so the reader can see WHICH
+        endpoints are better and which are worse, rather than trusting a
+        single composite number.
+========================================================================================================
+   # label            tox     aff   Caco2    Ca   don   DILI    MMP    p53    AhR   hERG   AMES L225 Y178
+  -- PLN-1474 (ref)   0.144   -6.95  -5.586              0.455  0.021  0.039  0.009  0.392  0.067          
+  ------------------------------------------------------------------------------------------------------
+   1*gen_07401     0.116   -7.13  -4.979  3.17  3.19  0.465  0.006  0.010  0.007  0.224  0.119    1    0
+   2*gen_07068     0.129   -6.96  -5.026  3.19  3.24  0.161  0.065  0.014  0.007  0.655  0.104    1    0
+   3 gen_07146     0.155   -7.78  -5.001  2.47  2.88  0.643  0.021  0.043  0.015  0.171  0.145    1    0
+   4 gen_02280     0.158   -6.97  -4.948  3.15  3.20  0.826  0.003  0.011  0.005  0.049  0.058    1    0
+   5 gen_00084     0.162   -7.13  -5.015  2.45  2.91  0.627  0.056  0.019  0.046  0.233  0.041    1    0
+   6 gen_07236     0.176   -7.42  -4.944  2.33  3.48  0.782  0.028  0.105  0.005  0.061  0.043    0    1
+   7 gen_07504     0.177   -7.13  -5.031  2.75  3.06  0.827  0.025  0.029  0.015  0.108  0.076    1    1
+   8 gen_06181     0.183   -6.99  -5.039  2.83  3.32  0.950  0.010  0.026  0.008  0.025  0.049    1    0
+   9 gen_02263     0.186   -7.59  -5.049  2.76  3.31  0.951  0.008  0.014  0.025  0.061  0.014    1    0
+  10 gen_00485     0.192   -6.97  -5.077  2.72  2.86  0.879  0.033  0.020  0.079  0.051  0.080    0    0
+  11 gen_02788     0.196   -7.55  -4.866  2.99  3.11  0.764  0.033  0.028  0.060  0.265  0.075    0    0
+  12 gen_00198     0.206   -7.60  -4.970  3.17  3.20  0.247  0.080  0.031  0.067  0.883  0.185    1    0
+  13 gen_01763     0.206   -7.03  -5.074  2.48  3.06  0.944  0.039  0.025  0.067  0.056  0.081    0    0
+  14 gen_03810     0.212   -6.98  -4.866  2.26  2.77  0.868  0.056  0.029  0.050  0.204  0.059    1    0
+  15 gen_07100     0.216   -7.76  -4.962  2.53  3.42  0.967  0.025  0.047  0.056  0.119  0.032    1    0
+  16 gen_01820     0.221   -8.00  -5.063  3.06  2.87  0.864  0.092  0.050  0.104  0.085  0.141    0    0
+  17 gen_07176     0.224   -7.10  -4.714  2.22  3.30  0.590  0.149  0.033  0.113  0.528  0.080    1    0
+  18 gen_01949     0.225   -7.63  -4.855  3.01  3.25  0.872  0.038  0.044  0.040  0.311  0.066    1    0
+  19 gen_05333     0.228   -6.97  -4.931  3.19  3.07  0.922  0.045  0.068  0.067  0.208  0.025    0    0
+  20 gen_05490     0.229   -7.10  -4.695  3.03  3.13  0.827  0.189  0.050  0.022  0.270  0.033    1    0
+
+  Every number here is a prediction. The ADMET models reach AUROC
+  0.84-0.93 on held-out benchmark splits whose leaderboard positions an
+  independent audit found largely unreproducible, and no selectivity
+  observation is evidence of selectivity (section 8.4). Wet-lab work is
+  what would settle any of it.

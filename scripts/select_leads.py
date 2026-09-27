@@ -9,7 +9,31 @@ benchmark in place of cpd 25, which was never proposed as a lead. A hard filter 
 defensible here in a way it is not for toxicity: affinity is what the docking measures
 directly, and both sides come from the same engine, receptor and box.
 
-STAGE 2 - RANK on toxicity. NOT a gate, and the reason is measured: this chemotype runs
+STAGE 2 - HARD FILTER on predicted permeability, against the same compound. Section
+9.2 (as revised by 7.5) pre-registers "beats PLN-1474 on predicted permeability" as a
+success criterion, and section 9 was frozen before sampling - so a lead that misses it
+is not a lead. The margin required is 0.5 log units, the figure section 7.5 established
+as the resolvable floor: the best Caco-2 models reach MAE 0.26-0.28 while the same
+compound's published values differ between laboratories by a median of 0.57 log, so a
+smaller gap is not a difference.
+
+WHY THE FILTER STOPS THERE. Extending it to the toxicity endpoints - "better than
+PLN-1474 on every one" - was measured and rejected. It leaves ZERO molecules, and the
+reason is instructive rather than disappointing: PLN-1474 already sits at 0.0093 on
+NR-AhR, 0.0208 on SR-MMP, 0.0393 on SR-p53 and 0.0437 on CYP2C9. Individually only
+2-7% of the permeability survivors beat each of those, and none beats all of them. More
+to the point, deciding that 0.0089 is "better than" 0.0093 is a resolution an AUROC-0.90
+classifier does not have. That is the same principle the 0.5 log floor enforces for
+permeability, and an all-endpoint conjunction would violate it nine times over.
+
+On the composite, PLN-1474 scores 0.144 against a candidate median of 0.286 - it sits
+in the top 5% of our own molecules. Only 2 of the 216 permeability survivors beat it
+outright, and those two are flagged in the output: they are the molecules that support
+the strongest claim available (better affinity, better permeability past the noise
+floor, and a better overall toxicity profile than the only alphaVbeta1 inhibitor to
+reach the clinic).
+
+STAGE 3 - RANK on toxicity. NOT a gate, and the reason is measured: this chemotype runs
 high on DILI across the board, including the published compounds. CHEMBL4649232 - the
 most potent non-RGD active in the curated set, pIC50 9.78 - scores 0.980, and A1AFA, the
 8W30 crystal ligand, scores 0.825. Any absolute DILI cutoff rejects the published
@@ -77,6 +101,11 @@ RDLogger.DisableLog("rdApp.*")
 
 PANEL_PREFIX = "PANEL_"
 REFERENCE = "PLN-1474"
+
+# log units of Caco-2. Section 7.5's resolvable floor: model MAE 0.26-0.28 against a
+# median inter-laboratory spread of 0.57 log on the same compound.
+PERMEABILITY_FLOOR = 0.5
+PERMEABILITY_ENDPOINT = "Caco2_Wang"
 
 TOXICITY_WEIGHTS = {
     # hepatic - the indication is liver fibrosis
@@ -172,8 +201,9 @@ def _selectivity(selectivity_csv: str) -> dict[str, dict]:
 
 def select_leads(geometry_csv: str, panel_geometry_csv: str, admet_csv: str,
                  survivors_smi: str, selectivity_csv: str | None = None,
-                 n_leads: int = 20) -> dict:
-    """Stage 1 then stage 2, with distinct Murcko scaffolds among the selected."""
+                 n_leads: int = 20,
+                 permeability_floor: float = PERMEABILITY_FLOOR) -> dict:
+    """Affinity filter, permeability filter, toxicity rank, distinct scaffolds."""
     from known_scaffolds import murcko
     from novelty import load_smi
 
@@ -184,6 +214,14 @@ def select_leads(geometry_csv: str, panel_geometry_csv: str, admet_csv: str,
     smiles = {label: s for s, label in load_smi(survivors_smi)}
     selectivity = _selectivity(selectivity_csv) if selectivity_csv else {}
 
+    panel_admet = admet.get(f"{PANEL_PREFIX}{REFERENCE}")
+    if panel_admet is None:
+        raise ValueError(f"{admet_csv}: no {PANEL_PREFIX}{REFERENCE} row - the "
+                         "permeability and composite references are undefined")
+    reference_caco = float(panel_admet[PERMEABILITY_ENDPOINT])
+    reference_tox = toxicity_score(panel_admet)
+
+    counts = {"affinity": 0, "permeability": 0}
     candidates = []
     for label, pose in poses.items():
         if label.startswith(PANEL_PREFIX) or label not in smiles:
@@ -193,6 +231,15 @@ def select_leads(geometry_csv: str, panel_geometry_csv: str, admet_csv: str,
         affinity = float(pose["affinity"])
         if affinity >= reference:            # stage 1: strictly better than PLN-1474
             continue
+        counts["affinity"] += 1
+        try:
+            caco = float(admet[label][PERMEABILITY_ENDPOINT])
+        except (KeyError, TypeError, ValueError):
+            continue
+        # stage 2: better by more than the resolvable floor, not merely better
+        if caco <= reference_caco + permeability_floor:
+            continue
+        counts["permeability"] += 1
         score = toxicity_score(admet[label])
         if score != score:                   # nan
             continue
@@ -202,6 +249,8 @@ def select_leads(geometry_csv: str, panel_geometry_csv: str, admet_csv: str,
             "toxicity_score": score,
             "scaffold": murcko(Chem.MolFromSmiles(smiles[label])),
             "ca_dist": pose.get("ca_dist"), "donor_dist": pose.get("donor_dist"),
+            "caco2": caco,
+            "beats_reference_toxicity": int(score < reference_tox),
             "leu225": observations.get("leu225", 0),
             "tyr178": observations.get("tyr178", 0),
             "asp218_basic": observations.get("asp218_basic", 0),
@@ -229,9 +278,16 @@ def select_leads(geometry_csv: str, panel_geometry_csv: str, admet_csv: str,
 
     return {
         "reference_affinity": reference,
+        "reference_caco2": reference_caco,
+        "reference_toxicity": reference_tox,
+        "permeability_floor": permeability_floor,
         "passing": len(poses),
+        "after_affinity": counts["affinity"],
+        "after_permeability": counts["permeability"],
         "after_hard_filter": len(candidates),
         "distinct_scaffolds": len({c["scaffold"] for c in candidates}),
+        "beating_reference_toxicity": sum(c["beats_reference_toxicity"]
+                                          for c in candidates),
         "leads": leads,
         "panel": panel,
     }
@@ -241,16 +297,37 @@ def _report(result: dict, n_leads: int) -> str:
     out = [
         "Section 8.7 final selection",
         "=" * 104,
-        f"  reference            PLN-1474 docked at "
-        f"{result['reference_affinity']:.3f} kcal/mol (identical protocol)",
+        "  All three references are PLN-1474, the only alphaVbeta1 inhibitor to reach",
+        "  the clinic (section 7.5). Affinity comes from scripts/dock_panel.py with the",
+        "  identical protocol; permeability and toxicity from the same ADMET run.",
+        "",
+        f"  reference affinity   {result['reference_affinity']:.3f} kcal/mol"
+        "   (best PASSING pose - a pose that misses the anchors is not a binding mode)",
+        f"  reference Caco-2     {result['reference_caco2']:.3f} log cm/s",
+        f"  reference toxicity   {result['reference_toxicity']:.3f}  (composite)",
+        "",
         f"  geometry survivors   {result['passing']}",
-        f"  after hard filter    {result['after_hard_filter']}"
-        f"   (affinity strictly better than PLN-1474)",
+        f"  after affinity       {result['after_affinity']}"
+        f"   (strictly better than PLN-1474)",
+        f"  after permeability   {result['after_permeability']}"
+        f"   (better by more than {result['permeability_floor']:.1f} log - section 9.2)",
         f"  distinct scaffolds   {result['distinct_scaffolds']}",
+        f"  beating PLN-1474 on the toxicity composite too: "
+        f"{result['beating_reference_toxicity']}",
         f"  leads selected       {len(result['leads'])} of {n_leads} requested,"
         " one per Murcko scaffold",
         "",
-        "Toxicity is a RANK, not a gate. Weights: hepatic endpoints (DILI, SR-MMP,",
+        "Affinity and permeability are HARD FILTERS: the first is what docking measures",
+        "directly, both sides from one engine and box; the second is pre-registered in",
+        "section 9.2, with a 0.5 log margin because model error (MAE 0.26-0.28) is the",
+        "size of inter-laboratory spread on the same compound (median 0.57 log).",
+        "",
+        "Extending the filter to every toxicity endpoint was measured and rejected: it",
+        "leaves ZERO molecules. PLN-1474 already scores 0.0093 on NR-AhR and 0.0208 on",
+        "SR-MMP, and calling 0.0089 'better' than 0.0093 is a resolution an AUROC-0.90",
+        "classifier does not have - the same objection the 0.5 log floor encodes.",
+        "",
+        "Toxicity is therefore a RANK. Weights: hepatic endpoints (DILI, SR-MMP,",
         "SR-p53, NR-AhR) x2 because the indication is liver fibrosis; hERG and AMES x1;",
         "CYP inhibition x0.5 as interaction risk. Lower is better. ClinTox,",
         "carcinogenicity, LD50, bioavailability and skin reaction are excluded on their",
@@ -268,19 +345,42 @@ def _report(result: dict, n_leads: int) -> str:
                    + "  ".join(f"{float(row[k]):5.3f}" if row.get(k) else "    -"
                                for k in ("DILI", "SR-MMP", "hERG", "AMES")))
 
-    out += ["", "=" * 104, "LEADS", "=" * 104,
-            f"  {'#':>2s} {'label':12s} {'tox':>7s} {'aff':>7s} {'Ca':>6s} "
-            f"{'don':>6s} {'DILI':>6s} {'MMP':>6s} {'hERG':>6s} {'Caco2':>7s} "
-            f"{'L225':>5s} {'Y178':>5s}"]
+    out += ["", "=" * 104,
+            "LEADS   * = also beats PLN-1474 on the toxicity composite",
+            "        Per-endpoint values are printed so the reader can see WHICH",
+            "        endpoints are better and which are worse, rather than trusting a",
+            "        single composite number.",
+            "=" * 104,
+            f"  {'#':>2s} {'label':12s} {'tox':>7s} {'aff':>7s} {'Caco2':>7s} "
+            f"{'Ca':>5s} {'don':>5s} {'DILI':>6s} {'MMP':>6s} {'p53':>6s} "
+            f"{'AhR':>6s} {'hERG':>6s} {'AMES':>6s} {'L225':>4s} {'Y178':>4s}"]
+    reference_row = {"label": f"{REFERENCE} (ref)",
+                     "toxicity_score": result["reference_toxicity"],
+                     "affinity": result["reference_affinity"],
+                     "caco2": result["reference_caco2"]}
+    panel_admet = next((p["admet"] for p in result["panel"]
+                        if p["label"] == REFERENCE), {})
+    get_ref = lambda k: (float(panel_admet[k]) if panel_admet.get(k)
+                         else float("nan"))
+    out.append(
+        f"  {'--':>2s} {reference_row['label']:12s} "
+        f"{reference_row['toxicity_score']:7.3f} {reference_row['affinity']:7.2f} "
+        f"{reference_row['caco2']:7.3f} {'':>5s} {'':>5s} "
+        f"{get_ref('DILI'):6.3f} {get_ref('SR-MMP'):6.3f} {get_ref('SR-p53'):6.3f} "
+        f"{get_ref('NR-AhR'):6.3f} {get_ref('hERG'):6.3f} {get_ref('AMES'):6.3f} "
+        f"{'':>4s} {'':>4s}")
+    out.append("  " + "-" * 102)
     for index, lead in enumerate(result["leads"], start=1):
         row = lead["admet"]
         get = lambda k: float(row[k]) if row.get(k) else float("nan")
+        mark = "*" if lead["beats_reference_toxicity"] else " "
         out.append(
-            f"  {index:2d} {lead['label']:12s} {lead['toxicity_score']:7.3f} "
-            f"{lead['affinity']:7.2f} {float(lead['ca_dist']):6.2f} "
-            f"{float(lead['donor_dist']):6.2f} {get('DILI'):6.3f} "
-            f"{get('SR-MMP'):6.3f} {get('hERG'):6.3f} {get('Caco2_Wang'):7.3f} "
-            f"{lead['leu225']:5d} {lead['tyr178']:5d}")
+            f"  {index:2d}{mark}{lead['label']:11s} {lead['toxicity_score']:7.3f} "
+            f"{lead['affinity']:7.2f} {lead['caco2']:7.3f} "
+            f"{float(lead['ca_dist']):5.2f} {float(lead['donor_dist']):5.2f} "
+            f"{get('DILI'):6.3f} {get('SR-MMP'):6.3f} {get('SR-p53'):6.3f} "
+            f"{get('NR-AhR'):6.3f} {get('hERG'):6.3f} {get('AMES'):6.3f} "
+            f"{lead['leu225']:4d} {lead['tyr178']:4d}")
 
     flagged = [l["label"] for l in result["leads"] if l["asp218_basic"]]
     if flagged:
@@ -316,7 +416,8 @@ def main(argv: list[str] | None = None) -> int:
 
     os.makedirs(os.path.dirname(args.out_csv) or ".", exist_ok=True)
     fields = ["rank", "label", "smiles", "scaffold", "toxicity_score", "affinity",
-              "ca_dist", "donor_dist", "leu225", "tyr178", "asp218_basic"]
+              "ca_dist", "donor_dist", "caco2", "beats_reference_toxicity",
+              "leu225", "tyr178", "asp218_basic"]
     fields += list(TOXICITY_WEIGHTS) + CONTEXT_ENDPOINTS
     with open(args.out_csv, "w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
@@ -325,8 +426,9 @@ def main(argv: list[str] | None = None) -> int:
             row = {"rank": index, **{k: lead[k] for k in
                                      ("label", "smiles", "scaffold",
                                       "toxicity_score", "affinity", "ca_dist",
-                                      "donor_dist", "leu225", "tyr178",
-                                      "asp218_basic")}}
+                                      "donor_dist", "caco2",
+                                      "beats_reference_toxicity", "leu225",
+                                      "tyr178", "asp218_basic")}}
             row.update({k: lead["admet"].get(k, "")
                         for k in list(TOXICITY_WEIGHTS) + CONTEXT_ENDPOINTS})
             writer.writerow(row)

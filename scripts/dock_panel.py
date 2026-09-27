@@ -130,27 +130,58 @@ def main(argv: list[str] | None = None) -> int:
     for key, value in counts.items():
         print(f"  {key:16s} {value}")
 
-    print("\nbest affinity per panel compound:")
+    # Two columns, because they differ and only one of them is the threshold. The
+    # candidates are evaluated on their best PASSING pose - a pose that misses the
+    # anchors is not a binding mode this project accepts - so the reference has to be
+    # PLN-1474's best passing pose too, or the comparison is not like for like. An
+    # earlier version of this printout reported the unfiltered minimum and labelled it
+    # the threshold; for PLN-1474 that is -6.998 against a true -6.953.
     import csv as _csv
-    best: dict[str, float] = {}
-    with open(args.out_csv, newline="") as handle:
-        for row in _csv.DictReader(handle):
+
+    rows = list(_csv.DictReader(open(args.out_csv, newline="")))
+    labels: list[str] = []
+    for row in rows:
+        if row["label"] not in labels:
+            labels.append(row["label"])
+
+    def best_of(subset):
+        values = []
+        for row in subset:
             try:
-                affinity = float(row["affinity"])
+                values.append(float(row["affinity"]))
             except (TypeError, ValueError):
                 continue
-            label = row["label"]
-            if label not in best or affinity < best[label]:
-                best[label] = affinity
-    for label, affinity in sorted(best.items(), key=lambda kv: kv[1]):
-        print(f"  {label:26s} {affinity:8.3f} kcal/mol")
-    reference = best.get(f"{PANEL_PREFIX}PLN-1474")
+        return min(values) if values else None
+
+    print("\naffinity per panel compound (kcal/mol):")
+    print(f"  {'compound':24s} {'poses':>6s} {'passing':>8s} {'best(all)':>10s} "
+          f"{'best(passing)':>14s}")
+    summary = {}
+    for label in labels:
+        subset = [r for r in rows if r["label"] == label]
+        passing = [r for r in subset if r.get("passes") == "1"]
+        overall, filtered = best_of(subset), best_of(passing)
+        summary[label] = filtered
+        shown = f"{filtered:14.3f}" if filtered is not None else f"{'none':>14s}"
+        print(f"  {label.replace(PANEL_PREFIX, ''):24s} {len(subset):6d} "
+              f"{len(passing):8d} "
+              f"{overall if overall is None else f'{overall:10.3f}'} {shown}")
+
+    print("\n  A compound with no passing pose is not a failure of the compound. The")
+    print("  panel spans two binding modes - four of its six carry Arg-mimic heads and")
+    print("  bind in the RGD zwitterionic mode - while section 8.5b's filter asks for a")
+    print("  carboxylate on Ca501 AND a donor on beta1-Asn224. The filter selects on")
+    print("  binding mode, not on score, which is why the panel's two best affinities")
+    print("  can be the ones that do not pass.")
+
+    reference = summary.get(f"{PANEL_PREFIX}PLN-1474")
     if reference is None:
-        print("\n  PLN-1474 produced no scored pose - section 8.7's hard filter has no"
-              "\n  reference. Do not proceed to lead selection.", file=sys.stderr)
+        print("\n  PLN-1474 produced no PASSING pose - section 8.7's hard filter has no"
+              "\n  like-for-like reference. Do not proceed to lead selection.",
+              file=sys.stderr)
         return 1
-    print(f"\n  section 8.7 hard filter: keep candidates with affinity < "
-          f"{reference:.3f} kcal/mol")
+    print(f"\n  section 8.7 hard filter: keep candidates whose best PASSING pose scores"
+          f"\n  below {reference:.3f} kcal/mol (PLN-1474's best passing pose)")
     return 0
 
 
