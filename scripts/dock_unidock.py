@@ -19,6 +19,19 @@ seed 42. Section 8.5b's whole design is to generate many poses and select on
 geometry, because the scoring function has no metal term - so `--search_mode fast`
 and a lower exhaustiveness are not tempting trade-offs here, they attack the
 compensation for a known gap.
+
+MULTI-GPU. Uni-Dock uses one GPU per process: a single invocation pinned GPU 0 at
+100% and 45 GB while the node's other seven sat at 3 MiB. The 8gpu partition charges
+8 node-hours per wall hour no matter how many GPUs the job touches, so running one
+process per GPU is 8x faster at identical allocation cost. --gpus N splits the ligand
+index N ways and launches N processes, each with CUDA_VISIBLE_DEVICES set to its own
+device; they share one --dir because Uni-Dock names outputs after each ligand, so
+there are no collisions.
+
+The split is round-robin rather than contiguous. Uni-Dock groups ligands internally
+by size (small/medium/large) and batches by GPU memory, so a shard that happened to
+collect all the large ligands would finish long after the others; interleaving gives
+every shard the same size mixture.
 """
 
 from __future__ import annotations
@@ -31,7 +44,8 @@ import sys
 import numpy as np
 from rdkit import Chem, RDLogger
 
-__all__ = ["DEFAULTS", "box_from_ligand", "build_command"]
+__all__ = ["DEFAULTS", "box_from_ligand", "build_command", "split_index",
+           "run_multi_gpu"]
 
 RDLogger.DisableLog("rdApp.*")
 
@@ -90,6 +104,70 @@ def build_command(receptor: str, ligand_index: str, out_dir: str, box: dict,
     return cmd
 
 
+def split_index(index_path: str, shards: int, out_dir: str) -> list[str]:
+    """Split a --ligand_index file into `shards` files, round-robin. Returns paths.
+
+    Round-robin, not contiguous: Uni-Dock groups ligands by size internally, so a
+    contiguous shard that collected the large ligands would straggle. Interleaving
+    gives every shard the same size mixture.
+
+    A shard that would be empty is not written, so `shards` larger than the ligand
+    count does not produce processes with nothing to do.
+    """
+    from pathlib import Path
+
+    lines = [line.strip() for line in Path(index_path).read_text().splitlines()
+             if line.strip()]
+    if not lines:
+        raise ValueError(f"{index_path}: no ligand paths")
+
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for shard in range(shards):
+        chunk = lines[shard::shards]
+        if not chunk:
+            continue
+        path = out / f"ligands_gpu{shard}.txt"
+        path.write_text("\n".join(chunk) + "\n")
+        paths.append(str(path))
+    return paths
+
+
+def run_multi_gpu(receptor: str, index_path: str, out_dir: str, box: dict,
+                  gpus: int, shard_dir: str, **kwargs) -> dict:
+    """One Uni-Dock process per GPU, each pinned with CUDA_VISIBLE_DEVICES.
+
+    Returns per-shard exit status. A nonzero status anywhere is reported rather than
+    raised, because the other shards' poses are still valid output - the caller
+    decides whether a partial library is usable.
+    """
+    import os
+
+    shards = split_index(index_path, gpus, shard_dir)
+    os.makedirs(out_dir, exist_ok=True)
+
+    processes = []
+    for device, shard in enumerate(shards):
+        env = dict(os.environ, CUDA_VISIBLE_DEVICES=str(device))
+        cmd = build_command(receptor, shard, out_dir, box, **kwargs)
+        log = os.path.join(out_dir, f"unidock_gpu{device}.log")
+        handle = open(log, "w")
+        print(f"  GPU {device}: {sum(1 for _ in open(shard))} ligands -> {log}",
+              flush=True)
+        processes.append((device, shard, log, handle,
+                          subprocess.Popen(cmd, env=env, stdout=handle,
+                                           stderr=subprocess.STDOUT)))
+
+    results = {}
+    for device, shard, log, handle, process in processes:
+        status = process.wait()
+        handle.close()
+        results[device] = {"shard": shard, "log": log, "status": status}
+        print(f"  GPU {device}: exit {status}", flush=True)
+    return results
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--receptor", default="docking/receptor.pdbqt")
@@ -103,6 +181,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--num-modes", type=int, default=DEFAULTS["num_modes"])
     parser.add_argument("--seed", type=int, default=DEFAULTS["seed"])
     parser.add_argument("--search-mode", default=None)
+    parser.add_argument("--gpus", type=int, default=1,
+                        help="run this many Uni-Dock processes, one per GPU. "
+                             "Uni-Dock uses a single GPU per process, and the 8gpu "
+                             "partition charges the same whether 1 or 8 are busy")
+    parser.add_argument("--shard-dir", default="docking/ligand_shards")
     parser.add_argument("--dry-run", action="store_true",
                         help="print the command and the box, run nothing")
     args = parser.parse_args(argv)
@@ -119,6 +202,9 @@ def main(argv: list[str] | None = None) -> int:
     print("\ncommand:")
     print("  " + " ".join(cmd))
 
+    if args.gpus > 1:
+        print(f"\nmulti-GPU: {args.gpus} processes, one per device")
+
     if args.dry_run:
         return 0
     if shutil.which("unidock") is None:
@@ -127,6 +213,24 @@ def main(argv: list[str] | None = None) -> int:
 
     import os
     os.makedirs(args.out_dir, exist_ok=True)
+
+    if args.gpus > 1:
+        print("\nrunning...", flush=True)
+        results = run_multi_gpu(
+            args.receptor, args.ligand_index, args.out_dir, box, args.gpus,
+            args.shard_dir, exhaustiveness=args.exhaustiveness,
+            num_modes=args.num_modes, seed=args.seed,
+            search_mode=args.search_mode)
+        failed = [d for d, r in results.items() if r["status"] != 0]
+        if failed:
+            print(f"\nFAILED on GPU(s) {failed} - their logs are in {args.out_dir}."
+                  "\nPoses from the other shards are still valid; decide whether a"
+                  "\npartial library is usable before running the geometry filter.",
+                  file=sys.stderr)
+            return 1
+        print("\nall shards finished")
+        return 0
+
     print("\nrunning...", flush=True)
     result = subprocess.run(cmd)
     print(f"exit status: {result.returncode}")

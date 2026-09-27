@@ -116,3 +116,83 @@ class TestBuildCommand(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSplitIndex(unittest.TestCase):
+    """--gpus N needs the ligand index split N ways. Uni-Dock uses one GPU per
+    process: a single invocation pinned GPU 0 at 100% / 45 GB while the node's other
+    seven sat at 3 MiB, and the 8gpu partition charges 8 node-hours per wall hour
+    regardless — so one process per GPU is 8x faster at identical cost."""
+
+    def setUp(self):
+        from tempfile import TemporaryDirectory
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.index = Path(self.tmp.name) / "ligands.txt"
+        self.index.write_text("".join(f"/abs/gen_{i:05d}.pdbqt\n"
+                                      for i in range(1, 101)))
+        self.out = str(Path(self.tmp.name) / "shards")
+
+    def _read(self, paths):
+        return [Path(p).read_text().split() for p in paths]
+
+    def test_every_ligand_appears_exactly_once(self):
+        from dock_unidock import split_index
+
+        shards = self._read(split_index(str(self.index), 8, self.out))
+        flat = [line for shard in shards for line in shard]
+        self.assertEqual(len(flat), 100)
+        self.assertEqual(len(set(flat)), 100)
+
+    def test_shards_are_balanced_within_one(self):
+        from dock_unidock import split_index
+
+        sizes = [len(s) for s in self._read(split_index(str(self.index), 8, self.out))]
+        self.assertEqual(len(sizes), 8)
+        self.assertLessEqual(max(sizes) - min(sizes), 1)
+
+    def test_split_is_round_robin_not_contiguous(self):
+        """Uni-Dock groups ligands by size internally, so a contiguous shard that
+        collected the large ligands would straggle while the others idled."""
+        from dock_unidock import split_index
+
+        shards = self._read(split_index(str(self.index), 8, self.out))
+        first = shards[0]
+        self.assertEqual(first[0], "/abs/gen_00001.pdbqt")
+        self.assertEqual(first[1], "/abs/gen_00009.pdbqt")   # stride 8, not 2
+
+    def test_more_shards_than_ligands_writes_no_empty_shard(self):
+        """Otherwise processes would be launched with nothing to dock."""
+        from dock_unidock import split_index
+
+        small = Path(self.tmp.name) / "three.txt"
+        small.write_text("/a.pdbqt\n/b.pdbqt\n/c.pdbqt\n")
+        paths = split_index(str(small), 8, self.out)
+        self.assertEqual(len(paths), 3)
+        for p in paths:
+            self.assertTrue(Path(p).read_text().strip())
+
+    def test_shard_filenames_name_their_gpu(self):
+        from dock_unidock import split_index
+
+        paths = split_index(str(self.index), 4, self.out)
+        self.assertEqual([Path(p).name for p in paths],
+                         [f"ligands_gpu{i}.txt" for i in range(4)])
+
+    def test_empty_index_raises(self):
+        from dock_unidock import split_index
+
+        empty = Path(self.tmp.name) / "empty.txt"
+        empty.write_text("\n\n")
+        with self.assertRaises(ValueError):
+            split_index(str(empty), 8, self.out)
+
+    def test_paths_survive_verbatim(self):
+        """The index holds absolute paths; mangling one would make Uni-Dock skip a
+        ligand with no error the caller would notice."""
+        from dock_unidock import split_index
+
+        shards = self._read(split_index(str(self.index), 8, self.out))
+        flat = sorted(line for shard in shards for line in shard)
+        expected = sorted(f"/abs/gen_{i:05d}.pdbqt" for i in range(1, 101))
+        self.assertEqual(flat, expected)
