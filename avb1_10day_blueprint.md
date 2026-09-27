@@ -643,6 +643,16 @@ Order matters — cheap to expensive:
    (iii) **αv-Tyr178 π-stack** — is a ligand aromatic ring centroid within 5.5 Å of the Tyr178 ring centroid, with an inter-plane angle either under 30° (parallel) or 60–90° (T-shaped)? Measured in 8W30: closest atom 3.70 Å, centroid 6.21 Å, ring angle 74.6°.
 
    **These are features reported as correlated with selectivity; they are not evidence of selectivity.** αvβ1 selectivity is determined by **both** the β subunit (against αvβ3/αvβ5/αvβ6/αvβ8) and the α subunit (against α5β1/α4β1/α8β1) [114], and this work addresses none of the latter — the same review names α5's Trp157, Gln221 and Ser224 as candidates and we do not analyse them. Nor has the contact said to confer selectivity ever been observed crystallographically: no αvβ1 structure existed as of 2020 [114], and the ligand in the first one, 8W30, has pIC50 5.30 and sits 7.00 Å from Asp218. **Measured cross-integrin IC50s are the only basis on which selectivity can be judged, and that is future work.**
+
+   **Criterion (iii)'s threshold is corrected (2026-09-28).** "Centroid within 5.5 Å" as written above **rejects the crystal structure**: 8W30's centroid distance is **6.21 Å**. The only crystallographically observed instance of this interaction fails the test written to detect it.
+
+   The cause is geometric. **A T-shaped stack holds the two rings perpendicular, which pushes their centroids apart while the closest atoms stay in contact.** A centroid cutoff implicitly assumes parallel stacking; 8W30 is T-shaped at 74.5°.
+
+   The distance criterion therefore moves to the **nearest ring atom, 4.5 Å**. The crystal's 3.70 Å sits comfortably inside it, 4.5 Å is the same bound criterion (i) uses for hydrophobic contact, and it is the usual permissive limit for an aromatic contact whose van der Waals range is 3.4–3.7 Å. Centroid distance is **reported but not applied**. This follows how §8.5's thresholds were set: let the structure define the boundary instead of importing a convention.
+
+   **What (ii)'s 7.00 Å refers to is also made explicit.** §1's pocket table row 5, "the 8W30 hit does not engage (7.0 Å)", is the distance to the nearest ligand atom of ANY kind — an aromatic CH. The nearest neutral donor is **12.35 Å**. `scripts/selectivity_observations.py` reports both, so the documented number is reproducible from the script.
+
+   The measurement is `scripts/selectivity_observations.py`, and `tests/test_selectivity_observations.py` asserts that it reproduces every recorded 8W30 value (nearest 3.70, centroid 6.21, ring angle 74.5°, Asp218 7.00, Leu225 3.69) and that **the crystal structure passes (i) and (iii)**. That the old centroid criterion rejected it is kept as a test too, so the criterion cannot drift back.
 5. **Docking — a geometric filter, not an affinity ranking:**
    - Receptor: 8W30 chains A+B; strip ligand TR01225179 and **all** waters (that is the method; the HOH2107 sensitivity run is withdrawn — reasons under *Water treatment* below)
    - Tool: smina / AutoDock Vina; ~20 Å box on the ligand centroid
