@@ -11,7 +11,7 @@
 
 ## 0. Design hypothesis (one sentence)
 
-The αvβ1 selectivity pharmacophore — a MIDAS-metal-coordinating carboxylate, an H-bond donor to β1-Asn224, and an aromatic element against αv-Tyr178 — can be carried by **novel, more drug-like scaffolds** than the published azabenzimidazolone series, whose 1.3% rat oral bioavailability and series-wide MDCK permeability < 0.1×10⁻⁶ cm/s are a **series-specific ceiling, not a target-intrinsic one** [111].
+The αvβ1 **binding** pharmacophore — a MIDAS-metal-coordinating carboxylate, an H-bond donor to β1-Asn224, and an aromatic element against αv-Tyr178 — can be carried by **novel, more drug-like scaffolds** than the published azabenzimidazolone series, whose 1.3% rat oral bioavailability and series-wide MDCK permeability < 0.1×10⁻⁶ cm/s are a **series-specific ceiling, not a target-intrinsic one** [111].
 
 Everything below is engineered to test that sentence — and to be able to say, honestly, if it fails.
 
@@ -24,10 +24,10 @@ Derived from the 8W30 coordinate analysis (see `avb1_8w30_contacts.csv`):
 | # | Pocket feature | Geometry in 8W30 | Consequence for generation/scoring |
 |---|---|---|---|
 | 1 | **Carboxylate → MIDAS Ca²⁺ (β1 Ca501)** | 2.62 Å, monodentate (second carboxylate O at 4.54 Å) | **Non-negotiable anchor.** All known αvβ1/αv-class inhibitors are carboxylates (RGD mimetics). → `MatchingSubstructure` carboxylic acid in RL; post-hoc docking filter: carboxylate O → Ca501 ≤ 3.2 Å |
-| 2 | **Ligand amide NH → β1-Asn224 backbone O** | 2.63 Å H-bond | Strong secondary anchor → post-hoc H-bond filter (donor within 3.5 Å of Asn224 O); in RL captured indirectly via similarity to actives, all of which make this contact |
+| 2 | **Ligand amide NH → β1-Asn224 backbone O** | 2.63 Å H-bond. **Asn224 is conserved in β3** — this confers binding, not selectivity (§8.4) | Strong secondary anchor → post-hoc H-bond filter (donor within 3.5 Å of Asn224 O); in RL captured indirectly via similarity to actives, all of which make this contact |
 | 3 | **Aromatic contact with αv-Tyr178** | 3.70 Å closest atoms, T-shaped/offset (centroid 6.21 Å, ring angle 74.6°) | ≥1 aromatic ring expected; not enforced directly in the objective — confirmed by the §8.5 docking geometric filter and by qualitative review |
-| 4 | **β1 hydrophobic subpocket** (Pro186 3.16 Å, Tyr133 3.17 Å, Cys187 3.88 Å, Lys182 3.82 Å) | dichlorophenyl of the hit sits here | Hydrophobic bulk is tolerated — SlogP up to about 3 is **clearly permitted**; potency is decided here. **Note:** this row was the source of §5's `SlogP` penalty threshold of "about 3", but it is a qualitative **permitted floor** derived from contact distances ("at least up to 3 is fine"), not "penalize above 3" — a misreading that turned a permitted lower bound into a penalty upper bound. §5.4 corrects this misreading and removes `SlogP` from the objective |
-| 5 | **αv-Asp218 — NOT engaged by the 8W30 hit** (7.0 Å) | engaged by cpd 25's benzimidazolone NH in the published series [111] | Growth vector. Deliberately **not** encoded as a substructure filter (would over-constrain novelty); used in manual inspection of top docked poses |
+| 4 | **β1 hydrophobic subpocket** (Pro186 3.16 Å, Tyr133 3.17 Å, Cys187 3.88 Å, Lys182 3.82 Å, Leu225 2.95 Å). **Only Leu225 differs in β3** (which carries Arg) — if selectivity comes from anywhere, it is here (§8.4) | dichlorophenyl of the hit sits here | Hydrophobic bulk is tolerated — SlogP up to about 3 is **clearly permitted**; potency is decided here. **Note:** this row was the source of §5's `SlogP` penalty threshold of "about 3", but it is a qualitative **permitted floor** derived from contact distances ("at least up to 3 is fine"), not "penalize above 3" — a misreading that turned a permitted lower bound into a penalty upper bound. §5.4 corrects this misreading and removes `SlogP` from the objective |
+| 5 | **αv-Asp218 — NOT engaged by the 8W30 hit** (7.0 Å) | engaged by cpd 25's benzimidazolone NH in the published series [111]. **How it is engaged is what matters** — a salt bridge from a basic Arg mimetic is associated with pan-αv activity (the 1,8-naphthyridine of GSK3008348 [114]), a neutral monodentate H-bond is not. Being an αv residue, it cannot account for selectivity among αvβx (§8.4) | Growth vector. Deliberately **not** encoded as a substructure filter (would over-constrain novelty); used in manual inspection of top docked poses |
 | 6 | **Interface water HOH2107** | 4.68 Å from ligand; bridges αv-Glu121 (2.6 Å) / β1-Ser177 (3.0 Å) | Possible water-mediated or water-displacement gains; post-hoc inspection only |
 | — | MIDAS-loop residues Ser132/Ser134/Glu229 | 3.0–3.3 Å from carboxylate | Context for the metal site; no direct constraint |
 
@@ -118,7 +118,7 @@ The four RGD tool compounds are in the core deliberately, for potency signal; th
 - Pull ChEMBL actives (IC50/Ki ≤ 1 µM) for integrin **αvβ3** and **α5β1**.
 - **ChEMBL target IDs verified against ChEMBL_37** (IC50 record counts in brackets): αvβ1 `CHEMBL2111407` [314], αvβ3 `CHEMBL1907598` [2158], α5β1 `CHEMBL2095226` [766], αvβ6 `CHEMBL2111416` [1361], αvβ8 `CHEMBL3430892` [276]. The Sabat document alone carries cross-integrin IC50 for αvβ3/α5β1/αvβ6/αvβ8/αvβ5/α4β1, so the selectivity picture for the primary series comes free with §3.1.
 - Note from the §3.1 audit: **αvβ1 selectivity does not require abandoning the RGD zwitterion.** Document `CHEMBL3862028` (*N-Arylsulfonyl-L-proline … Potent and Selective αvβ1 Inhibitors*, ACS Med Chem Lett 2016) contributes 36 molecules that are selective and sub-nM yet all carry an Arg mimic. Selectivity and chemotype are independent axes — the non-RGD core is chosen for **permeability**, not selectivity. Expect this on the poster.
-- Use post-hoc: flag any generated molecule with ECFP4 Tanimoto ≥ 0.5 to a counter-screen active.
+- ~~Use post-hoc: flag any generated molecule with ECFP4 Tanimoto ≥ 0.5 to a counter-screen active.~~ → **This clause is withdrawn (2026-09-27)**, for two reasons. First, **the set was never produced** — there is no αvβ3/α5β1 actives file under `data/`, and although §10's D2 is marked "all data frozen", this item was missed. Second, as the caveat above says of itself, similarity is not activity, and selectivity and chemotype are independent axes. §8.4 replaces it with three structural observations and §9.4 removes selectivity from the criteria.
 
 ### 3.3 Potency model (`ChemProp2`) — **NO-GO, decided at curation time**
 
@@ -483,13 +483,48 @@ Order matters — cheap to expensive:
    - **Exact-structure mismatch alone is not enough.** TL-A at 200 epochs memorizes (§4: max NN-Tanimoto = 1.000, some samples reproduce a training active verbatim). Adding one methyl group makes a "structure not seen before," so this criterion alone cannot answer "isn't this just cpd 25 with a methyl added?" Murcko does answer it.
    - **NN-Tanimoto is kept as a reported number, not a gate.** Of the 420 that pass on Murcko, **5 sit at NN ≥ 0.680 (max 0.738)**, so analog objections are possible. Reporting each lead's NN value alongside **the name of its nearest known active** lets a reader judge without a threshold. The band table above is retained only as context for reading that value — `data/novelty_band.json` is not a gate.
    - **Tautomer normalization bites directly here (§8.0).** Verified: PLN-1474's two tautomers give **different Murcko SMILES** without normalization (`...C1=CC=C2CCCN=C2N1` vs `...c1ccc2c(n1)NCCC2`), and identical Murcko SMILES with it. Without normalization, the novelty claim is breakable by a representation change.
-4. **Counter-screen flags:** Tanimoto ≥ 0.5 to αvβ3/α5β1 actives → flag only, no auto-discard (similarity ≠ activity), but the flag rate is reported.
+4. **Selectivity — reported as an observation, not claimed (revised 2026-09-27).** The former clause, flagging Tanimoto ≥ 0.5 to αvβ3/α5β1 actives, is **withdrawn**: the counter-screen set §3.2 specifies was never produced, so the clause is unexecutable, and §3.2 itself notes that similarity ≠ activity. Instead, **measure and report** these three on the poses that clear §8.5.
+
+   (i) **β1-Leu225 side-chain contact** — is a ligand hydrophobic atom within 4.5 Å of the Leu225 side chain (CB/CG/CD1/CD2)? Aligning the βI domains of ITGB1 (P05556, 20-residue signal peptide removed) and ITGB3 (P05106) shows that of the five residues Sabat names as the source of selectivity, **only Leu225 differs in β3**, which carries **Arg** there — a hydrophobic wall replaced by a charged side chain. Tyr133, Pro186, Cys187, Asn224 and Asp226 are all conserved. This explains why GLPG0187 and CWHM-12 engage the Leu225 **backbone** through the same 3-aminopropionyl framework and are nonetheless pan: the pocket needs the Leu **side chain**.
+
+   (ii) **The character of the αv-Asp218 contact** — within 4.0 Å of the Asp218 carboxylate oxygens, is there (a) a neutral hydrogen-bond donor, or (b) a basic nitrogen (an Arg-mimetic head)? (b) is associated with pan-αv activity in the literature: the 1,8-naphthyridine of the αvβ6 clinical candidate GSK3008348 forms a **salt bridge** with Asp218 [114], and Sabat's THN incorporation produced pan-αv inhibition [111].
+
+   (iii) **αv-Tyr178 π-stack** — is a ligand aromatic ring centroid within 5.5 Å of the Tyr178 ring centroid, with an inter-plane angle either under 30° (parallel) or 60–90° (T-shaped)? Measured in 8W30: closest atom 3.70 Å, centroid 6.21 Å, ring angle 74.6°.
+
+   **These are features reported as correlated with selectivity; they are not evidence of selectivity.** αvβ1 selectivity is determined by **both** the β subunit (against αvβ3/αvβ5/αvβ6/αvβ8) and the α subunit (against α5β1/α4β1/α8β1) [114], and this work addresses none of the latter — the same review names α5's Trp157, Gln221 and Ser224 as candidates and we do not analyse them. Nor has the contact said to confer selectivity ever been observed crystallographically: no αvβ1 structure existed as of 2020 [114], and the ligand in the first one, 8W30, has pIC50 5.30 and sits 7.00 Å from Asp218. **Measured cross-integrin IC50s are the only basis on which selectivity can be judged, and that is future work.**
 5. **Docking — a geometric filter, not an affinity ranking:**
    - Receptor: 8W30 chains A+B; strip ligand TR01225179 and waters (record the water decision; HOH2107 is the candidate to retain in a sensitivity run)
    - Tool: smina / AutoDock Vina; ~20 Å box on the ligand centroid
    - **Known limitation:** Vina-class scoring functions do not model metal coordination — the single most important interaction (carboxylate → MIDAS Ca²⁺) is invisible to the scorer. Therefore:
      - **(a) Validation:** redock TR01225179. Require carboxylate-O → Ca501 ≤ 3.2 Å in the top pose (ideally also heavy-atom RMSD < 2 Å against the crystal pose). **If validation fails, do not rank anything by docking** — fall back to similarity/QSAR-based triage and state that on the poster.
      - **(b) Post-hoc filter:** accept only poses with carboxylate O → Ca501 ≤ 3.2 Å **and** an H-bond donor within 3.5 Å of β1-Asn224 backbone O. Docking score is used only to break ties.
+
+   **Validation result — EXECUTED, PASSED (2026-09-27).** In a conda `docking` environment (smina 2020.12.10, openbabel), TR01225179 was redocked into 8W30 chain A+B with the ligand, waters and glycans removed and **all six Ca²⁺ retained**: `--autobox_ligand` plus `--autobox_add 6 --exhaustiveness 16 --num_modes 20 --seed 42`.
+
+   | pose | affinity | O→Ca501 | N→Asn224 O | RMSD |
+   |---|---|---|---|---|
+   | **1 (top)** | −6.91 | **2.72 Å** | **2.89 Å** | **0.63 Å** |
+   | 2 | −6.83 | 2.31 | 3.27 | 1.75 |
+   | 3 | −6.74 | 2.47 | 3.10 | 1.83 |
+   | crystal | — | 2.62 | 2.63 | — |
+
+   The top three poses all fall within 2 Å RMSD and the affinity ranking tracks the RMSD ranking. **Pose generation succeeded despite the missing metal term** — retaining Ca²⁺ in the receptor makes MIDAS a narrow polar concavity in which steric exclusion alone fixes where a carboxylate can sit. What the missing term still costs is **affinity ranking**, which is precisely why score is used only to break ties.
+
+   > **A caution about the RMSD.** Computed index-wise, assuming the atom order is preserved, the RMSD is 6.13 Å — smina/obabel reorder atoms relative to the input and the molecule carries symmetry (phenyl, dichlorophenyl). Measured with `rdMolAlign.CalcRMS`, which accounts for atom mapping and symmetry without superposing coordinates, it is 0.63 Å. **A naive RMSD turns a passed validation into an apparent failure.**
+
+   **Why the thresholds are these values.**
+
+   *carboxylate-O → Ca501 ≤ 3.2 Å* — First, **the first coordination shell of this structure ends at that boundary.** Ranking the O/N atoms coordinating Ca501 by distance: β1-Glu229 OE2 at 2.39 Å, β1-Ser132 OG at 2.45 Å, β1-Ser134 OG at 2.50 Å, **the ligand OXT at 2.62 Å** — then a **gap** — β1-Asp259 OD1 at 3.30 Å and β1-Asp130 OD2 at 3.85 Å. The void between 2.62 and 3.30 separates the first shell from the second, and 3.2 Å sits inside it. The cut-off is therefore not a convention but **a boundary this structure defines**. Second, Ca²⁺–O coordination normally runs 2.3–2.6 Å, so 3.2 Å is a generous ceiling that absorbs the coordinate error implied by a 2.45 Å structure and a rigid-receptor assumption. Third, it leaves 0.58 Å of headroom over the crystallographic 2.62 Å, and the redocked top pose came in at 2.72 Å (+0.10) — neither too tight nor too loose.
+
+   **The contact is judged monodentate.** Of the ligand's two carboxylate oxygens only `OXT` is close at 2.62 Å; the other (`O`) sits at **4.54 Å**. The condition is therefore **"either oxygen within 3.2 Å"** — requiring both would reject the crystal structure itself. **Ca501 is named** because Ca502 is 6.44 Å from the ligand and takes no part.
+
+   *H-bond donor → β1-Asn224 backbone O ≤ 3.5 Å* — The crystallographic value is **2.63 Å**. Compared against the same oxygen's other partners: Leu225 N at 2.25 Å (the backbone chain), the ligand N at 2.63 Å, Asn224 N at 2.65 Å — all in the 2.2–2.7 Å band. 3.5 Å is the standard generous cut-off for an N···O hydrogen bond and leaves 0.85 Å above that band. Asn224 exists only in chain B, as does the ligand, so this is an intra-chain contact.
+
+   **This contact confers binding, not selectivity.** Sabat 2024 states that the MIDAS and Asn224 contacts "substantiated the observed αvβ1 affinity but not necessarily isoform preference", and a β1/β3 sequence alignment confirms the structural reason: **Asn224 is conserved in β3** (§8.4).
+
+   *Pose generation parameters* — `--exhaustiveness 16 --num_modes 20`, `--seed 42`. With no metal term there is no reason to expect the correct geometry to rank first, so **generating many poses and filtering them geometrically** is the design of (b). The redocking put the top three within 2 Å, so 20 modes suffice.
+
+   *Water treatment* — the default receptor strips all waters. A second receptor retaining **HOH A2107** alone (4.68 Å from the ligand, at the subunit interface) is built for sensitivity analysis, because Sabat 2024 reports obtaining selectivity by engaging that **interface crystallographic water** instead of αv-Asp218. Report the difference between the two receptors.
 6. **ADMET:** apply ADMET-AI (or equivalent) to survivors — permeability proxy, solubility, microsomal stability, hERG, CYPs. The decision baseline is cpd 25's *measured* liabilities (MDCK < 0.1×10⁻⁶ cm/s, oral F 1.3% [111]). Predictions must clear that bar directionally.
 7. **Final selection:** roughly 10–20 leads satisfying: geometric filter pass, predicted permeability better than cpd 25, **Murcko scaffold absent from §8.3's 106-member set (`data/known_scaffolds.smi`)**, clean alerts, carboxylate present. QED and NN-Tanimoto (with the name of the nearest active) are reported alongside as **metrics, not gates**.
 
@@ -501,7 +536,7 @@ Through the **identical** funnel, the proposal succeeds if at least one generate
 1. passes the geometric docking filter (MIDAS + Asn224 contacts preserved),
 2. beats cpd 25 on the predicted permeability axes,
 3. **Murcko scaffold absent from the 106-member set in `data/known_scaffolds.smi`** (§8.3 — the union of five curated reference files; `actives_extended` alone, 103, is missing PLN-1474, bexotegrast and A1AFA). Both sides are judged after §8.0's tautomer normalization — without it, the same molecule can yield a different Murcko SMILES. NN-Tanimoto and the nearest known active's name are reported alongside as **metrics, not a gate**,
-4. carries no counter-screen or CustomAlerts flags (§5.4's replaced aniline pattern),
+4. carries no CustomAlerts flags (§5.4's replaced aniline pattern) — the **counter-screen clause is withdrawn** (§8.4): the set was never produced and the mechanism is weak. **Selectivity is not part of these criteria**,
 5. and, scored with the identical funnel and tools as the positive panel (PLN-1474, bexotegrast, CWHM-12, GLPG0187, cpd 25), is comparable on **non-circular axes** — passes the docking geometric filter on equal footing, beats cpd 25 on ADMET-AI permeability, and has a novel Murcko scaffold. **Total score is not used for comparison** (it is the value of an objective function we designed, so it is circular — §3.4, §5.4). The negative-panel clause is dropped (§3.4).
 
 **Falsification clause:** if nothing satisfies 1–4, report exactly that. It is evidence the carboxylate–permeability tension may be **target-intrinsic** — which is itself a finding, and the honest answer to the strongest attack on this project.
@@ -584,3 +619,4 @@ Pip installs binary-only (`--only-binary=:all:`). Without it, a package whose ne
 - [111] Sabat et al., J. Med. Chem. (2024) — Design and Discovery of a Potent and Selective Inhibitor of Integrin αvβ1
 - [112] PDB 8W30 — αvβ1 headpiece + TR01225179
 - [113] Qie, Wang, Li et al., *Molecular Diversity* (2026), doi 10.1007/s11030-026-11625-z — REINVENT4 stage-wise RL for EGFR inhibitor design + experimental validation. The **prior RL protocol** this project references
+- [114] Zheng Y, Leftheris K, *J. Med. Chem.* **2020**, 63, 5675–5696, doi 10.1021/acs.jmedchem.9b01869 — *Insights into Protein–Ligand Interactions in Integrin Complexes: Advances in Structure Determinations*. Source for: selectivity among αvβx being determined by the β subunit because αv is shared; the absence of any αvβ1 structure as of 2020; α5's Trp157/Gln221/Ser224; the Asp218 salt bridge of GSK3008348; and the 2,6-dichlorophenyl motif being a general SDL-proximal feature across integrin inhibitors.
