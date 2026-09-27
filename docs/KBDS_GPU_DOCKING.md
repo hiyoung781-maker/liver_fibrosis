@@ -5,6 +5,24 @@ earlier 138-line setup script wrapped them in diagnostics and `set -euo pipefail
 which under conda's own `conda.sh` aborted with **no output at all**. The commands
 below are meant to be pasted into a login-node shell.
 
+## Getting the code onto K-BDS
+
+The login node has outbound internet but **no GitHub SSH key**, so an `ssh://`
+remote fails with `Permission denied (publickey)`. The repository is public, so
+read-only HTTPS needs no credentials at all — no key to generate, no token:
+
+```bash
+cd /home01/<user>/liver_fibrosis
+git remote set-url origin https://github.com/hiyoung781-maker/liver_fibrosis.git
+git pull
+```
+
+Pushing from K-BDS is not set up and is not needed: code travels K-BDS-ward through
+git, and results come back by ordinary file transfer. The pose SDF is ~350 MB and
+does not belong in git anyway; only the geometry-filter summary CSV (a few MB) would.
+
+Note the repository is public, so everything committed is world-readable.
+
 ## Workflow this fits
 
 `~/kbds/kbds_gpu/*.sh` are **allocation holders**: each sbatch's an infinite
