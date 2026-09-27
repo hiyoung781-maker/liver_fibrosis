@@ -85,8 +85,9 @@ class TestWriteSurvivors(unittest.TestCase):
     def test_reproduces_the_reported_7767(self):
         """§6.3 and the ADMET run both report 7,767 survivors of data/library.smi.
         This pins that number to the committed inputs."""
-        known = {line.strip() for line in open("data/known_scaffolds.smi")
-                 if line.strip() and not line.startswith("#")}
+        with open("data/known_scaffolds.smi") as handle:
+            known = {line.strip() for line in handle
+                     if line.strip() and not line.startswith("#")}
         counts = write_survivors(self.out, "data/library.smi", known)
         self.assertEqual(counts["input"], 19485)
         self.assertEqual(counts["survivors"], 7767)

@@ -68,8 +68,9 @@ def write_survivors(out_path: str, library_path: str = DEFAULT_LIBRARY,
     they must stay stable: regenerating from the same library gives the same labels.
     """
     if known is None:
-        known = {line.strip() for line in open(KNOWN_SCAFFOLDS)
-                 if line.strip() and not line.startswith("#")}
+        with open(KNOWN_SCAFFOLDS) as handle:
+            known = {line.strip() for line in handle
+                     if line.strip() and not line.startswith("#")}
 
     smiles = [s for s, _ in load_smi(library_path)]
     scored = objective.score_smiles(smiles)

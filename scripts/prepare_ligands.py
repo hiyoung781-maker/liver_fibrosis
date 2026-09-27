@@ -24,13 +24,17 @@ from pathlib import Path
 from rdkit import Chem, RDLogger
 from rdkit.Chem import AllChem
 
-import shutil
 
-__all__ = ["CONTROL_SHARD", "embed", "write_shards"]
+__all__ = ["CONTROL_LABEL", "CONTROL_SHARD", "embed", "write_shards"]
 
 RDLogger.DisableLog("rdApp.*")
 
 CONTROL_SHARD = "shard_0000_control.sdf"
+# The control ligand is relabelled on the way in. Its own SDF title is
+# "ligand_crystal.pdb", which would travel all the way into the geometry CSV and the
+# passing-pose SDF as that string - indistinguishable at a glance from a filename
+# artefact. CONTROL_LABEL sorts apart from every gen_NNNNN and says what it is.
+CONTROL_LABEL = "CONTROL_crystal"
 DEFAULT_SHARD_SIZE = 10
 
 
@@ -67,7 +71,13 @@ def write_shards(survivors_path: str, out_dir: str,
 
     shards: list[str] = []
     if control_sdf:
-        shutil.copyfile(control_sdf, out / CONTROL_SHARD)
+        control = Chem.MolFromMolFile(control_sdf, removeHs=False)
+        if control is None:
+            raise ValueError(f"{control_sdf}: control ligand could not be read")
+        control.SetProp("_Name", CONTROL_LABEL)
+        writer = Chem.SDWriter(str(out / CONTROL_SHARD))
+        writer.write(control)
+        writer.close()
         shards.append(CONTROL_SHARD)
 
     failures: list[str] = []
