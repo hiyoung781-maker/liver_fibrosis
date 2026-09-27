@@ -25,10 +25,16 @@ __all__ = [
 ]
 
 # Every curated reference set, not just actives_extended. That file is defined as
-# ChEMBL alphaVbeta1 actives <= 1 uM, which omits PLN-1474 (structure from
-# AdisInsight, not a ChEMBL activity record), bexotegrast, and A1AFA (pIC50 5.30,
-# below the cut) - so on its own the gate would call a molecule rebuilding
-# PLN-1474's scaffold novel. The union is 106 scaffolds.
+# ChEMBL alphaVbeta1 actives <= 1 uM, which omits PLN-1474, bexotegrast, and A1AFA
+# (pIC50 5.30, below the cut) - so on its own the gate would call a molecule
+# rebuilding PLN-1474's scaffold novel. The union is 106 scaffolds.
+#
+# PLN-1474 IS in ChEMBL, as CHEMBL5933542 - an earlier version of this comment said
+# its structure came from AdisInsight rather than a ChEMBL record, which was
+# imprecise. ChEMBL holds it unnamed, with no synonyms and max_phase null, and its
+# only activity records are three alphaVbeta6 entries (IC50 50 nM). It has NO
+# alphaVbeta1 activity record, which is why the actives_extended query misses it
+# and why this union exists. Blueprint section 7.5.
 REFERENCE_FILES = (
     "data/actives_core.smi",
     "data/actives_core_B.smi",

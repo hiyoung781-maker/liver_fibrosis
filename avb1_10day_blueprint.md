@@ -133,7 +133,7 @@ The ≥ 100-molecule condition cannot be met in any defensible form:
 **Consequence:** the potency proxy is `TanimotoSimilarity`, which makes §5's endpoint handling load-bearing rather than optional. The real gain from the ChEMBL pull is not a QSAR model but a **novelty baseline computed over 197 actives instead of ~30**, which materially strengthens the §8.3 scaffold-novelty claim.
 
 ### 3.4 Benchmark panel (frozen on D2)
-- **Positives:** `data/benchmark_panel.smi` — the 8W30 ligand A1AFA, the most potent non-RGD Sabat compound (cpd 25 class), PLN-1474, bexotegrast, CWHM-12, GLPG0187. C8 is excluded; see §3.1.
+- **Positives:** `data/benchmark_panel.smi` — the 8W30 ligand A1AFA, `CHEMBL4649232`, PLN-1474, bexotegrast, CWHM-12, GLPG0187. C8 is excluded; see §3.1. **`CHEMBL4649232` is not called "cpd 25"** — nothing in the repository equates them, and §3.4's earlier wording said only "cpd 25 class". The molecule needs no such label to justify its place: per `data/actives_annotated.csv` it is the **most potent non-RGD active in the entire curated set at pIC50 9.78 (IC50 0.166 nM)**, and since non-RGD is the space this project targets, it belongs on the positive panel (MW 502.4, TPSA 133.3, cLogP 4.02). Its TPSA of 133.3 coinciding with the Sabat series' *median* of 133.3 is a coincidence, not evidence of identity.
 - **The negative panel is discarded (2026-09-26).** The objective gates on the carboxylate (§5.1), so a molecule without a carboxylic acid has a total-score ceiling of 6.31e-04. Random drug-like ChEMBL molecules mostly lack a carboxylic acid, so a negative panel would pile up at that floor, and "the generated set beats the negative panel" would just be re-measuring "the generated molecules carry a carboxylic acid" — a fact the objective already enforces and §5.5 already reports as a pass rate. It carries no information, so it is not built.
 - The only comparison worth making is against the positive panel, and only on **non-circular axes**: §8.5 docking geometry, §9.2 ADMET-AI permeability, Murcko novelty (§8.3), and alert/counter-screen flags. **Total score is not used for comparison** — it is the value of an objective function we designed, so comparing on it is circular (§5.4).
 - This panel passes through the **identical** scoring + triage funnel as generated molecules. This is what makes every poster comparison honest.
@@ -364,7 +364,7 @@ The acid median of 0.178 at `(40, 115)` is **the intended direction** — the ac
 
 **For the same reason, ADMET-AI is not put in the RL objective.** Doing so would make §9.2 circular too. Keeping TPSA in RL and ADMET-AI in post-hoc evaluation is what keeps the permeability claim non-circular — the same kind of deliberate constraint as §12's "no docking inside RL."
 
-**`SlogP` removed.** Three files disagreed — this document said "reverse_sigmoid, penalize above ~3", `reinvent4_avb1_scoring_config_sketch.toml` said `double_sigmoid(low=1, high=4)`, and the actually-run `logs/cmp.vigHoB/new3.toml` used `reverse_sigmoid(low=2, high=5, k=0.4)`. The 0.5-crossing of `reverse_sigmoid(2, 5, 0.4)` is actually **3.5** (logP 3.0 already scores 0.823, 3.25 scores 0.683), so "about 3" pointed at where the penalty becomes noticeable, not its crossing point. The source is §1's pocket table row 4 ("hydrophobic bulk tolerated → SlogP up to about 3"), but that row is a qualitative **permitted floor** derived from contact distances ("at least up to 3 is fine"), not "penalize above 3" — a misreading that turned a permitted lower bound into a penalty upper bound. The low/high values themselves are not derived from either document. More importantly, the direction is wrong: this project builds an **anion** with a mandatory carboxylate, and §9.2 requires "beat cpd 25 on predicted permeability." For an acidic compound the permeability bottleneck is the ionized carboxylate, not excess lipophilicity, so trimming logP above 3 would degrade the very axis this project claims to improve. Prior work [113]'s own reference is not a soft penalty either, but a hard filter (exclude MW > 500 or logP > 5). → moved to the §8.2 triage window. **The cost of this decision was measured in §6.3** — with no logP term, the agent's cLogP median drifted from the prior's 2.62 to 5.15, dropping the `logP ≤ 5` standalone pass rate from 90.1% to 46.5%. The directional argument above holds; the size of the drift is what it failed to predict.
+**`SlogP` removed.** Three files disagreed — this document said "reverse_sigmoid, penalize above ~3", `reinvent4_avb1_scoring_config_sketch.toml` said `double_sigmoid(low=1, high=4)`, and the actually-run `logs/cmp.vigHoB/new3.toml` used `reverse_sigmoid(low=2, high=5, k=0.4)`. The 0.5-crossing of `reverse_sigmoid(2, 5, 0.4)` is actually **3.5** (logP 3.0 already scores 0.823, 3.25 scores 0.683), so "about 3" pointed at where the penalty becomes noticeable, not its crossing point. The source is §1's pocket table row 4 ("hydrophobic bulk tolerated → SlogP up to about 3"), but that row is a qualitative **permitted floor** derived from contact distances ("at least up to 3 is fine"), not "penalize above 3" — a misreading that turned a permitted lower bound into a penalty upper bound. The low/high values themselves are not derived from either document. More importantly, the direction is wrong: this project builds an **anion** with a mandatory carboxylate, and §9.2 requires "beat PLN-1474 on predicted permeability" (§7.5 replaced cpd 25 as the benchmark). For an acidic compound the permeability bottleneck is the ionized carboxylate, not excess lipophilicity, so trimming logP above 3 would degrade the very axis this project claims to improve. Prior work [113]'s own reference is not a soft penalty either, but a hard filter (exclude MW > 500 or logP > 5). → moved to the §8.2 triage window. **The cost of this decision was measured in §6.3** — with no logP term, the agent's cLogP median drifted from the prior's 2.62 to 5.15, dropping the `logP ≤ 5` standalone pass rate from 90.1% to 46.5%. The directional argument above holds; the size of the drift is what it failed to predict.
 
 **`QED` removed.** PLN-1474 (the only αvβ1 inhibitor to reach the clinic) has a QED of **0.4619**, and the TL-A prior sample median QED is **0.468**. The one clinical-stage compound is indistinguishable from an ordinary prior sample, so it cannot serve as an optimization axis. (0.433 is the value computed on a non-aromatic tautomer and is an artifact of §8.0.) → kept only as a §8.7 reported metric.
 
@@ -526,7 +526,64 @@ The shift percentiles read 0.000 through p90. **Percentiles alone make the effec
 
 - `run_type = "scoring"` with the **identical scoring function from §5.1** applied to the frozen benchmark panel
 - **Precondition:** `CustomAlerts` must be running the replaced aniline pattern from §5.4 (`[NX3;H2][c]`). With the old `[NH2,NH][c]`, 5 of the 6 positive-panel molecules score 0, and §9.5 would false-pass — do not run §7 without this check
-- Output: **per-component** scores for cpd 25, PLN-1474, bexotegrast, CWHM-12, GLPG0187 (total score is also recorded but not used as a basis for comparison — §3.4) — the reference distribution behind every comparison shown on the poster
+- Output: **per-component** scores for all six panel compounds (total score is also recorded but not used as a basis for comparison — §3.4) — the reference distribution behind every comparison shown on the poster
+
+### 7.1 Execution — complete (2026-09-27)
+
+`configs/score_panel.toml` is **generated, not hand-written** (`scripts/make_scoring_config.py`): components come from `configs/_rl_scoring.frag`, the aggregator from `reinvent4_avb1_scoring_config_sketch.toml`'s `[stage.scoring]`, and the only transformation is dropping the `stage.` prefix. §5.4 records three files disagreeing on `SlogP`, so "identical to §5.1" is not left as a hand-copied assertion — `tests/test_scoring_config.py` compares the generated config's component tree against the frag's parsed tree.
+
+**Precondition verified — passes.** **No** panel molecule matches the aniline pattern (`[NX3;H2][c]`), any of the other seven alert SMARTS, or PAINS, and all six carry the carboxylate. This is pinned as a test. Exempting the panel from the filter was not the route taken — §9.5 requires the panel and the generated set to pass the **same** funnel, so an exemption would invalidate the comparison in the same way §7's precondition exists to prevent.
+
+### 7.2 The reference distribution
+
+| Compound | COOH | TPSA (raw) | TPSA | SAScore | alerts | total |
+|---|---|---|---|---|---|---|
+| A1AFA | 1.000 | 66.4 | 1.000 | 1.000 | pass | 1.000 |
+| PLN-1474 | 1.000 | 100.6 | 0.996 | 1.000 | pass | 0.998 |
+| bexotegrast | 1.000 | 112.5 | 0.723 | 1.000 | pass | 0.878 |
+| CHEMBL4649232 | 1.000 | 133.3 | 0.001 | 1.000 | pass | 0.060 |
+| GLPG0187 | 1.000 | 158.7 | 0.000 | 1.000 | pass | 0.001 |
+| CWHM-12 | 1.000 | 172.4 | 0.000 | 1.000 | pass | 0.001 |
+
+**On this panel the total is purely a TPSA readout.** COOH, SAScore and alerts read identically at maximum for all six, so the total's ordering is the TPSA ordering. The panel splits in two (inside the window: A1AFA, PLN-1474, bexotegrast; outside: CHEMBL4649232, GLPG0187, CWHM-12), and the boundary is the `(40, 115)` window we drew in §5.4 around PLN-1474 (100.6) and bexotegrast (112.5).
+
+**§3.4's and §5.4's prohibition on comparing totals is confirmed here numerically.** The generated library's median total is 1.00; CWHM-12's is 0.001. That thousand-fold gap is not a finding but **a restatement of how we drew the window** — CWHM-12 was never proposed as an oral structure. And the new benchmark compound, PLN-1474, already sits at **0.998, essentially the ceiling**, so "matches PLN-1474" is not a bar on the objective either. Only non-circular axes can carry a comparison (§8.5 docking geometry, §9.2 ADMET-AI, Murcko novelty).
+
+**GATE_FLOOR is not carboxylate-specific.** CWHM-12's and GLPG0187's total of 6.31e-04 is the **same value** §5.1 describes as the cost of a missing MIDAS anchor (`1e-8^(1/2.5)`), yet both carry the carboxylate and reach it through a TPSA clamped to zero. So **a total near the floor does not identify which component failed** — which is why per-component reporting is the deliverable.
+
+### 7.3 Normalization is a no-op on the panel, and that is the fact §9.5 needs
+
+All six curated panel SMILES are **already their own canonical tautomer**. The as-curated and §8.0-normalized arms agree on all six, so §9.5's comparison against normalized generated molecules (library.smi column 1) is symmetric with no extra work — the problem §8.0 exists to prevent simply does not arise on the panel. The 19 verdict reversals §6.5 measured in the generated set are zero here.
+
+REINVENT scoring was therefore run **once**. With byte-identical inputs the second arm is pure waste. `tests/test_panel_report.py` pins this as an assertion, so if anyone puts a non-canonical tautomer into `data/benchmark_panel.smi`, the test reports that the comparison went asymmetric.
+
+### 7.4 Cross-check of the reference implementation — agrees
+
+`scripts/objective.py` against REINVENT's own scorer, on the six panel compounds:
+
+| Component | max \|difference\| |
+|---|---|
+| total | 2.5e-09 |
+| COOH | 0 |
+| TPSA | 1.6e-08 |
+| SAScore | 0 |
+| alerts | 0 |
+
+The two scorers **differ by exactly one filter, PAINS** — `CustomAlerts` takes only SMARTS and the RDKit PAINS catalog is a Python object, so it cannot be expressed in the TOML. No panel molecule matches PAINS, so the difference does not show on this panel. §8 will score 19,485 molecules with `objective.py`, so confirming that the reference implementation agrees with the real scorer **on the exact six compounds the poster cites** is this step's substantive output.
+
+### 7.5 Replacing the permeability benchmark: cpd 25 → PLN-1474 (2026-09-27)
+
+§9.2, §9.5 and §8's items 6 and 7 all took "beat cpd 25 on predicted permeability" as the bar. It is **replaced with PLN-1474 (`CHEMBL5933542`)**, for two reasons.
+
+**First, the bar is low by construction.** cpd 25 was never put forward as a lead compound — and §5.4's stated reason for **rejecting** that series as the basis for the TPSA window was that "its high TPSA just restates that it was never proposed as an oral structure, and is therefore circular." The identical objection applies to using it as the permeability baseline. Beating a compound never optimized for oral exposure is not a finding.
+
+**Second, it was not a like-for-like comparison.** The old wording set **our prediction** against cpd 25's **measured** liabilities (MDCK < 0.1×10⁻⁶ cm/s, oral F 1.3% [111]). Comparing a model output to an experimental number does not even guarantee the direction. PLN-1474's ADME is not public, so §9.2 becomes **ADMET-AI applied to both sides — predicted versus predicted**: a harder bar, but a valid comparison.
+
+The case for PLN-1474 as the anchor is already in this document: it is the **only αvβ1 inhibitor to enter the clinic** (Phase 1 completed, development then halted), and §5.4 drew the `(40, 115)` TPSA window around its 100.6. Keeping the permeability baseline on the same compound is consistent.
+
+**`CHEMBL5933542` = PLN-1474, verified.** Flattened, it yields exactly the same SMILES as `data/benchmark_panel.smi`'s PLN-1474, and ChEMBL's reported TPSA of 100.55 matches §5.4's 100.6.
+
+**One fact surfaced along the way — §8.3's five-file union still stands.** ChEMBL holds `CHEMBL5933542` **unnamed, with no synonyms and `max_phase` null**, and its only activity records are **three αvβ6 entries (IC50 50 nM), with no αvβ1 record at all.** So `data/actives_extended.smi`'s definition ("ChEMBL αvβ1 actives ≤ 1 µM") legitimately missed it, and §8.3's reason for taking the union of five reference files holds unchanged. But `scripts/known_scaffolds.py`'s comment describing PLN-1474 as having its "structure from AdisInsight, not a ChEMBL activity record" was imprecise — **the structure is in ChEMBL**; what is absent is the αvβ1 activity record. The comment is corrected.
 
 ---
 
@@ -619,8 +676,8 @@ Order matters — cheap to expensive:
    *Pose generation parameters* — `--exhaustiveness 16 --num_modes 20`, `--seed 42`. With no metal term there is no reason to expect the correct geometry to rank first, so **generating many poses and filtering them geometrically** is the design of (b). The redocking put the top three within 2 Å, so 20 modes suffice.
 
    *Water treatment* — the default receptor strips all waters. A second receptor retaining **HOH A2107** alone (4.68 Å from the ligand, at the subunit interface) is built for sensitivity analysis, because Sabat 2024 reports obtaining selectivity by engaging that **interface crystallographic water** instead of αv-Asp218. Report the difference between the two receptors.
-6. **ADMET:** apply ADMET-AI (or equivalent) to survivors — permeability proxy, solubility, microsomal stability, hERG, CYPs. The decision baseline is cpd 25's *measured* liabilities (MDCK < 0.1×10⁻⁶ cm/s, oral F 1.3% [111]). Predictions must clear that bar directionally.
-7. **Final selection:** roughly 10–20 leads satisfying: geometric filter pass, predicted permeability better than cpd 25, **Murcko scaffold absent from §8.3's 106-member set (`data/known_scaffolds.smi`)**, clean alerts, carboxylate present. QED and NN-Tanimoto (with the name of the nearest active) are reported alongside as **metrics, not gates**.
+6. **ADMET:** apply ADMET-AI (or equivalent) to survivors — permeability proxy, solubility, microsomal stability, hERG, CYPs. **The baseline is PLN-1474, predicted with the same tool and compared prediction-to-prediction.** The earlier wording used cpd 25's *measured* liabilities (MDCK < 0.1×10⁻⁶ cm/s, oral F 1.3% [111]) as the baseline; it was revised for two reasons (§7.5).
+7. **Final selection:** roughly 10–20 leads satisfying: geometric filter pass, predicted permeability **better than PLN-1474**, **Murcko scaffold absent from §8.3's 106-member set (`data/known_scaffolds.smi`)**, clean alerts, carboxylate present. QED and NN-Tanimoto (with the name of the nearest active) are reported alongside as **metrics, not gates**.
 
 ---
 
@@ -628,10 +685,10 @@ Order matters — cheap to expensive:
 
 Through the **identical** funnel, the proposal succeeds if at least one generated molecule satisfies:
 1. passes the geometric docking filter (MIDAS + Asn224 contacts preserved),
-2. beats cpd 25 on the predicted permeability axes,
+2. **beats PLN-1474 (`CHEMBL5933542`)** on the predicted permeability axes (revised 2026-09-27 — the earlier wording was "beats cpd 25"; see §7.5),
 3. **Murcko scaffold absent from the 106-member set in `data/known_scaffolds.smi`** (§8.3 — the union of five curated reference files; `actives_extended` alone, 103, is missing PLN-1474, bexotegrast and A1AFA). Both sides are judged after §8.0's tautomer normalization — without it, the same molecule can yield a different Murcko SMILES. NN-Tanimoto and the nearest known active's name are reported alongside as **metrics, not a gate**,
 4. carries no CustomAlerts flags (§5.4's replaced aniline pattern) — the **counter-screen clause is withdrawn** (§8.4): the set was never produced and the mechanism is weak. **Selectivity is not part of these criteria**,
-5. and, scored with the identical funnel and tools as the positive panel (PLN-1474, bexotegrast, CWHM-12, GLPG0187, cpd 25), is comparable on **non-circular axes** — passes the docking geometric filter on equal footing, beats cpd 25 on ADMET-AI permeability, and has a novel Murcko scaffold. **Total score is not used for comparison** (it is the value of an objective function we designed, so it is circular — §3.4, §5.4). The negative-panel clause is dropped (§3.4).
+5. and, scored with the identical funnel and tools as the six positive-panel compounds (A1AFA, PLN-1474, bexotegrast, CWHM-12, GLPG0187, CHEMBL4649232), is comparable on **non-circular axes** — passes the docking geometric filter on equal footing, **beats PLN-1474 on ADMET-AI permeability**, and has a novel Murcko scaffold. **Total score is not used for comparison** (it is the value of an objective function we designed, so it is circular — §3.4, §5.4; §7.2 confirms this numerically). The negative-panel clause is dropped (§3.4).
 
 **Falsification clause:** if nothing satisfies 1–4, report exactly that. It is evidence the carboxylate–permeability tension may be **target-intrinsic** — which is itself a finding, and the honest answer to the strongest attack on this project.
 
@@ -646,7 +703,7 @@ Through the **identical** funnel, the proposal succeeds if at least one generate
 | D3 | TL-A and TL-B runs + diagnostics on all three arms | one arm selected on the D3 checks, **chemotype drift decisive**; if TL-B raises the Arg-mimic fraction or TPSA, it is out regardless of its other numbers |
 | D4 | **Preceding work:** add tautomer normalization to the comparison layer (`scripts/normalize.py`) → recompute `novelty_band.json` (§8.0); verify the `CustomAlerts` aniline pattern replacement (§5.4). **`curate_actives.standardize()` is deliberately left untouched** — its output is written to `data/actives_core.smi`, the TL-A training input and RL inception seed, and adding tautomer canonicalization there would invalidate the completed D3 run; normalization lives only in the comparison layer (`scripts/normalize.py:8-9`, `scripts/curate_actives.py:243-246`). Then RL single stage, steps 0–300 | start only after confirming no reference-set molecule scores 0 **beyond the one recorded in §5.4** — the eight SMARTS the RL run applies zero `CHEMBL4756602` in `actives_extended` via `[Nr0][Nr0]` (acyclic N–N, the hydrazine class). That pattern is a legitimate reactive alert and 1 of 190 is not the aniline catastrophe of 164/190, so it is accepted rather than hidden. PAINS is absent from the RL config and applies only in `objective.py` / the §8 triage, where the count is 3 (`CHEMBL244434` and `CHEMBL244013` via `mannich_A(296)`). Log §5.5 diagnostics every 100 steps |
 | D5 | RL single stage, steps 300–600 | final agent; watch for collapse onto known series (NN-Tanimoto rising above 0.6 → raise DF `minscore` 0.4 → 0.5, restart from an earlier checkpoint if needed). **No similarity-weight adjustment is possible** — that component is not in the objective (§5.2) |
-| D6 | Sampling 20k **(complete)**; benchmark panel scoring | `data/library.smi` 19,485 + `data/library_prior.smi` 18,346 (§6.1); reference score distributions |
+| D6 | Sampling 20k **(complete)**; benchmark panel scoring **(complete, §7.1)** | `data/library.smi` 19,485 + `data/library_prior.smi` 18,346 (§6.1); reference score distributions |
 | D7 | Docking setup + TR01225179 redocking validation | validated protocol **or** documented fallback to similarity/QSAR-only triage |
 | D8 | Dock + geometric filter + ADMET + counter-screens | triage table |
 | D9 | Benchmark comparison, lead selection, results table + figures | top 10–20 leads |

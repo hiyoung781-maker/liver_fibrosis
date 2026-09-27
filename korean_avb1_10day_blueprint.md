@@ -133,7 +133,7 @@ RGD 툴 화합물 4개는 potency 신호를 위해 의도적으로 코어에 포
 **결과:** potency proxy는 `TanimotoSimilarity`이며, 따라서 §5의 endpoint 처리가 선택이 아니라 필수 요소가 된다. ChEMBL 수집의 실질적 이득은 QSAR 모델이 아니라 **novelty 기준선을 ~30개가 아닌 197개 active 위에서 계산한다는 점**이고, 이것이 §8.3의 scaffold novelty 주장을 실질적으로 강화한다.
 
 ### 3.4 벤치마크 패널 (D2에 고정)
-- **양성:** `data/benchmark_panel.smi` — 8W30 리간드 A1AFA, 가장 강력한 비-RGD Sabat 화합물(cpd 25 계열), PLN-1474, bexotegrast, CWHM-12, GLPG0187. C8은 제외했다(§3.1 참조).
+- **양성:** `data/benchmark_panel.smi` — 8W30 리간드 A1AFA, `CHEMBL4649232`, PLN-1474, bexotegrast, CWHM-12, GLPG0187. C8은 제외했다(§3.1 참조). **`CHEMBL4649232`를 "cpd 25"로 부르지 않는다** — 저장소에 둘을 동일시하는 기록이 없고 §3.4의 옛 문구는 "cpd 25 계열"이라고만 적었다. 이 분자의 근거는 그 자체로 충분하다: `data/actives_annotated.csv` 기준 **pIC50 9.78(IC50 0.166 nM)로 큐레이션한 전체 집합에서 가장 강력한 non-RGD active**이며, 우리가 겨냥하는 공간이 non-RGD이므로 양성 패널에 있어야 할 분자다(MW 502.4, TPSA 133.3, cLogP 4.02). TPSA 133.3이 Sabat 25개 계열의 *중앙값* 133.3과 같은 것은 우연이며, 동일성의 근거가 아니다.
 - **음성 패널은 폐기한다(2026-09-26).** 목적함수가 카르복실레이트를 게이트로 요구하므로(§5.1) 카르복실산이 없는 분자는 총점 상한이 6.31e-04다. 무작위 drug-like ChEMBL 분자는 대부분 카르복실산이 없으니 음성 패널은 그 바닥에 몰리고, "생성 집합이 음성 패널을 능가한다"는 **"생성 분자에 카르복실산이 있다"를 다시 재는 것**이 된다 — 목적함수가 강제하고 §5.5가 통과율로 이미 보고하는 사실이다. 정보량이 없으므로 만들지 않는다.
 - 의미 있는 비교는 양성 패널이며, **순환하지 않는 축**에서만 한다: §8.5 docking 기하, §9.2 ADMET-AI permeability, Murcko 신규성(§8.3), alert/counter-screen. **총점으로 비교하지 않는다** — 총점은 우리가 설계한 목적함수의 값이므로 순환이다(§5.4).
 - 이 패널은 생성 분자와 **완전히 동일한** scoring + triage funnel을 통과한다. 포스터의 모든 비교가 정직해지는 근거가 바로 이것이다.
@@ -364,7 +364,7 @@ PAINS는 **이 TOML로 표현할 수 없다** — `reinvent_plugins`에는 PAINS
 
 **같은 이유로 ADMET-AI를 RL 목적함수에 넣지 않는다.** 넣으면 §9.2도 순환이 된다. TPSA를 RL에, ADMET-AI를 사후 평가에 두는 분리가 투과성 주장을 비순환으로 유지하는 장치이며, 이는 §12의 "RL 내부 docking 미사용"과 같은 종류의 의도적 제약이다.
 
-**`SlogP` 제거.** 세 파일이 서로 달랐다 — 이 문서는 "reverse_sigmoid, 약 3 초과 시 페널티", `reinvent4_avb1_scoring_config_sketch.toml`은 `double_sigmoid(low=1, high=4)`, 실제 실행된 `logs/cmp.vigHoB/new3.toml`은 `reverse_sigmoid(low=2, high=5, k=0.4)`. `reverse_sigmoid(2, 5, 0.4)`의 0.5 교차점은 실제로 **3.5**이고(logP 3.0에서 이미 0.823, 3.25에서 0.683), "약 3"은 페널티가 눈에 띄기 시작하는 지점을 가리킨 것이다. 출처는 §1 pocket 표 4행("소수성 부피 수용 가능 → SlogP 약 3까지")이지만, 그 행은 접촉 거리에서 얻은 정성적 **허용 하한**("적어도 3까지는 괜찮다")이며 "3을 넘으면 벌점"이 아니다 — 허용 범위의 하한을 페널티의 상한으로 바꿔 쓴 오독이다. low/high 값 자체는 어느 문서에서도 유도되지 않는다. 더 중요한 것은 방향이다 — 이 프로젝트는 필수 카르복실레이트를 가진 **음이온**을 만들고 §9.2는 "예측 permeability에서 cpd 25를 능가"를 요구한다. 산성 화합물의 투과성 병목은 지질친화성 과다가 아니라 이온화된 카르복실레이트이므로, logP를 3 위에서 깎으면 개선하겠다고 선언한 축을 악화시킨다. 선행연구 [113]의 준거도 soft penalty가 아니라 hard filter(MW > 500 또는 logP > 5 제외)다. → §8.2 triage 창으로 이동. **이 결정이 남긴 비용은 §6.3에서 측정했다** — logP 항이 없는 상태에서 agent의 cLogP 중앙값이 prior의 2.62에서 5.15로 드리프트해, `logP ≤ 5` 단독 통과율이 90.1% → 46.5%로 떨어졌다. 방향에 관한 위 논거는 유지되지만 드리프트의 크기는 위에서 예측하지 못한 것이다.
+**`SlogP` 제거.** 세 파일이 서로 달랐다 — 이 문서는 "reverse_sigmoid, 약 3 초과 시 페널티", `reinvent4_avb1_scoring_config_sketch.toml`은 `double_sigmoid(low=1, high=4)`, 실제 실행된 `logs/cmp.vigHoB/new3.toml`은 `reverse_sigmoid(low=2, high=5, k=0.4)`. `reverse_sigmoid(2, 5, 0.4)`의 0.5 교차점은 실제로 **3.5**이고(logP 3.0에서 이미 0.823, 3.25에서 0.683), "약 3"은 페널티가 눈에 띄기 시작하는 지점을 가리킨 것이다. 출처는 §1 pocket 표 4행("소수성 부피 수용 가능 → SlogP 약 3까지")이지만, 그 행은 접촉 거리에서 얻은 정성적 **허용 하한**("적어도 3까지는 괜찮다")이며 "3을 넘으면 벌점"이 아니다 — 허용 범위의 하한을 페널티의 상한으로 바꿔 쓴 오독이다. low/high 값 자체는 어느 문서에서도 유도되지 않는다. 더 중요한 것은 방향이다 — 이 프로젝트는 필수 카르복실레이트를 가진 **음이온**을 만들고 §9.2는 "예측 permeability에서 PLN-1474를 능가"를 요구한다(§7.5에서 기준 분자를 cpd 25에서 교체했다). 산성 화합물의 투과성 병목은 지질친화성 과다가 아니라 이온화된 카르복실레이트이므로, logP를 3 위에서 깎으면 개선하겠다고 선언한 축을 악화시킨다. 선행연구 [113]의 준거도 soft penalty가 아니라 hard filter(MW > 500 또는 logP > 5 제외)다. → §8.2 triage 창으로 이동. **이 결정이 남긴 비용은 §6.3에서 측정했다** — logP 항이 없는 상태에서 agent의 cLogP 중앙값이 prior의 2.62에서 5.15로 드리프트해, `logP ≤ 5` 단독 통과율이 90.1% → 46.5%로 떨어졌다. 방향에 관한 위 논거는 유지되지만 드리프트의 크기는 위에서 예측하지 못한 것이다.
 
 **`QED` 제거.** PLN-1474(αvβ1 저해제 중 유일하게 임상 착수)의 QED는 **0.4619**이고 TL-A prior 샘플의 QED 중앙값은 **0.468**이다. 유일한 임상 진입 화합물이 평범한 prior 샘플과 구별되지 않으므로 최적화 축으로 쓸 수 없다. (0.433은 비방향족 타우토머로 계산한 값이며 §8.0의 artifact다.) → §8.7 보고 지표로만 유지.
 
@@ -526,7 +526,64 @@ NN-Tanimoto의 **중앙값은 두 arm이 같고 p90만 갈린다**(0.39 vs 0.58)
 
 - 고정된 벤치마크 패널에 **§5.1과 동일한 scoring function**을 적용해 `run_type = "scoring"` 실행
 - **선행 조건:** `CustomAlerts`가 §5.4의 교체된 aniline 패턴(`[NX3;H2][c]`)을 쓰고 있어야 한다. 기존 `[NH2,NH][c]`로는 양성 패널 6개 중 5개가 0점이 되어 §9.5가 false pass한다 — 이 검증 없이 §7을 실행하지 말 것
-- 출력: cpd 25, PLN-1474, bexotegrast, CWHM-12, GLPG0187에 대한 **component별** 점수(총점도 기록하되 비교 근거로 쓰지 않는다 — §3.4) — 포스터에 실릴 모든 비교의 배경이 되는 기준 분포
+- 출력: 패널 6개 전부에 대한 **component별** 점수(총점도 기록하되 비교 근거로 쓰지 않는다 — §3.4) — 포스터에 실릴 모든 비교의 배경이 되는 기준 분포
+
+### 7.1 실행 — 완료(2026-09-27)
+
+`configs/score_panel.toml`은 **손으로 쓰지 않고 생성했다**(`scripts/make_scoring_config.py`). component는 `configs/_rl_scoring.frag`에서, aggregator는 `reinvent4_avb1_scoring_config_sketch.toml`의 `[stage.scoring]`에서 읽고, `stage.` 접두사만 벗긴다. §5.4가 `SlogP` 값이 세 파일에서 어긋난 사고를 기록했으므로 "§5.1과 동일"을 손으로 베낀 주장으로 두지 않는다 — `tests/test_scoring_config.py`가 생성된 config의 component 트리를 frag의 파싱 결과와 대조한다.
+
+**사전 조건 검증 — 통과.** 패널 6개 중 aniline 패턴(`[NX3;H2][c]`)·나머지 7개 alert SMARTS·PAINS에 걸리는 분자는 **하나도 없고**, 6개 모두 카르복실산을 갖는다. 테스트로 고정했다. 패널만 필터에서 면제하는 방식은 쓰지 않았다 — §9.5가 패널과 생성 집합에 **동일한** funnel을 요구하므로, 면제는 §7의 사전 조건이 막으려는 것과 같은 종류로 비교를 무효화한다.
+
+### 7.2 기준 분포
+
+| 화합물 | COOH | TPSA(원값) | TPSA | SAScore | alert | 총점 |
+|---|---|---|---|---|---|---|
+| A1AFA | 1.000 | 66.4 | 1.000 | 1.000 | 통과 | 1.000 |
+| PLN-1474 | 1.000 | 100.6 | 0.996 | 1.000 | 통과 | 0.998 |
+| bexotegrast | 1.000 | 112.5 | 0.723 | 1.000 | 통과 | 0.878 |
+| CHEMBL4649232 | 1.000 | 133.3 | 0.001 | 1.000 | 통과 | 0.060 |
+| GLPG0187 | 1.000 | 158.7 | 0.000 | 1.000 | 통과 | 0.001 |
+| CWHM-12 | 1.000 | 172.4 | 0.000 | 1.000 | 통과 | 0.001 |
+
+**이 패널에서 총점은 전적으로 TPSA 판독값이다.** COOH·SAScore·alert가 6개 모두 동일하게 만점이므로 총점의 순서는 TPSA 순서와 같다. 패널이 둘로 갈리는데(창 안: A1AFA·PLN-1474·bexotegrast / 창 밖: CHEMBL4649232·GLPG0187·CWHM-12), 그 경계는 우리가 §5.4에서 PLN-1474(100.6)와 bexotegrast(112.5)에 맞춰 그은 `(40, 115)` 창이다.
+
+**총점으로 비교하지 말라는 §3.4·§5.4의 금지가 여기서 수치로 확인된다.** 생성 library의 총점 중앙값은 1.00이고 CWHM-12는 0.001이다. 이 1000배 차이는 발견이 아니라 **창을 그은 방식의 재진술**이다 — CWHM-12는 애초에 경구용으로 제안된 구조가 아니다. 그리고 새 기준 분자인 PLN-1474는 **0.998로 이미 천장에 붙어 있어** "PLN-1474에 준한다"도 목적함수 위에서는 바가 되지 못한다. 비교를 지탱할 수 있는 것은 순환하지 않는 축뿐이다(§8.5 docking 기하, §9.2 ADMET-AI, Murcko 신규성).
+
+**GATE_FLOOR는 카르복실산 전용이 아니다.** CWHM-12와 GLPG0187의 총점 6.31e-04는 §5.1이 "MIDAS anchor 부재의 대가"로 설명한 값(`1e-8^(1/2.5)`)과 **같은 값**인데, 두 분자는 카르복실산을 갖고 있고 TPSA가 0으로 clamp되어 그 값에 도달했다. 즉 **총점이 floor 근처라는 것만으로는 어느 component가 실패했는지 알 수 없다.** component별 보고가 필요한 이유다.
+
+### 7.3 정규화는 패널에서 무동작이고, 그것이 §9.5에 필요한 사실이다
+
+패널 6개의 큐레이션된 SMILES는 **이미 각자의 canonical 타우토머**다. as-curated와 §8.0 정규화 결과가 6개 전부 동일하므로, §9.5가 정규화된 생성 분자(library.smi 1열)와 패널을 비교할 때 비대칭이 발생하지 않는다 — §8.0이 막으려는 문제가 패널에서는 애초에 없다. §6.5가 생성 집합에서 측정한 판정 반전(19건)이 패널에서는 0건이다.
+
+따라서 REINVENT scoring은 **한 번만** 돌렸다. 입력 파일이 바이트 단위로 같으므로 두 번째 arm은 순수한 낭비다. 이 사실을 `tests/test_panel_report.py`가 단정으로 고정하므로, 누군가 `data/benchmark_panel.smi`에 비-canonical 타우토머를 넣으면 테스트가 비대칭을 알린다.
+
+### 7.4 참조 구현 교차 검증 — 일치
+
+`scripts/objective.py`와 REINVENT의 실제 scorer를 패널 6개에서 대조했다.
+
+| component | 최대 \|차이\| |
+|---|---|
+| 총점 | 2.5e-09 |
+| COOH | 0 |
+| TPSA | 1.6e-08 |
+| SAScore | 0 |
+| alert | 0 |
+
+두 scorer는 **PAINS 하나만큼 다르다** — `CustomAlerts`는 SMARTS만 받고 RDKit PAINS 카탈로그는 Python 객체라서 TOML로 표현할 수 없다. 패널 6개가 PAINS에 걸리지 않으므로 이 패널에서는 차이가 나타나지 않는다. §8이 `objective.py`로 19,485개를 채점할 예정이므로, **포스터가 인용할 바로 그 6개에서** 참조 구현이 실제 scorer와 일치함을 확인한 것이 이 단계의 실질적 산출이다.
+
+### 7.5 투과성 기준 분자를 cpd 25에서 PLN-1474로 교체(2026-09-27)
+
+§9.2·§9.5·§8의 6·7항이 "예측 permeability에서 cpd 25를 능가"를 기준으로 삼고 있었다. 두 가지 이유로 **PLN-1474(`CHEMBL5933542`)로 교체한다.**
+
+**첫째, 바가 구성상 낮다.** cpd 25는 lead compound로 제시된 분자가 아니다 — §5.4가 TPSA 창의 근거로 이 계열을 **거부한 이유**가 "그 계열 TPSA가 높은 것은 애초에 경구용으로 제안된 구조가 아니기 때문이고, 따라서 순환"이었다. 같은 반박이 투과성 기준선에도 그대로 적용된다. 경구 노출을 위해 최적화된 적 없는 분자를 능가하는 것은 발견이 아니다.
+
+**둘째, 동종 비교가 아니었다.** 기존 문구는 **우리의 예측값**을 cpd 25의 **실측값**(MDCK < 0.1×10⁻⁶ cm/s, oral F 1.3% [111])과 맞대고 있었다. 모델 출력과 실험값의 비교는 방향성조차 보장되지 않는다. PLN-1474의 ADME는 비공개이므로 §9.2가 **ADMET-AI를 양쪽에 적용한 예측 대 예측**이 된다 — 더 어려운 바이지만 유효한 비교다.
+
+PLN-1474가 올바른 앵커인 근거는 이미 문서 안에 있다: αvβ1 저해제 중 **유일하게 임상에 진입**했고(Phase 1 완료, 이후 개발 중단), §5.4가 TPSA 창 `(40, 115)`를 이 분자의 100.6에 맞춰 그었다. 투과성 기준선도 같은 분자로 두는 것이 일관된다.
+
+**`CHEMBL5933542` = PLN-1474 확인.** 평탄화하면 `data/benchmark_panel.smi`의 PLN-1474와 정확히 동일한 SMILES가 되고, ChEMBL이 보고하는 TPSA 100.55가 §5.4의 100.6과 일치한다.
+
+**확인 과정에서 나온 사실 하나 — §8.3의 5파일 합집합 논거는 유지된다.** ChEMBL은 `CHEMBL5933542`를 **이름 없이, synonym 없이, `max_phase` null**로 갖고 있으며, 활성 기록은 **αvβ6 IC50 50 nM 세 건뿐이고 αvβ1 기록이 없다.** 그래서 `data/actives_extended.smi`의 정의("ChEMBL αvβ1 active ≤ 1 µM")가 이 분자를 놓친 것이 정당하며, §8.3이 참조 파일 5개의 합집합을 쓰는 이유가 그대로 성립한다. 다만 `scripts/known_scaffolds.py`의 주석이 PLN-1474를 "구조가 AdisInsight에서 왔고 ChEMBL 활성 기록이 아니다"로 적었던 것은 부정확했다 — **구조는 ChEMBL에 있고**, 없는 것은 αvβ1 활성 기록이다. 주석을 정정했다.
 
 ---
 
@@ -619,8 +676,8 @@ NN-Tanimoto의 **중앙값은 두 arm이 같고 p90만 갈린다**(0.39 vs 0.58)
    *pose 생성 파라미터* — `--exhaustiveness 16 --num_modes 20`, `--seed 42`. 금속 항이 없으므로 올바른 기하가 최상위로 오르는 것을 기대할 수 없고 **pose를 많이 만들어 기하로 걸러내는 것**이 (b)의 설계다. redocking에서 상위 3개가 2 Å 이내였으므로 20 modes로 충분하다.
 
    *물 처리* — 기본 receptor는 물을 모두 제거한다. **HOH A2107**(리간드로부터 4.68 Å, 서브유닛 계면)만 유지한 receptor를 민감도 분석용으로 함께 만든다. Sabat 2024가 αv-Asp218 대신 **계면 결정수**를 engage하는 전략으로 선택성을 얻었다고 보고하기 때문이다. 두 receptor의 결과 차이를 보고한다.
-6. **ADMET:** 생존 분자에 ADMET-AI(또는 동등 도구) 적용 — permeability proxy, 용해도, microsome 안정성, hERG, CYP. 의사결정의 기준선은 cpd 25의 *실측* 약점이다(MDCK < 0.1×10⁻⁶ cm/s, oral F 1.3% [111]). 예측치는 방향성 면에서 이 기준을 넘어야 한다.
-7. **최종 선별:** 다음을 만족하는 lead 약 10–20개 — 기하학적 필터 통과, 예측 permeability가 cpd 25보다 우수, **Murcko scaffold가 §8.3의 106개 집합(`data/known_scaffolds.smi`)에 없음**, alert 없음, 카르복실레이트 보유. QED와 NN-Tanimoto(최근접 active 이름 포함)는 **게이트가 아니라 보고 지표**로 병기한다.
+6. **ADMET:** 생존 분자에 ADMET-AI(또는 동등 도구) 적용 — permeability proxy, 용해도, microsome 안정성, hERG, CYP. **기준선은 PLN-1474이며, 같은 도구로 예측해 비교한다(예측 대 예측).** 이전 문구는 cpd 25의 *실측* 약점(MDCK < 0.1×10⁻⁶ cm/s, oral F 1.3% [111])을 기준선으로 삼았으나 두 가지 이유로 개정했다(§7.5).
+7. **최종 선별:** 다음을 만족하는 lead 약 10–20개 — 기하학적 필터 통과, 예측 permeability가 **PLN-1474보다 우수**, **Murcko scaffold가 §8.3의 106개 집합(`data/known_scaffolds.smi`)에 없음**, alert 없음, 카르복실레이트 보유. QED와 NN-Tanimoto(최근접 active 이름 포함)는 **게이트가 아니라 보고 지표**로 병기한다.
 
 ---
 
@@ -628,10 +685,10 @@ NN-Tanimoto의 **중앙값은 두 arm이 같고 p90만 갈린다**(0.39 vs 0.58)
 
 **동일한** funnel을 통과시켰을 때, 다음을 만족하는 생성 분자가 최소 하나 있으면 제안은 성공이다:
 1. 기하학적 docking 필터 통과(MIDAS + Asn224 contact 보존),
-2. 예측 permeability 축에서 cpd 25를 능가,
+2. 예측 permeability 축에서 **PLN-1474(`CHEMBL5933542`)를 능가**(2026-09-27 개정 — 이전 문구는 "cpd 25를 능가"였다. §7.5 참조),
 3. **Murcko scaffold가 `data/known_scaffolds.smi`의 106개 집합에 없을 것**(§8.3 — 큐레이션된 참조 파일 5개의 합집합이며, `actives_extended` 단독 103개는 PLN-1474·bexotegrast·A1AFA를 빠뜨린다). 양쪽 모두 §8.0의 타우토머 정규화를 거친 뒤에 판정한다 — 정규화 없이는 같은 분자가 다른 Murcko SMILES를 낸다. NN-Tanimoto와 가장 가까운 known active는 **게이트가 아니라 보고 수치**로 병기한다,
 4. CustomAlerts 플래그 없음(§5.4의 교체된 aniline 패턴 기준) — **counter-screen 조항은 철회했다**(§8.4): 세트가 산출된 적이 없고 기전이 약하다. **선택성은 이 기준에 포함되지 않는다**,
-5. 그리고 **양성 패널(PLN-1474, bexotegrast, CWHM-12, GLPG0187, cpd 25)과 동일한 funnel·동일한 도구로 채점했을 때, 순환하지 않는 축에서 비교 가능할 것** — docking 기하 필터를 동등하게 통과하고, ADMET-AI permeability에서 cpd 25를 능가하며, Murcko scaffold가 신규일 것. **총점으로는 비교하지 않는다**(우리가 설계한 목적함수의 값이므로 순환 — §3.4, §5.4). 음성 패널 절은 폐기했다(§3.4).
+5. 그리고 **양성 패널 6개(A1AFA, PLN-1474, bexotegrast, CWHM-12, GLPG0187, CHEMBL4649232)와 동일한 funnel·동일한 도구로 채점했을 때, 순환하지 않는 축에서 비교 가능할 것** — docking 기하 필터를 동등하게 통과하고, **ADMET-AI permeability에서 PLN-1474를 능가하며**, Murcko scaffold가 신규일 것. **총점으로는 비교하지 않는다**(우리가 설계한 목적함수의 값이므로 순환 — §3.4, §5.4; §7.2가 이를 수치로 확인했다). 음성 패널 절은 폐기했다(§3.4).
 
 **반증 조항:** 1–4를 만족하는 분자가 하나도 없으면, 그 사실을 그대로 보고한다. 이는 carboxylate–permeability 긴장이 **타깃 자체에 내재된 것**일 가능성을 시사하는 증거이며, 그 자체로 하나의 발견이자 이 프로젝트에 대한 가장 강한 공격에 대한 정직한 답이다.
 
@@ -646,7 +703,7 @@ NN-Tanimoto의 **중앙값은 두 arm이 같고 p90만 갈린다**(0.39 vs 0.58)
 | D3 | TL-A·TL-B 실행 + 3개 arm 전체 진단 | D3 기준으로 arm 1개 선택, **화학형 이동이 결정적**. TL-B가 Arg 모방체 비율이나 TPSA를 올리면 다른 수치와 무관하게 탈락 |
 | D4 | **선행 작업:** 타우토머 정규화를 비교 계층(`scripts/normalize.py`)에 추가 → `novelty_band.json` 재계산(§8.0); `CustomAlerts` aniline 패턴 교체 검증(§5.4). **`curate_actives.standardize()`는 의도적으로 그대로 둔다** — 그 출력은 TL-A 학습 입력이자 RL inception seed인 `data/actives_core.smi`에 기록되므로, 여기에 타우토머 정규화를 추가하면 이미 완료된 D3 run이 무효화된다. 정규화는 비교 계층에만 존재한다(`scripts/normalize.py:8-9`, `scripts/curate_actives.py:243-246`). 그 후 RL 단일 stage 0–300 step | 참조 세트 0점 화합물이 **§5.4에 기록된 1건 외에 없음**을 확인한 뒤 착수 — RL이 적용하는 여덟 SMARTS는 `actives_extended`의 `CHEMBL4756602` 하나를 `[Nr0][Nr0]`(비고리 N–N, 하이드라진류)로 0점 처리한다. 이 패턴은 정당한 reactive alert이고 190개 중 1개는 aniline의 164/190 같은 파국이 아니므로 받아들이되 숨기지 않는다. PAINS는 RL에 없고 `objective.py`/§8 triage에서만 적용되므로 거기서는 3건이 된다(`CHEMBL244434`, `CHEMBL244013`이 `mannich_A(296)`). 100 step마다 §5.5 진단 기록 |
 | D5 | RL 단일 stage 300–600 step | 최종 agent; 알려진 series로의 붕괴 감시(NN-Tanimoto가 0.6 초과로 상승 → DF `minscore` 0.4 → 0.5로 상향, 필요시 이전 체크포인트에서 재시작). **similarity 가중치 조정은 불가** — 그 component는 목적함수에 없다(§5.2) |
-| D6 | Sampling 20k **(완료)**; 벤치마크 패널 scoring | `data/library.smi` 19,485개 + `data/library_prior.smi` 18,346개 (§6.1); 기준 점수 분포 |
+| D6 | Sampling 20k **(완료)**; 벤치마크 패널 scoring **(완료, §7.1)** | `data/library.smi` 19,485개 + `data/library_prior.smi` 18,346개 (§6.1); 기준 점수 분포 |
 | D7 | Docking 설정 + TR01225179 redocking 검증 | 검증된 프로토콜 **또는** similarity/QSAR 기반 triage로의 fallback 문서화 |
 | D8 | Docking + 기하학적 필터 + ADMET + counter-screen | triage 표 |
 | D9 | 벤치마크 비교, lead 선별, 결과 표 + 그림 | 상위 lead 10–20개 |
