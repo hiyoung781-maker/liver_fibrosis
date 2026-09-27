@@ -364,7 +364,7 @@ The acid median of 0.178 at `(40, 115)` is **the intended direction** — the ac
 
 **For the same reason, ADMET-AI is not put in the RL objective.** Doing so would make §9.2 circular too. Keeping TPSA in RL and ADMET-AI in post-hoc evaluation is what keeps the permeability claim non-circular — the same kind of deliberate constraint as §12's "no docking inside RL."
 
-**`SlogP` removed.** Three files disagreed — this document said "reverse_sigmoid, penalize above ~3", `reinvent4_avb1_scoring_config_sketch.toml` said `double_sigmoid(low=1, high=4)`, and the actually-run `logs/cmp.vigHoB/new3.toml` used `reverse_sigmoid(low=2, high=5, k=0.4)`. The 0.5-crossing of `reverse_sigmoid(2, 5, 0.4)` is actually **3.5** (logP 3.0 already scores 0.823, 3.25 scores 0.683), so "about 3" pointed at where the penalty becomes noticeable, not its crossing point. The source is §1's pocket table row 4 ("hydrophobic bulk tolerated → SlogP up to about 3"), but that row is a qualitative **permitted floor** derived from contact distances ("at least up to 3 is fine"), not "penalize above 3" — a misreading that turned a permitted lower bound into a penalty upper bound. The low/high values themselves are not derived from either document. More importantly, the direction is wrong: this project builds an **anion** with a mandatory carboxylate, and §9.2 requires "beat cpd 25 on predicted permeability." For an acidic compound the permeability bottleneck is the ionized carboxylate, not excess lipophilicity, so trimming logP above 3 would degrade the very axis this project claims to improve. Prior work [113]'s own reference is not a soft penalty either, but a hard filter (exclude MW > 500 or logP > 5). → moved to the §8.2 triage window.
+**`SlogP` removed.** Three files disagreed — this document said "reverse_sigmoid, penalize above ~3", `reinvent4_avb1_scoring_config_sketch.toml` said `double_sigmoid(low=1, high=4)`, and the actually-run `logs/cmp.vigHoB/new3.toml` used `reverse_sigmoid(low=2, high=5, k=0.4)`. The 0.5-crossing of `reverse_sigmoid(2, 5, 0.4)` is actually **3.5** (logP 3.0 already scores 0.823, 3.25 scores 0.683), so "about 3" pointed at where the penalty becomes noticeable, not its crossing point. The source is §1's pocket table row 4 ("hydrophobic bulk tolerated → SlogP up to about 3"), but that row is a qualitative **permitted floor** derived from contact distances ("at least up to 3 is fine"), not "penalize above 3" — a misreading that turned a permitted lower bound into a penalty upper bound. The low/high values themselves are not derived from either document. More importantly, the direction is wrong: this project builds an **anion** with a mandatory carboxylate, and §9.2 requires "beat cpd 25 on predicted permeability." For an acidic compound the permeability bottleneck is the ionized carboxylate, not excess lipophilicity, so trimming logP above 3 would degrade the very axis this project claims to improve. Prior work [113]'s own reference is not a soft penalty either, but a hard filter (exclude MW > 500 or logP > 5). → moved to the §8.2 triage window. **The cost of this decision was measured in §6.3** — with no logP term, the agent's cLogP median drifted from the prior's 2.62 to 5.15, dropping the `logP ≤ 5` standalone pass rate from 90.1% to 46.5%. The directional argument above holds; the size of the drift is what it failed to predict.
 
 **`QED` removed.** PLN-1474 (the only αvβ1 inhibitor to reach the clinic) has a QED of **0.4619**, and the TL-A prior sample median QED is **0.468**. The one clinical-stage compound is indistinguishable from an ordinary prior sample, so it cannot serve as an optimization axis. (0.433 is the value computed on a non-aromatic tautomer and is an artifact of §8.0.) → kept only as a §8.7 reported metric.
 
@@ -427,6 +427,75 @@ None of these feed the reward — this keeps the novelty claim measurable withou
 - `run_type = "sampling"` from **the final RL agent** (and, for comparison, from the D3-selected focused prior)
 - 20,000–50,000 SMILES, unique molecules only
 - Output: `library.smi` → dedupe → canonicalize → **tautomer normalization (§8.0)** → property/novelty distributions
+
+### 6.1 Execution — complete (2026-09-27)
+
+Both arms requested 20,000, the low end of §6's range. The choice was a cost one: tautomer canonicalization runs ~0.14 s/molecule, so each arm is ~47 min of post-processing and there are two arms.
+
+| Artifact | Contents |
+|---|---|
+| `configs/sample_agent.toml` | `results/rl_final.chkpt` (the 1000-step single-stage agent), `num_smiles = 20000` |
+| `configs/sample_prior.toml` | `priors/focused_A.prior` (TL-A) — **the baseline arm** |
+| `data/library.smi` | agent arm, 19,485 molecules. This is the artifact §9 pre-registers by name |
+| `data/library_prior.smi` | prior arm, 18,346 molecules |
+| `scripts/build_library.py` | CSV → `.smi`: validate → canonical dedupe → tautomer normalize → dedupe again |
+| `scripts/library_report.py` | descriptive distributions only. **Gates nothing** — the cuts live in §8 |
+
+`unique_molecules = true` already collapses identical canonical SMILES, so `build_library.py`'s first dedupe is bookkeeping; the one that does work is the second, **after** normalization. Two tautomers are two distinct canonical SMILES and would otherwise be counted as two molecules.
+
+`library.smi` carries **two columns**: column 1 the normalized SMILES (the structure every downstream property and novelty claim is made about), column 2 the pre-normalization canonical SMILES (**the structure the RL objective actually scored**). Tautomer choice moves descriptors, so the two can disagree; keeping both is what makes the size of that disagreement measurable.
+
+### 6.2 Distributions — agent vs prior
+
+| | agent (19,485) | prior (18,346) |
+|---|---|---|
+| MW median | 431.4 | 417.4 |
+| **cLogP median** | **5.15** | **2.62** |
+| TPSA median | 74.3 | 102.4 |
+| QED median | 0.44 | 0.50 |
+| SAScore median | 2.73 | 2.85 |
+| **carboxylate %** | **96.7** | **51.5** |
+| alert-free % | 96.9 | 91.7 |
+| objective total, median | 1.00 | 0.00 |
+| **Murcko-novel %** | **99.7** | 87.5 |
+| unique scaffolds | 17,268 | 11,875 |
+| acyclic | 3 | 254 |
+| NN-Tanimoto median / p90 | 0.34 / **0.39** | 0.35 / **0.58** |
+
+The prior's 87.5% Murcko-novel reproduces, on 18,346 molecules, the 86.1% §8.3 measured on a 488-molecule sample.
+
+On NN-Tanimoto **the medians agree and only the p90 diverges** (0.39 vs 0.58). RL did not move away from the actives as a body; it removed the memorization tail §4 recorded for TL-A (max 1.000). The novelty gain must be described as tail removal, not as a shift of the distribution.
+
+### 6.3 Applying the §8.2 pre-registered window
+
+§8.2's window (`logP ≤ 5`, MW 250–550, TPSA 40–115) plus §8.1's alert and carboxylate hard cuts, applied cumulatively cheapest-first. **This is not §8's triage run early; it is a check that §6's distribution clears the pre-registered window.**
+
+| Cumulative step | agent | prior |
+|---|---|---|
+| all | 19,485 (100%) | 18,346 (100%) |
+| + carboxylate | 18,845 (96.7%) | 9,454 (51.5%) |
+| + alert-free | 18,273 (93.8%) | 8,920 (48.6%) |
+| + **logP ≤ 5** | **8,430 (43.3%)** | 8,253 (45.0%) |
+| + MW 250–550 | 8,162 (41.9%) | 6,634 (36.2%) |
+| + TPSA 40–115 | 7,787 (40.0%) | 2,716 (14.8%) |
+| + Murcko-novel | **7,767 (39.9%)** | **2,125 (11.6%)** |
+| surviving unique scaffolds | **6,849** | 1,446 |
+
+Pass rates for each cut alone: `logP ≤ 5` is 46.5% agent / 90.1% prior; `TPSA 40–115` is 95.5% agent / 55.7% prior.
+
+**What RL bought:** survival 11.6% → 39.9%, surviving scaffolds 1,446 → 6,849 (4.7×). Most of it comes from the two axes the objective aimed at — TPSA-window pass 55.7% → 95.5%, carboxylate 51.5% → 96.7%.
+
+**What RL cost — logP.** 90.1% of the prior clears `logP ≤ 5`; only 46.5% of the agent does, and that step's 93.8% → 43.3% drop is the agent arm's **one dominant loss**. With no logP term in the objective, the agent drifted into lipophilic bulk while staying inside the TPSA window — TPSA median 74.3 sits mid-window, cLogP median is 5.15.
+
+§5.4's argument for removing `SlogP` — that for an anion carrying an obligate carboxylate the permeability bottleneck is the ionized carboxylate rather than excess lipophilicity, so shaving logP above 3 would worsen the very axis we declared we would improve — **still holds as to direction**. What it did not predict was how far the drift goes once the term is gone entirely, and the answer is a median of 2.62 → 5.15. That is a measured cost of the §5 design decision, recorded here rather than hidden after the fact.
+
+**Even so, RL is not re-run.** §8 targets 10–20 leads and there are 7,767 survivors across 6,849 unique scaffolds; the logP loss does not threaten the yield. What it does constrain is **the poster's wording**: any "druggable" claim must rest on the surviving set (logP median **3.97**, MW median 379.4, TPSA median 77.8), never on the full library's 5.15. §9.2's permeability comparison likewise runs on the survivors.
+
+### 6.4 What normalization actually did
+
+Tautomer duplicates: **0** in the agent arm, **1** in the prior; zero normalization failures in both. Normalization therefore **did no work as a deduplicator.** This does not weaken §8.0, whose claim was never deduplication but comparison symmetry — the reference and measured sides must pass through the same normalization, evidenced by §8.3's finding that PLN-1474's two tautomers yield different Murcko SMILES. But **the claim "normalization filters out duplicates" is unsupported by this measurement and is not made.**
+
+Column 1 vs column 2: 19,179 of 19,485 are identical; the carboxylate verdict differs on **4** and the alert verdict on **31** (prior: 9 and 347). The total-score shift is 0.000 through p90, so **percentiles alone read as zero** and the whole effect sits in the tail. That is why `library_report.py` reports `n_shifted` and `max_shift` beside the percentiles.
 
 ## 7. Step 4 — Scoring the benchmark panel (D6, after sampling)
 
@@ -552,7 +621,7 @@ Through the **identical** funnel, the proposal succeeds if at least one generate
 | D3 | TL-A and TL-B runs + diagnostics on all three arms | one arm selected on the D3 checks, **chemotype drift decisive**; if TL-B raises the Arg-mimic fraction or TPSA, it is out regardless of its other numbers |
 | D4 | **Preceding work:** add tautomer normalization to the comparison layer (`scripts/normalize.py`) → recompute `novelty_band.json` (§8.0); verify the `CustomAlerts` aniline pattern replacement (§5.4). **`curate_actives.standardize()` is deliberately left untouched** — its output is written to `data/actives_core.smi`, the TL-A training input and RL inception seed, and adding tautomer canonicalization there would invalidate the completed D3 run; normalization lives only in the comparison layer (`scripts/normalize.py:8-9`, `scripts/curate_actives.py:243-246`). Then RL single stage, steps 0–300 | start only after confirming no reference-set molecule scores 0 **beyond the one recorded in §5.4** — the eight SMARTS the RL run applies zero `CHEMBL4756602` in `actives_extended` via `[Nr0][Nr0]` (acyclic N–N, the hydrazine class). That pattern is a legitimate reactive alert and 1 of 190 is not the aniline catastrophe of 164/190, so it is accepted rather than hidden. PAINS is absent from the RL config and applies only in `objective.py` / the §8 triage, where the count is 3 (`CHEMBL244434` and `CHEMBL244013` via `mannich_A(296)`). Log §5.5 diagnostics every 100 steps |
 | D5 | RL single stage, steps 300–600 | final agent; watch for collapse onto known series (NN-Tanimoto rising above 0.6 → raise DF `minscore` 0.4 → 0.5, restart from an earlier checkpoint if needed). **No similarity-weight adjustment is possible** — that component is not in the objective (§5.2) |
-| D6 | Sampling 20–50k; benchmark panel scoring | `library.smi` + reference score distributions |
+| D6 | Sampling 20k **(complete)**; benchmark panel scoring | `data/library.smi` 19,485 + `data/library_prior.smi` 18,346 (§6.1); reference score distributions |
 | D7 | Docking setup + TR01225179 redocking validation | validated protocol **or** documented fallback to similarity/QSAR-only triage |
 | D8 | Dock + geometric filter + ADMET + counter-screens | triage table |
 | D9 | Benchmark comparison, lead selection, results table + figures | top 10–20 leads |

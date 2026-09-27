@@ -1,0 +1,20 @@
+# Blueprint section 6, arm 1 of 2: the RL-optimized agent.
+#
+# results/rl_final.chkpt is the checkpoint the 1000-step single-stage run wrote
+# (configs/../reinvent4_avb1_scoring_config_sketch.toml). It loads as
+# model_type = "Reinvent", so sampling reads it directly - no conversion step.
+#
+# num_smiles is the low end of section 6's 20,000-50,000 range. 20,000 was chosen
+# because tautomer canonicalization costs ~0.14 s/molecule, so each arm is ~47 min
+# of post-processing, and there are two arms.
+run_type = "sampling"
+device = "cuda:0"
+
+[parameters]
+model_file = "results/rl_final.chkpt"
+output_file = "results/sample_agent.csv"
+num_smiles = 20000
+# Dedupe here as well as in build_library: this collapses identical canonical
+# SMILES, build_library additionally collapses tautomer duplicates.
+unique_molecules = true
+randomize_smiles = true
