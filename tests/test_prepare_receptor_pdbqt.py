@@ -119,3 +119,45 @@ class TestDetectsBreakage(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNitrogenTypingIsTheRealDefect(unittest.TestCase):
+    """Checks 1-5 above all PASS on this receptor, and it is still energetically wrong.
+
+    Measured: `obabel -xr` on the hydrogen-free receptor.pdb typed 1,170 of its 1,212
+    nitrogens as `NA`, AutoDock's H-bond ACCEPTOR. Most protein nitrogens are backbone
+    amide NH, i.e. donors; Open Babel cannot tell without hydrogens and defaults to
+    acceptor. Cost: the same smina, ligand, box and settings scored -6.9 against
+    receptor.pdb and -6.4 against receptor.pdbqt, and Uni-Dock's -6.31 matched the
+    PDBQT figure - which is how the engine looked guilty when the receptor was at
+    fault. These assertions exist so the defect cannot quietly return.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.pdb = read_pdb_atoms(PDB)
+        cls.pdbqt = read_pdbqt_atoms(PDBQT)
+
+    def test_source_receptor_has_no_hydrogens(self):
+        """The root cause. With hydrogens present, donor/acceptor typing is decidable."""
+        elements = {a["name"][0] for a in self.pdb}
+        self.assertNotIn("H", elements)
+
+    def test_nitrogen_count_is_preserved_so_the_problem_is_typing_not_loss(self):
+        source_n = sum(1 for a in self.pdb if a["name"].startswith("N"))
+        typed_n = sum(1 for a in self.pdbqt if a.get("adtype") in ("N", "NA"))
+        self.assertEqual(source_n, typed_n)
+
+    def test_most_nitrogens_are_mistyped_as_acceptors(self):
+        acceptors = sum(1 for a in self.pdbqt if a.get("adtype") == "NA")
+        total = sum(1 for a in self.pdbqt if a.get("adtype") in ("N", "NA"))
+        self.assertGreater(acceptors / total, 0.9)
+
+    def test_the_anchor_checks_do_not_catch_it(self):
+        """The point of this class: a receptor can pass every anchor check and still be
+        the wrong thing to dock against. Recorded so the anchor checks are not mistaken
+        for a sufficient validation."""
+        rows = compare_anchors(self.pdb, self.pdbqt)
+        for row in rows:
+            self.assertTrue(row["in_converted"])
+            self.assertLessEqual(row["displacement"], TOLERANCE)

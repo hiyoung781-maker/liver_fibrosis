@@ -193,7 +193,11 @@ def run_multi_gpu(receptor: str, index_path: str, out_dir: str, box: dict,
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--receptor", default="docking/receptor.pdbqt")
+    # PDB, not PDBQT. Uni-Dock accepts either, and the PDBQT conversion of this
+    # hydrogen-free receptor mistypes 97% of its nitrogens as H-bond acceptors, worth
+    # 0.5 kcal/mol - see scripts/prepare_receptor_pdbqt.py. The PDB is also the exact
+    # representation section 8.5(a)'s -6.9 validation was measured on.
+    parser.add_argument("--receptor", default="docking/receptor.pdb")
     parser.add_argument("--ligand-index", default="docking/ligands_pdbqt/ligands.txt")
     parser.add_argument("--out-dir", default="docking/poses")
     parser.add_argument("--autobox-ligand", default="docking/ligand_ref.sdf")

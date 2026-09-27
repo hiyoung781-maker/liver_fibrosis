@@ -63,20 +63,20 @@ for ex in $LEVELS; do
   printf '  best affinity   %s\n' \
     "$(grep -m1 'VINA RESULT' "$pose_file" 2>/dev/null | awk '{print $4}')"
   echo "  --- geometry per pose (ca_dist / donor_dist, cutoffs 3.2 / 3.5) ---"
-  python3 scripts/pose_geometry.py --poses <(python3 - "$pose_file" <<'PY'
-import sys, pathlib
-sys.path.insert(0, "scripts")
-from poses_to_sdf import poses_from_pdbqt
-from rdkit import Chem
-w = Chem.SDWriter("/dev/stdout")
-for m in poses_from_pdbqt(sys.argv[1]):
-    w.write(m)
-w.close()
-PY
-) --out-csv "$out/geometry.csv" >/dev/null 2>&1 \
-    && awk -F, 'NR>1 {printf "    pose %-3s ca %-7s donor %-7s passes %s\n", $2,$4,$6,$9}' \
-         "$out/geometry.csv" \
-    || echo "    (geometry step failed; run pose_geometry.py manually on $pose_file)"
+  # A real file, not process substitution: RDKit's SDMolSupplier needs a seekable
+  # file and silently yields nothing from a FIFO, which is how the first version of
+  # this script printed an empty geometry section while reporting no error.
+  if python3 scripts/poses_to_sdf.py --pose-dir "$out" --out-sdf "$out/poses.sdf" \
+       > "$out/convert.log" 2>&1 \
+     && python3 scripts/pose_geometry.py --poses "$out/poses.sdf" \
+          --receptor "${GEOM_RECEPTOR:-docking/receptor.pdb}" \
+          --out-csv "$out/geometry.csv" > "$out/geom.log" 2>&1; then
+    awk -F, 'NR>1 {printf "    pose %-3s ca %-7s donor %-7s passes %s\n", $2,$4,$6,$9}' \
+        "$out/geometry.csv"
+  else
+    echo "    geometry step FAILED - see $out/convert.log and $out/geom.log"
+    tail -3 "$out/convert.log" "$out/geom.log" 2>/dev/null | sed 's/^/      /'
+  fi
 done
 
 cat <<'NOTE'

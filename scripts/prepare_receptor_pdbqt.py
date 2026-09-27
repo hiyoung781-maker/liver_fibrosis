@@ -19,6 +19,20 @@ What is checked:
   4. Every receptor atom the filter's second anchor needs - Asn224 backbone O of
      chain B - is likewise present and unmoved.
   5. Nothing silently vanished: atom counts before and after, by record type.
+  6. The nitrogen donor/acceptor split, because checks 1-5 all PASSED on a receptor
+     that was energetically wrong.
+
+MEASURED FAILURE, kept here because checks 1-5 did not catch it. Converting the
+hydrogen-free receptor.pdb with `obabel -xr` typed 1,170 of its 1,212 nitrogens as
+`NA`, AutoDock's H-bond ACCEPTOR type. In a protein with no hydrogens Open Babel
+cannot tell a backbone amide NH (a donor) from an acceptor, so it defaulted almost
+all of them to acceptor. That rewrites the H-bond landscape of the whole protein, and
+it cost 0.5 kcal/mol: the same smina, ligand, box and settings scored -6.9 against
+receptor.pdb and -6.4 against receptor.pdbqt. Uni-Dock's -6.31 matched the PDBQT
+number, which is how the engine came to look guilty when the receptor was at fault.
+
+Uni-Dock accepts `--receptor` as PDB as well as PDBQT, so the route that avoids this
+entirely is to hand it the same receptor.pdb smina was validated on.
 """
 
 from __future__ import annotations
@@ -143,6 +157,21 @@ def _report(pdb_path: str, pdbqt_path: str) -> int:
         print(f"  {a['chain']}/{a['resseq']:>5s}  AD type {a.get('adtype','?'):>3s}"
               f"  charge {a.get('charge','?'):>7s}")
 
+    src_n = [a for a in source if a["name"].startswith("N") or a["name"] == "N"]
+    acceptors = [a for a in converted if a.get("adtype") == "NA"]
+    donors = [a for a in converted if a.get("adtype") == "N"]
+    total_n = len(acceptors) + len(donors)
+    print(f"\nnitrogen typing: {total_n} nitrogens -> "
+          f"{len(acceptors)} NA (acceptor), {len(donors)} N (non-acceptor)")
+    if total_n and len(acceptors) / total_n > 0.5:
+        print(f"  *** {len(acceptors)}/{total_n} = {len(acceptors)/total_n:.0%} typed as")
+        print("      H-bond ACCEPTORS. In a protein, most nitrogens are backbone amide")
+        print("      NH - DONORS. Open Babel cannot tell them apart without hydrogens,")
+        print("      so a hydrogen-free input gets this wrong, and it is worth")
+        print("      0.5 kcal/mol (smina scored -6.9 on the PDB, -6.4 on the PDBQT).")
+        print("      Either add hydrogens before converting, or skip the conversion:")
+        print("      Uni-Dock takes --receptor as PDB.")
+
     print("\nanchors the section 8.5b filter measures:")
     ok = True
     for row in compare_anchors(source, converted):
@@ -158,7 +187,11 @@ def _report(pdb_path: str, pdbqt_path: str) -> int:
               f"  AD type {str(row['adtype']):>3s}  {status}")
 
     print()
-    if ok:
+    if total_n and len(acceptors) / total_n > 0.5:
+        print("VERDICT: anchors are fine but the nitrogen typing above is not. This")
+        print("         receptor scores 0.5 kcal/mol worse than the PDB it came from.")
+        print("         Prefer --receptor <the PDB> over this file.")
+    elif ok:
         print("VERDICT: both anchors survived unmoved. The geometry filter can run")
         print("         against this receptor.")
     else:
