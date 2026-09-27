@@ -225,7 +225,7 @@ No collapse anywhere — 736 unique scaffolds per 1,000 is far above the §4 bar
 
 > **2026-09-26 redesign.** The former two-stage curriculum (Stage 1 focus, 200 steps → Stage 2 optimize, 400 steps) has been discarded and replaced with a single stage of 600 steps. Full rationale and measurements are in `docs/superpowers/specs/2026-09-26-step2-single-stage-rl-design.md`.
 
-**Shared settings:** `learning_strategy` type `"dap"`, `sigma = 128`, `rate = 0.0001`; `batch_size = 128` (GPU); `diversity_filter` = `IdenticalMurckoScaffold`, `bucket_size = 25`, `minscore = 0.4` (**applied throughout**); `inception` seeded with actives (a memory of "what a good molecule looks like"); aggregation is `geometric_mean`; `max_steps = 600`.
+**Shared settings:** `learning_strategy` type `"dap"`, `sigma = 128`, `rate = 0.0001`; `batch_size = 128` (GPU); `diversity_filter` = `IdenticalMurckoScaffold`, `bucket_size = 25`, `minscore = 0.4` (**applied throughout**); `inception` seeded with actives (a memory of "what a good molecule looks like"); aggregation is `geometric_mean`; `max_steps = 1000`.
 * DAP (Differentiable Augmented Posterior): recomputes the log-likelihood in differentiable form at every step and backpropagates through it. It is REINVENT4's default recommendation and converges faster and more stably than alternative strategies such as MAULI/MASCOF/SDAP. Keep `dap` unless there is a specific reason not to.
 * sigma: the weight that determines how hard the score pushes against the prior probability. Since the score is normalized to 0–1, sigma = 128 means a molecule with score 1.0 is preferred over the prior by 128 nats of log-likelihood.
   - Low (60–80): stays close to the prior → good synthesizability/chemical plausibility but slow score improvement

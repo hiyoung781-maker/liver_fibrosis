@@ -52,8 +52,28 @@ sample_size = 10
 chkpt_file = "results/rl_final.chkpt"
 termination = "simple"
 max_score = 1.0
-min_steps = 600
-max_steps = 600
+# 1000, not 600. The 600 in the first version was inherited arithmetic - the deleted
+# two-stage curriculum's 200 + 400 - and had no basis of its own. The 600-step run
+# (results/run-600steps/) settled the question with measurement: new distinct Murcko
+# scaffolds per 100-step window were 7366, 7931, 8446, 8464, 8766, 8595 - the rate
+# never declined, so the run was still finding new chemotypes when it stopped. The
+# diversity filter was not the constraint either: of 40697 scaffolds carrying a
+# molecule above minscore, only 113 (0.3%) filled their 25-molecule bucket, median
+# occupancy 1. Cost is ~0.57 s/step, so 1000 steps is ~10 minutes.
+#
+# STOPPING CRITERION for the next revision, fixed in advance so this number does not
+# become inherited too: stop when a 100-step window adds fewer than 3683 previously
+# unseen Murcko scaffolds - half the first window's 7366. If no window falls below
+# that by step 1000, the budget is still the binding constraint and not the chemistry,
+# and raising it further needs a reason beyond "the rate had not flattened".
+#
+# Note the objective itself saturates near step 200 (median Score 0.002 -> 0.995 ->
+# 1.000). Steps past that are driven by the diversity filter forcing scaffold
+# exploration at a score the objective can no longer distinguish. That is consistent
+# with the novelty goal, but it means "1000 steps" describes scaffold search, not
+# continued objective optimization - say so when reporting.
+min_steps = 1000
+max_steps = 1000
 
 [stage.scoring]
 type = "geometric_mean"
@@ -103,7 +123,7 @@ transform.coef_se = 20.0
 # GUARD RAIL, not an optimization axis. Every reference molecule and every prior
 # sample scores 0.99998 or better here (reverse_sigmoid approaches 1.0 asymptotically;
 # the worst reference molecule scores 0.999983), contributing nothing measurable at
-# step 0 - a total is depressed by 2.2e-06. It only bites if 600 steps of RL drift
+# step 0 - a total is depressed by 2.2e-06. It only bites if 1000 steps of RL drift
 # past SA 6, the conventional hard-to-make line.
 # The earlier (3, 6) window gave actives_extended's worst molecule (SA 5.10) a 0.093
 # - punishing a published active.

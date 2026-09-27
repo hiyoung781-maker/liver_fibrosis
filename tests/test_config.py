@@ -26,10 +26,11 @@ def endpoints(config):
 
 
 class TestSingleStage(unittest.TestCase):
-    def test_exactly_one_stage_of_600_steps(self):
+    def test_exactly_one_stage_of_1000_steps(self):
         config = load()
         self.assertEqual(len(config["stage"]), 1)
-        self.assertEqual(config["stage"][0]["max_steps"], 600)
+        self.assertEqual(config["stage"][0]["max_steps"], 1000)
+        self.assertEqual(config["stage"][0]["min_steps"], 1000)
 
     def test_common_parameters(self):
         config = load()

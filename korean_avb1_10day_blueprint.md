@@ -225,7 +225,7 @@ K-BDS가 아니라 로컬 TITAN Xp(sm_61)에서 실행했다. 두 환경은 동�
 
 > **2026-09-26 재설계.** 기존 2단계 커리큘럼(Stage 1 focus 200 steps → Stage 2 optimize 400 steps)을 폐기하고 단일 stage 600 steps로 교체했다. 근거와 측정 데이터 전체는 `docs/superpowers/specs/2026-09-26-step2-single-stage-rl-design.md`에 있다.
 
-**공통 설정:** `learning_strategy` type `"dap"`, `sigma = 128`, `rate = 0.0001`; `batch_size = 128`(GPU); `diversity_filter` = `IdenticalMurckoScaffold`, `bucket_size = 25`, `minscore = 0.4`(**전 구간 적용**); `inception`은 active로 시드("좋은 분자가 어떤 모습인지"에 대한 기억); 집계는 `geometric_mean`; `max_steps = 600`.
+**공통 설정:** `learning_strategy` type `"dap"`, `sigma = 128`, `rate = 0.0001`; `batch_size = 128`(GPU); `diversity_filter` = `IdenticalMurckoScaffold`, `bucket_size = 25`, `minscore = 0.4`(**전 구간 적용**); `inception`은 active로 시드("좋은 분자가 어떤 모습인지"에 대한 기억); 집계는 `geometric_mean`; `max_steps = 1000`.
 * DAP (Differentiable Augmented Posterior): log-likelihood를 미분 가능한 형태로 매 스텝 다시 계산해서 역전파합니다. REINVENT 4의 기본 권장값이고, MAULI/MASCOF/SDAP 같은 다른 전략보다 수렴이 빠르고 안정적입니다. 특별한 이유 없으면 dap 유지가 맞습니다.
 * sigma: 점수를 prior 확률 대비 얼마나 세게 밀어붙일지를 정하는 가중치입니다. score는 0~1로 정규화돼 있으므로, sigma=128이면 "score 1.0인 분자"는 log-likelihood 기준 prior보다 128 nat만큼 더 선호된다는 뜻입니다.
   - 낮으면(60~80): prior에 가깝게 머무름 → 합성 가능성/화학적 타당성은 좋지만 점수 개선이 느림

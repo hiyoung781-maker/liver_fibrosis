@@ -43,7 +43,7 @@ transform.coef_se = 20.0
 # GUARD RAIL, not an optimization axis. Every reference molecule and every prior
 # sample scores 0.99998 or better here (reverse_sigmoid approaches 1.0 asymptotically;
 # the worst reference molecule scores 0.999983), contributing nothing measurable at
-# step 0 - a total is depressed by 2.2e-06. It only bites if 600 steps of RL drift
+# step 0 - a total is depressed by 2.2e-06. It only bites if 1000 steps of RL drift
 # past SA 6, the conventional hard-to-make line.
 # The earlier (3, 6) window gave actives_extended's worst molecule (SA 5.10) a 0.093
 # - punishing a published active.
