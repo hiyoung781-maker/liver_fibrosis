@@ -22,8 +22,11 @@ device = "cuda:0"
 summary_csv_prefix = "results/rl"
 use_checkpoint = false
 purge_memories = false
-prior_file = "priors/avb1_tl_a.prior"
-agent_file = "priors/avb1_tl_a.prior"
+# TL-A, the arm D3 adopted: scripts/run_d3.sh:99 writes the `core` arm (trained on
+# data/actives_core.smi) to priors/focused_A.prior and labels it TL-A at :117.
+# focused_B.prior is TL-B, rejected in D3 for Arg-mimic drift (+26.0 pp) - do not use it.
+prior_file = "priors/focused_A.prior"
+agent_file = "priors/focused_A.prior"
 batch_size = 128
 unique_sequences = true
 randomize_smiles = true
