@@ -748,6 +748,12 @@ KISTI K-BDS 클러스터에서 실행한다. 스택은 로그인 노드 실측(`
 
 1. **glibc 2.17** — REINVENT4 `main`은 `torch==2.12.0`을 핀하는데 이 버전은 `manylinux_2_28` 휠만 있어 여기서 돌지 않는다. **REINVENT4를 `v4.5.11`로 고정**했다 — torch 핀(2.5.1)이 아직 glibc 2.17 휠을 갖는 마지막 릴리즈이자 prior를 레포에 동봉한 버전이다. 같은 제약으로 PyPI `rdkit`(역시 `manylinux_2_28`)도 배제되어 **rdkit은 conda-forge**에서 가져온다(`__glibc >=2.17`).
 2. **드라이버 470.57.02** — CUDA 12는 드라이버 ≥ 525가 필요하므로 클러스터가 제공하는 `compilers/cuda/12.4`·`12.8` 모듈은 이 용도로 쓸 수 없다. CUDA 11.8은 ≥ 450이면 된다. v4.5.11 핀에서 바꾼 것은 **`torch==2.5.1+cu124` → `2.5.1+cu118`** 하나뿐이다 — 같은 torch, 다른 CUDA 빌드이며 `pyproject.toml` 주석이 예상하는 바로 그 교체다. **CUDA 모듈은 로드하지 않는다**: pip 휠이 자체 런타임을 포함하고, 툴킷을 로드하면 그것을 가려버린다.
+
+> **정정(2026-09-27).** 위의 `470.57.02`는 **로그인 노드**(bdata-login01, A100 40 GB 1장)의 드라이버다. **계산 노드는 다르다** — `gpu-8-002`를 직접 조회하니 **드라이버 550.54.14, A100 80 GB × 8, compute capability 8.0**이었고, 이는 **CUDA 12.x를 지원한다.** 따라서 "`cuda/12.4`·`12.8` 모듈을 쓸 수 없다"는 위 문장은 로그인 노드에만 해당한다.
+>
+> **`torch 2.5.1+cu118` 고정 결정 자체는 바뀌지 않는다** — 그 근거는 드라이버만이 아니라 **glibc 2.17**이기도 했고(1항), 계산 노드 역시 CentOS 7.9 / glibc 2.17이다. 다만 근거 두 개 중 하나가 잘못된 노드를 짚고 있었으므로 기록을 고친다.
+>
+> 같은 조사에서 §8.5 GPU 도킹 경로에 관한 사실들도 확인했다: 계산 노드는 **인터넷이 없고**(github·conda·pypi 전부 도달 불가), **Environment Module이 작동하지 않으며**(`module load`가 무동작, cmake는 `env(COMPILER_VER)` 미설정으로 실패), gcc 4.8.5 / cmake 2.8.12이므로 **소스 빌드가 불가능하다.** OpenCL(`nvidia.icd`, `libOpenCL.so`)과 Boost는 갖춰져 있고 `/scratch/tools`에는 도킹 도구가 없다. 그래서 GPU 도킹은 **로그인 노드에서 conda로 설치**하는 경로를 택한다 — conda 패키지가 자체 CUDA 런타임을 포함하므로 위 제약 전부를 우회한다.
 3. **외부 인터넷이 열려 있다**(pypi·conda-forge·zenodo·github·rcsb 전부 200, 프록시 없음) — K-BDS에서 직접 설치하며 `conda-pack` 번들이 필요 없다. Apptainer와 Singularity는 로그인 노드에서 둘 다 깨져 있어(`libsubid.so.3` 부재) 컨테이너 경로는 쓸 수 없었다.
 
 **선언된 의존성 3개를 의도적으로 제거했다.** 셋 다 스코어링 컴포넌트 하나씩만 지원하며, REINVENT4는 import에 실패한 컴포넌트를 건너뛰므로 나머지에 영향이 없다: `openEye-toolkits`(상용 라이선스, ROCS 전용), `chemprop`(§3.3이 ChemProp2를 no-go로 확정했고, scipy·scikit-learn을 끌어오는데 이들 최신 릴리즈는 `manylinux_2_28` 전용), `descriptastorus`(chemprop의 숨은 의존성으로 REINVENT4 코드가 import하지 않음). REINVENT4를 `pip install --no-deps`로 설치하는 이유이며, `setup_kbds.sh`는 마지막에 RL 목적함수가 쓰는 컴포넌트 9개가 전부 등록됐는지 검증한다.
