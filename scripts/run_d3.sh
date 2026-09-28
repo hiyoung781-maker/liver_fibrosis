@@ -4,6 +4,14 @@
 #
 #   bash scripts/run_d3.sh                 # offline wandb, GPU 1
 #   CUDA_VISIBLE_DEVICES=0 bash scripts/run_d3.sh --no-wandb
+#   bash scripts/run_d3.sh --mode production-sweep --print-config   # render TL config only
+#
+# --mode {diagnostic,production-sweep} picks the (EPOCHS, SAVEFREQ) pair used when
+# rendering configs/tl.toml.in: diagnostic is 20/1, production-sweep is 200/20.
+# production-sweep exists so the production TL run gets a validation NLL at every
+# checkpoint (REINVENT4 computes it only on save epochs) instead of just at the end.
+# --print-config renders the resulting TL config to stdout and exits without running
+# anything, so it can be diffed or asserted on in tests.
 #
 # Three phases, and phases 1 and 2 must not be confused:
 #   1. diagnostic - 5 folds x 2 arms, trains on a fold's train split and validates on
@@ -21,11 +29,46 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-DIAG_EPOCHS="${DIAG_EPOCHS:-20}"
 N_FOLDS=5
 SAMPLE_N="${SAMPLE_N:-1000}"
 USE_WANDB=1
-[ "${1:-}" = "--no-wandb" ] && USE_WANDB=0
+MODE="${MODE:-diagnostic}"
+PRINT_CONFIG=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --no-wandb) USE_WANDB=0 ;;
+    --mode) MODE="$2"; shift ;;
+    --mode=*) MODE="${1#*=}" ;;
+    --print-config) PRINT_CONFIG=1 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+# Mode selector: diagnostic finds the epoch where validation NLL turns up (fine
+# checkpoint granularity); production-sweep is the 200-epoch production run, whose
+# checkpoints must land every 20 epochs - REINVENT4 computes validation NLL only on
+# save epochs, so a coarse save_every_n_epochs here means the sweep curve has no
+# validation NLL to choose an epoch from at all.
+case "$MODE" in
+  diagnostic)       EPOCHS=20;  SAVEFREQ=1  ;;
+  production-sweep) EPOCHS=200; SAVEFREQ=20 ;;
+  *) echo "unknown mode: $MODE" >&2; exit 2 ;;
+esac
+DIAG_EPOCHS="${DIAG_EPOCHS:-$EPOCHS}"
+
+render() {  # smiles validation output epochs savefreq tb_logdir -> stdout
+  sed -e "s|{SMILES}|$1|" -e "s|{VALIDATION}|$2|" -e "s|{OUTPUT}|$3|" \
+      -e "s|{EPOCHS}|$4|" -e "s|{SAVEFREQ}|$5|" -e "s|{TB_LOGDIR}|$6|" \
+      configs/tl.toml.in
+}
+
+if [ "$PRINT_CONFIG" = 1 ]; then
+  render "data/actives_core.smi" "" "priors/focused_A.prior" \
+         "$EPOCHS" "$SAVEFREQ" "logs/d3/tb"
+  exit 0
+fi
+
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-1}"
 # Offline by default: nothing leaves this machine until `wandb sync` is run by hand.
 export WANDB_MODE="${WANDB_MODE:-offline}"
@@ -42,12 +85,6 @@ echo "    GPU     : $CUDA_VISIBLE_DEVICES"
 nvidia-smi --query-gpu=index,name,memory.used --format=csv,noheader
 echo "    wandb   : $([ $USE_WANDB = 1 ] && echo "$WANDB_MODE" || echo disabled)"
 echo "=============================================================="
-
-render() {  # smiles validation output epochs savefreq tb_logdir -> stdout
-  sed -e "s|{SMILES}|$1|" -e "s|{VALIDATION}|$2|" -e "s|{OUTPUT}|$3|" \
-      -e "s|{EPOCHS}|$4|" -e "s|{SAVEFREQ}|$5|" -e "s|{TB_LOGDIR}|$6|" \
-      configs/tl.toml.in
-}
 
 count() { grep -vc '^#' "$1"; }
 
@@ -99,14 +136,21 @@ for arm in core core_B; do
   out="priors/focused_$([ "$arm" = core ] && echo A || echo B).prior"
   d="$RUN/prod_${arm}"; mkdir -p "$d"
   e=${BEST_EPOCH[$arm]}
-  render "data/actives_${arm}.smi" "" "$out" "$e" "$e" "$d/tb" > "$d/tl.toml"
+  prod_epochs="$e"; prod_savefreq="$e"; run_name=""
+  if [ "$MODE" = "production-sweep" ] && [ "$arm" = core ]; then
+    # The production sweep for TL-A ("a-prime"): fixed 200 epochs, checkpointing
+    # every 20 so validation NLL actually lands on every checkpoint, not just the
+    # last one (see the --mode block above).
+    prod_epochs="$EPOCHS"; prod_savefreq="$SAVEFREQ"; run_name="tl-a-prime-sweep"
+  fi
+  render "data/actives_${arm}.smi" "" "$out" "$prod_epochs" "$prod_savefreq" "$d/tb" > "$d/tl.toml"
   reinvent -l "$d/tl.log" "$d/tl.toml" > "$d/stdout.txt" 2>&1 || {
     echo "  $label FAILED - see $d/tl.log"; tail -5 "$d/tl.log"; exit 1; }
-  echo "  $label: $(count "data/actives_${arm}.smi") molecules, $e epochs -> $out"
+  echo "  $label: $(count "data/actives_${arm}.smi") molecules, $prod_epochs epochs (save every $prod_savefreq) -> $out"
   if [ $USE_WANDB = 1 ]; then
-    python3 scripts/wandb_sync.py --arm "$label" --job production --epochs "$e" \
+    python3 scripts/wandb_sync.py --arm "$label" --job production --epochs "$prod_epochs" \
       --n-train "$(count "data/actives_${arm}.smi")" --tb-logdir "$d/tb" \
-      --log "$d/tl.log" || echo "  (wandb sync failed, continuing)"
+      --log "$d/tl.log" ${run_name:+--run-name "$run_name"} || echo "  (wandb sync failed, continuing)"
   fi
 done
 

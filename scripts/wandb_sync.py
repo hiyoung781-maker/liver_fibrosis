@@ -67,12 +67,14 @@ def main() -> int:
     ap.add_argument("--n-valid", type=int, default=0)
     ap.add_argument("--tb-logdir", required=True)
     ap.add_argument("--log", required=True, help="the reinvent -l log file")
+    ap.add_argument("--run-name", default=None,
+                     help="override the generated wandb run name, e.g. tl-a-prime-sweep")
     args = ap.parse_args()
 
     import wandb
 
-    name = (f"{args.arm}-fold{args.fold}" if args.job == "diagnostic"
-            else f"{args.arm}-production")
+    name = args.run_name or (f"{args.arm}-fold{args.fold}" if args.job == "diagnostic"
+                              else f"{args.arm}-production")
     summary = parse_tl_log(Path(args.log))
 
     run = wandb.init(
