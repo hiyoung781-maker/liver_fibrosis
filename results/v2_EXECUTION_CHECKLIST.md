@@ -153,3 +153,27 @@ existing behavior.
 
 **Gate:** none — both arms that have a checkpoint are pre-registered to be
 sampled and post-processed; comparing them is a later task's job.
+
+## Task 8: AutoGrid4 maps for 8W30 receptor
+
+**Not run in this session:** `autogrid4` is not installed anywhere on this
+development machine (not on PATH, not in any conda env, including the
+`docking` env that has `obabel`/`smina`). `scripts/prepare_maps.py` writes
+and structurally validates the GPF (directive order, even `npts` that cover
+the search box, `gridcenter`, `spacing`, `receptor_types` including `CA` for
+the MIDAS calcium, and the `map`/`elecmap`/`dsolvmap` lines) and gates on
+`maps_cover_box`, but it does not and cannot invoke `autogrid4`. Left
+runnable via:
+
+```bash
+python scripts/prepare_receptor_pdbqt.py --out docking/v2/receptor.pdbqt
+python scripts/prepare_maps.py --receptor docking/v2/receptor.pdbqt \
+    --ligand-ref docking/ligand_ref.sdf --out-dir docking/v2/maps
+(cd docking/v2/maps && autogrid4 -p receptor.gpf -l receptor.glg)
+```
+
+**Gate:** `autogrid4` must be available on K-BDS (or another machine with
+AutoDockTools installed) before this step can produce `receptor.maps.fld`.
+`prepare_maps.py`'s own exit status already fails loudly if the computed
+grid does not cover the search box, before autogrid4 would ever be invoked
+on a bad GPF.
