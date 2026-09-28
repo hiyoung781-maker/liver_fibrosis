@@ -21,14 +21,19 @@ bash scripts/kbds_submit_tl_sweep.sh
 ```
 
 This backgrounds, in order:
-1. `MODE=production-sweep bash scripts/run_d3.sh` — renders `configs/tl.toml.in`
-   with `num_epochs=200`, `save_every_n_epochs=20` for the TL-A/core arm
-   (verified: `bash scripts/run_d3.sh --print-config --mode production-sweep`
-   renders exactly `num_epochs = 200` / `save_every_n_epochs = 20` — this is the
-   fix for the v1 bug where the default `diagnostic` mode set
-   `save_every_n_epochs` equal to `num_epochs`, leaving checkpoints with no
-   validation NLL). Also runs the 5-fold diagnostic phase and the TL-B/core_B
-   production run, which the shared script does not let TL-A′ skip.
+1. `MODE=production-sweep bash scripts/run_d3.sh --arm A-prime` — renders
+   `configs/tl.toml.in` with `num_epochs=200`, `save_every_n_epochs=20` for the
+   TL-A/core arm (verified: `bash scripts/run_d3.sh --print-config --mode
+   production-sweep` renders exactly `num_epochs = 200` /
+   `save_every_n_epochs = 20` — this is the fix for the v1 bug where the
+   default `diagnostic` mode set `save_every_n_epochs` equal to `num_epochs`,
+   leaving checkpoints with no validation NLL). `--arm A-prime` restricts
+   phases 1 and 2 to the core/TL-A arm only — no core_B diagnostic fold, no
+   TL-B production train. This flag was added after review: `run_d3.sh`
+   previously ran both arms unconditionally, which would have burned real GPU
+   allocation on TL-B, an arm v2 discards outright (not just wasted
+   wall-clock — the `8gpu` partition bills node-hours regardless of GPU count
+   actually used).
 2. `python scripts/tl_sweep_report.py --checkpoints priors/focused_A.prior
    --n-samples 1000 --final-epoch 200 --out results/v2_tl_sweep.csv`
 

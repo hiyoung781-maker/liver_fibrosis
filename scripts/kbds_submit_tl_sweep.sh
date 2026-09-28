@@ -5,11 +5,12 @@
 # scripts/setup_kbds.sh) - GPU jobs run directly on the allocated GPU node,
 # backgrounded with nohup so the session can disconnect safely.
 #
-# Task brief names the invocation `MODE=production-sweep bash scripts/run_d3.sh
-# --arm A-prime`; the script actually checked into this repo has no --arm flag
-# (`bash scripts/run_d3.sh --print-config` and the arg parser confirm this), so
-# this runner uses the brief's explicitly-allowed alternate form, MODE=
-# production-sweep alone, which already targets the "core"/TL-A arm in phase 2.
+# Runs `MODE=production-sweep bash scripts/run_d3.sh --arm A-prime` exactly as
+# the task brief names it. run_d3.sh's --arm/ARM= selector (added after review)
+# restricts phases 1 and 2 to the core/TL-A arm, so this run does NOT touch the
+# core_B/TL-B diagnostic fold or TL-B production at all - v2 discards TL-B
+# outright, and running it here would burn real GPU allocation for nothing on a
+# node-hour-billed partition.
 #
 #   ssh bdata-gpuNN                       # allocated GPU node
 #   cd ~/liver_fibrosis
@@ -39,10 +40,9 @@ mkdir -p logs priors results
 echo "launching TL-A' production sweep in background, log: $LOG"
 nohup bash -c '
   set -euo pipefail
-  # run_d3.sh has no --arm flag (checked against the current script); MODE=
-  # production-sweep alone is enough - it only changes the epoch/savefreq pair
-  # applied to the "core" arm (= TL-A/A-prime) in phase 2, per the script.
-  MODE=production-sweep bash scripts/run_d3.sh
+  # --arm A-prime restricts run_d3.sh to the core/TL-A arm only: no core_B
+  # diagnostic fold, no TL-B production train.
+  MODE=production-sweep bash scripts/run_d3.sh --arm A-prime
   # Phase 2 writes checkpoints as priors/focused_A.prior(.N.chkpt) for the core
   # arm - that IS the A-prime sweep output, so aggregate it directly.
   eval "$(conda shell.bash hook)"

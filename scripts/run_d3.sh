@@ -5,6 +5,7 @@
 #   bash scripts/run_d3.sh                 # offline wandb, GPU 1
 #   CUDA_VISIBLE_DEVICES=0 bash scripts/run_d3.sh --no-wandb
 #   bash scripts/run_d3.sh --mode production-sweep --print-config   # render TL config only
+#   MODE=production-sweep bash scripts/run_d3.sh --arm A-prime      # TL-A' only, skips TL-B entirely
 #
 # --mode {diagnostic,production-sweep} picks the (EPOCHS, SAVEFREQ) pair used when
 # rendering configs/tl.toml.in: diagnostic is 20/1, production-sweep is 200/20.
@@ -12,6 +13,15 @@
 # checkpoint (REINVENT4 computes it only on save epochs) instead of just at the end.
 # --print-config renders the resulting TL config to stdout and exits without running
 # anything, so it can be diffed or asserted on in tests.
+#
+# --arm/ARM= {both,core,core_B} (aliases A/A-prime/TL-A -> core, B/TL-B -> core_B)
+# restricts phases 1 and 2 to one arm. Default is "both" (unchanged historical
+# behaviour: 5-fold diagnostics + full production for core AND core_B), so existing
+# callers are unaffected. Use --arm core (or A-prime) for a TL-A'-only production
+# sweep - without it, MODE=production-sweep also runs the core_B diagnostic fold and
+# a full TL-B production train, which v2 discards outright and which is real,
+# non-trivial GPU allocation burn on a node-hour-billed partition, not just wasted
+# wall-clock.
 #
 # Three phases, and phases 1 and 2 must not be confused:
 #   1. diagnostic - 5 folds x 2 arms, trains on a fold's train split and validates on
@@ -33,17 +43,32 @@ N_FOLDS=5
 SAMPLE_N="${SAMPLE_N:-1000}"
 USE_WANDB=1
 MODE="${MODE:-diagnostic}"
+ARM="${ARM:-both}"
 PRINT_CONFIG=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-wandb) USE_WANDB=0 ;;
     --mode) MODE="$2"; shift ;;
     --mode=*) MODE="${1#*=}" ;;
+    --arm) ARM="$2"; shift ;;
+    --arm=*) ARM="${1#*=}" ;;
     --print-config) PRINT_CONFIG=1 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
 done
+
+# Arm selector: default "both" runs core (TL-A/A-prime) and core_B (TL-B), exactly
+# the historical behaviour, so existing callers are unaffected. --arm/ARM= restricts
+# phases 1 and 2 to a single arm - added so a production-sweep run for TL-A' does
+# not also burn GPU allocation on the TL-B diagnostic fold and full TL-B production,
+# which v2 discards outright (see results/v2_EXECUTION_CHECKLIST.md, Task 5).
+case "$ARM" in
+  both)                 ARMS=(core core_B) ;;
+  core|A|A-prime|TL-A)  ARMS=(core) ;;
+  core_B|B|TL-B)        ARMS=(core_B) ;;
+  *) echo "unknown arm: $ARM (expected both|core|core_B, aliases A/A-prime/TL-A, B/TL-B)" >&2; exit 2 ;;
+esac
 
 # Mode selector: diagnostic finds the epoch where validation NLL turns up (fine
 # checkpoint granularity); production-sweep is the 200-epoch production run, whose
@@ -90,7 +115,7 @@ count() { grep -vc '^#' "$1"; }
 
 # ---------------------------------------------------------------- phase 1
 declare -A BEST_EPOCH
-for arm in core core_B; do
+for arm in "${ARMS[@]}"; do
   label="TL-A"; [ "$arm" = core_B ] && label="TL-B"
   echo
   echo "== phase 1: $label diagnostic, $N_FOLDS scaffold folds, up to $DIAG_EPOCHS epochs =="
@@ -131,7 +156,7 @@ done
 # ---------------------------------------------------------------- phase 2
 echo
 echo "== phase 2: production priors, full sets, no validation file =="
-for arm in core core_B; do
+for arm in "${ARMS[@]}"; do
   label="TL-A"; [ "$arm" = core_B ] && label="TL-B"
   out="priors/focused_$([ "$arm" = core ] && echo A || echo B).prior"
   d="$RUN/prod_${arm}"; mkdir -p "$d"
