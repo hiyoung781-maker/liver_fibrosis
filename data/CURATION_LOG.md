@@ -15,6 +15,7 @@ ChEMBL release: ChEMBL_37 (2026-05-01)
 - PLN-1474: RGD-zwitterion, MW 431.6, TPSA 100.6, QED 0.462
 - bexotegrast: RGD-zwitterion, MW 492.6, TPSA 112.5, QED 0.291
 - CWHM-12: RGD-zwitterion, MW 590.5, TPSA 172.4, QED 0.245
+  `CHEMBL3319237`은 pref_name이 None이고 synonym 목록이 비어 있다. 이름은 PubChem InChIKey 사슬로만 붙으므로 추론 동정이다.
 - GLPG0187: RGD-zwitterion, MW 595.7, TPSA 158.7, QED 0.273
 
 ### `actives_core.smi` — 5-fold scaffold split
@@ -57,13 +58,20 @@ canonicalization (blueprint 8.0).
 
 ## Notes
 
-**C8 is unresolved and deliberately excluded.** The blueprint lists it as a tool
-compound, but Sabat et al. cite it as a previously reported external inhibitor, not
-as one of their own compounds, and the name resolves to nothing in PubChem. Table 4
-of the paper gives C8 a cell-adhesion alphaVbeta1 pIC50 of 7.90 and describes a
+**C8 is deliberately excluded.** The blueprint lists it as a tool compound, but
+Sabat et al. cite it as a previously reported external comparator, not one of their
+own compounds. C8의 출처는 Reed NI et al., Sci Transl Med 2015;7(288):288ra79
+(Sabat 참고문헌 10)이다. 이번 연구에서는 사용하지 않는다 - 강한 αvβ1 선택성이나
+최적 포켓 점유를 달성하지 못한 비교 대상 화합물이기 때문이다. Table 4 of the paper
+gives C8 a cell-adhesion alphaVbeta1 pIC50 of 7.90 and describes a
 phenylsulfonamidopyrrolidine. The closest candidate in ChEMBL is `CHEMBL3957812`
 (pIC50 7.9, N-arylsulfonyl-L-proline scaffold, document `CHEMBL3862028`), but the
 match rests on one coincident number, so C8 is left out rather than guessed.
+
+**Boundary case: `CHEMBL2381700`.** CHEMBL2381700은 피리미딘에 붙은 3차
+다이에틸아미노기를 가진다. 지방족 아민 패턴이 `!$(Na)`로 방향족 결합 질소를
+배제하고 2-aminopyridine 패턴이 `[NX3;H1,H2]`를 요구하므로 SMARTS 기준으로는
+non-RGD이나, core 25개 중 유일하게 판정이 규칙에 의존하는 분자다.
 
 **The paper's numbered series is fully covered.** Compound numbering runs to 25 plus
 the external C8 (Table 4: *Cellular Selectivity Data for C8 and Benzimidazolone 25*),

@@ -75,6 +75,22 @@ PANEL_COMPOUNDS = ["PLN-1474", "bexotegrast"]
 # 선택성 역도킹 전용. 측정된 pan-αv ground truth를 제공한다.
 PAN_AV_REFERENCES = ["CWHM-12", "GLPG0187"]
 
+# ChEMBL의 출처 문서가 1차 논문이 아닌 경우의 명시적 매핑.
+# 리뷰에서 수확된 레코드는 출처를 리뷰로 적으면 추적이 끊긴다.
+PRIMARY_SOURCE_OVERRIDES = {
+    # 리뷰 CHEMBL4602673 = Zheng & Leftheris, J Med Chem 2020, 63:5675-5696.
+    # 그 안의 compound 38이며, 리뷰의 참고문헌 141이 1차 출처다.
+    # Sabat 2024도 같은 논문을 참고문헌 16으로 인용하며, 거기서 나온 화합물을
+    # "limited affinity for αv integrins other than αvβ1"의 사례로 든다.
+    "CHEMBL4649232": (
+        "Hatley RJD et al., ChemMedChem 2019, 14(14), 1315-20"
+    ),
+}
+
+PAPER_IDS = {
+    "CHEMBL5532604": "Sabat2024:25",
+}
+
 # Arg-mimetic basic heads.  A molecule carrying one binds in the zwitterionic RGD
 # mode; the 8W30 ligand and the Sabat series carry none.
 ARG_MIMIC_HEADS = {
@@ -369,12 +385,21 @@ def main() -> int:
     # ---- assemble every candidate, keyed by InChIKey
     records: dict[str, dict] = {}
 
-    def add(smiles: str, source: str, identifier: str, potency_nm: float | None) -> str | None:
+    def add(
+        smiles: str,
+        source: str,
+        identifier: str,
+        potency_nm: float | None,
+        endpoint_type: str = "",
+    ) -> str | None:
         result = standardize(smiles)
         if result is None:
             note(f"  ! unparsable SMILES from {source}/{identifier}")
             return None
         canonical, inchikey = result
+        document = first_doc.get(identifier, "")
+        primary_source = PRIMARY_SOURCE_OVERRIDES.get(identifier, document)
+        paper_id = PAPER_IDS.get(identifier, "")
         if inchikey in records:
             existing = records[inchikey]
             existing["source"] = f"{existing['source']}+{source}"
@@ -383,6 +408,7 @@ def main() -> int:
             ):
                 existing["ic50_nM"] = potency_nm
                 existing["pIC50"] = round(9 - np.log10(potency_nm), 2)
+                existing["endpoint_type"] = endpoint_type
             return inchikey
         records[inchikey] = {
             "inchikey": inchikey,
@@ -392,7 +418,10 @@ def main() -> int:
             "identifier": identifier,
             "ic50_nM": potency_nm,
             "pIC50": round(9 - np.log10(potency_nm), 2) if potency_nm else None,
-            "document": first_doc.get(identifier, ""),
+            "document": document,
+            "endpoint_type": endpoint_type,
+            "primary_source": primary_source,
+            "paper_id": paper_id,
             **describe(canonical),
         }
         return inchikey
@@ -407,7 +436,8 @@ def main() -> int:
         if not smiles:
             continue
         value = potency[molecule_id][0] if molecule_id in potency else None
-        add(smiles, "ChEMBL", molecule_id, value)
+        endpoint_type = potency[molecule_id][1]["standard_type"] if molecule_id in potency else ""
+        add(smiles, "ChEMBL", molecule_id, value, endpoint_type)
 
     # named tool compounds: panel references plus the pan-alphaV selectivity
     # redocking controls. Neither group enters the core.
@@ -426,6 +456,9 @@ def main() -> int:
             record = records[key]
             note(f"- {name}: {record['chemotype']}, MW {record['MW']}, "
                  f"TPSA {record['TPSA']}, QED {record['QED']}")
+            if name == "CWHM-12":
+                note("  `CHEMBL3319237`은 pref_name이 None이고 synonym 목록이 비어 있다. "
+                     "이름은 PubChem InChIKey 사슬로만 붙으므로 추론 동정이다.")
     note()
 
     # ---- the four sets
@@ -677,6 +710,7 @@ def main() -> int:
     # ---- annotated table
     columns = [
         "inchikey", "smiles", "identifier", "source", "document", "ic50_nM", "pIC50",
+        "endpoint_type", "primary_source", "paper_id",
         "smiles_flat", "chemotype", "arg_mimic_heads", "unflagged_basic_N",
         "has_carboxylic_acid",
         "MW", "TPSA", "cLogP",
@@ -688,20 +722,27 @@ def main() -> int:
         handle.write(",".join(columns + list(membership)) + "\n")
         for key, record in sorted(records.items(),
                                    key=lambda kv: (-(kv[1]["pIC50"] or 0), kv[0])):
-            row = [str(record.get(c, "")) for c in columns]
+            row = ["" if record.get(c) is None else str(record.get(c)) for c in columns]
             row += ["1" if key in members else "0" for members in membership.values()]
             handle.write(",".join('"' + c.replace('"', '""') + '"' for c in row) + "\n")
 
     # ---- QC gate and summary
     note("## Notes")
     note()
-    note("**C8 is unresolved and deliberately excluded.** The blueprint lists it as a tool")
-    note("compound, but Sabat et al. cite it as a previously reported external inhibitor, not")
-    note("as one of their own compounds, and the name resolves to nothing in PubChem. Table 4")
-    note("of the paper gives C8 a cell-adhesion alphaVbeta1 pIC50 of 7.90 and describes a")
+    note("**C8 is deliberately excluded.** The blueprint lists it as a tool compound, but")
+    note("Sabat et al. cite it as a previously reported external comparator, not one of their")
+    note("own compounds. C8의 출처는 Reed NI et al., Sci Transl Med 2015;7(288):288ra79")
+    note("(Sabat 참고문헌 10)이다. 이번 연구에서는 사용하지 않는다 - 강한 αvβ1 선택성이나")
+    note("최적 포켓 점유를 달성하지 못한 비교 대상 화합물이기 때문이다. Table 4 of the paper")
+    note("gives C8 a cell-adhesion alphaVbeta1 pIC50 of 7.90 and describes a")
     note("phenylsulfonamidopyrrolidine. The closest candidate in ChEMBL is `CHEMBL3957812`")
     note("(pIC50 7.9, N-arylsulfonyl-L-proline scaffold, document `CHEMBL3862028`), but the")
     note("match rests on one coincident number, so C8 is left out rather than guessed.")
+    note()
+    note("**Boundary case: `CHEMBL2381700`.** CHEMBL2381700은 피리미딘에 붙은 3차")
+    note("다이에틸아미노기를 가진다. 지방족 아민 패턴이 `!$(Na)`로 방향족 결합 질소를")
+    note("배제하고 2-aminopyridine 패턴이 `[NX3;H1,H2]`를 요구하므로 SMARTS 기준으로는")
+    note("non-RGD이나, core 25개 중 유일하게 판정이 규칙에 의존하는 분자다.")
     note()
     note("**The paper's numbered series is fully covered.** Compound numbering runs to 25 plus")
     note("the external C8 (Table 4: *Cellular Selectivity Data for C8 and Benzimidazolone 25*),")
