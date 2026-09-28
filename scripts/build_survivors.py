@@ -30,9 +30,21 @@ import objective
 from known_scaffolds import DEFAULT_OUTPUT as KNOWN_SCAFFOLDS
 from novelty import load_smi, murcko
 
-__all__ = ["WINDOW", "passes_window", "write_survivors"]
+__all__ = [
+    "WINDOW", "passes_window", "write_survivors",
+    "library_path", "survivors_path",
+]
 
 RDLogger.DisableLog("rdApp.*")
+
+def library_path(arm: str) -> str:
+    """The arm-scoped library.smi this arm's survivors are drawn from."""
+    return f"data/v2_{arm}/library.smi"
+
+
+def survivors_path(arm: str) -> str:
+    """The arm-scoped survivors.smi this build writes."""
+    return f"data/v2_{arm}/survivors.smi"
 
 # Pre-registered in section 8.2. TPSA deliberately reuses the RL objective's window
 # rather than restating it, so the two cannot diverge.
@@ -116,12 +128,23 @@ def write_survivors(out_path: str, library_path: str = DEFAULT_LIBRARY,
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--library", default=DEFAULT_LIBRARY)
-    parser.add_argument("--out", default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--arm", help="e.g. TL-A-prime or TL-C; sets default --library/--out")
+    parser.add_argument("--library", help="default: derived from --arm")
+    parser.add_argument("--out", help="default: derived from --arm")
     args = parser.parse_args(argv)
 
-    counts = write_survivors(args.out, args.library)
-    print(f"{args.library} -> {args.out}")
+    if not args.arm and not (args.library and args.out):
+        parser.error("either --arm or both --library and --out are required")
+
+    library = args.library or library_path(args.arm)
+    out = args.out or survivors_path(args.arm)
+
+    import os
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+
+    counts = write_survivors(out, library)
+    print(f"{library} -> {out}")
     for key, value in counts.items():
         print(f"  {key:14s} {value}")
     return 0

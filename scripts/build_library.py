@@ -30,9 +30,27 @@ from rdkit import Chem, RDLogger
 import normalize
 from normalize import canonical_tautomer, flatten
 
-__all__ = ["build_library", "read_sampling_csv", "write_library"]
+__all__ = [
+    "build_library", "read_sampling_csv", "write_library",
+    "output_path", "LIBRARY_COLUMNS", "input_path",
+]
 
 RDLogger.DisableLog("rdApp.*")
+
+# v1 wrote to the arm-less results/leads.csv-style paths. Re-running v2 with the
+# same paths would silently overwrite the previous arm's (or v1's) results,
+# making the two RL arms incomparable. Every path below is scoped by arm.
+LIBRARY_COLUMNS = ("smiles", "smiles_as_scored")
+
+
+def input_path(arm: str) -> str:
+    """The arm-scoped REINVENT sampling CSV this build reads from."""
+    return f"results/v2_{arm}/sample.csv"
+
+
+def output_path(arm: str) -> str:
+    """The arm-scoped library.smi this build writes."""
+    return f"data/v2_{arm}/library.smi"
 
 
 def read_sampling_csv(path: str) -> list[str]:
@@ -117,15 +135,28 @@ def write_library(path: str, result: dict, source: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--input", required=True, help="REINVENT sampling CSV")
-    parser.add_argument("--output", required=True, help="library .smi to write")
+    parser.add_argument(
+        "--arm", help="e.g. TL-A-prime or TL-C; sets default --input/--output")
+    parser.add_argument(
+        "--input", help="REINVENT sampling CSV (default: derived from --arm)")
+    parser.add_argument(
+        "--output", help="library .smi to write (default: derived from --arm)")
     args = parser.parse_args(argv)
 
-    sampled = read_sampling_csv(args.input)
-    result = build_library(sampled)
-    write_library(args.output, result, source=args.input)
+    if not args.arm and not (args.input and args.output):
+        parser.error("either --arm or both --input and --output are required")
 
-    print(f"{args.input} -> {args.output}")
+    input_csv = args.input or input_path(args.arm)
+    output_smi = args.output or output_path(args.arm)
+
+    import os
+    os.makedirs(os.path.dirname(output_smi) or ".", exist_ok=True)
+
+    sampled = read_sampling_csv(input_csv)
+    result = build_library(sampled)
+    write_library(output_smi, result, source=input_csv)
+
+    print(f"{input_csv} -> {output_smi}")
     for key in ("n_input", "n_valid", "n_unique_canonical",
                 "n_unique_normalized", "n_tautomer_failures"):
         print(f"  {key:22s} {result[key]}")

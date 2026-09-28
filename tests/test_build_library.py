@@ -128,5 +128,22 @@ class TestWriteLibrary(unittest.TestCase):
         self.assertRegex(joined, r"column|field")  # explains the second column
 
 
+class TestArmScopedOutputs(unittest.TestCase):
+    """v1은 results/leads.csv처럼 아암 접미사 없는 경로에 썼다. 재실행 시
+    이전 결과를 덮어써서 비교가 불가능해진다."""
+
+    def test_output_path_includes_the_arm(self):
+        from build_library import output_path
+        self.assertEqual(output_path("TL-A-prime"), "data/v2_TL-A-prime/library.smi")
+        self.assertEqual(output_path("TL-C"), "data/v2_TL-C/library.smi")
+
+    def test_library_keeps_both_smiles_columns(self):
+        """1열은 정규화 SMILES(모든 속성·신규성 주장의 대상), 2열은 정규화 전
+        정준 SMILES(RL 목적함수가 실제로 채점한 구조). 토토머 선택이 디스크립터를
+        움직이므로 둘의 불일치 크기를 측정 가능하게 남긴다."""
+        from build_library import LIBRARY_COLUMNS
+        self.assertEqual(LIBRARY_COLUMNS, ("smiles", "smiles_as_scored"))
+
+
 if __name__ == "__main__":
     unittest.main()
