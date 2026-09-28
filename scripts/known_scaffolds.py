@@ -32,9 +32,10 @@ __all__ = [
 # PLN-1474 IS in ChEMBL, as CHEMBL5933542 - an earlier version of this comment said
 # its structure came from AdisInsight rather than a ChEMBL record, which was
 # imprecise. ChEMBL holds it unnamed, with no synonyms and max_phase null, and its
-# only activity records are three alphaVbeta6 entries (IC50 50 nM). It has NO
-# alphaVbeta1 activity record, which is why the actives_extended query misses it
-# and why this union exists. Blueprint section 7.5.
+# only activity records are one censored alphaVbeta6 IC50 ("<50 nM") plus two
+# kinetic (kon/koff) rows with no reported value. It has NO alphaVbeta1 activity
+# record, which is why the actives_extended query misses it and why this union
+# exists. Blueprint section 7.5.
 REFERENCE_FILES = (
     "data/actives_core.smi",
     "data/actives_core_B.smi",
