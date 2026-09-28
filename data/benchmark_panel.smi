@@ -1,7 +1,5 @@
 # Section 3.4 positive benchmark panel. Scored, never trained on.
 O=C(NC(Cc1ccccc1)C(=O)O)c1ccc(Cl)cc1Cl	A1AFA
-COCCN(CCCCc1ccc2c(n1)NCCC2)CCC(Nc1ncnc2ccccc12)C(=O)O	bexotegrast
-CC(C)(C)c1cc(Br)cc(C(CC(=O)O)NC(=O)CNC(=O)c2cc(O)cc(NC3=NCC(O)CN3)c2)c1	CWHM-12
-COc1ccc(S(=O)(=O)NC(CNc2nc(C)nc(N3CCC(c4ccc5c(n4)NCCC5)CC3)c2C)C(=O)O)cc1	GLPG0187
 CC1(C(=O)NC(CCCCCCCc2ccc3c(n2)NCCC3)C(=O)O)CCOCC1	PLN-1474
+COCCN(CCCCc1ccc2c(n1)NCCC2)CCC(Nc1ncnc2ccccc12)C(=O)O	bexotegrast
 CCNC(=O)Nc1cnnc(-c2ccc(CC(NC(=O)c3c(Cl)cccc3Cl)C(=O)O)cc2)c1	CHEMBL4649232

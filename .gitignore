@@ -48,6 +48,10 @@ results/*
 !results/admet_survivors.csv
 !results/panel_geometry.csv
 !results/leads.csv
+!results/v2_*.md
+!results/v2_*.csv
+!results/v2_*.json
+!results/v2_TL-*/
 
 # 도킹 중간 산출물. §8.5 실행이 만드는 것들이며 재생성 가능하다.
 #   docking/poses/          리간드별 출력 PDBQT 7,763개

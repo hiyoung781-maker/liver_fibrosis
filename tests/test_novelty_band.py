@@ -26,9 +26,9 @@ class TestBandReproduction(unittest.TestCase):
 
     def test_core_unnormalized_matches_golden_values(self):
         band = cross_scaffold_band([s for s, _ in load_smi(CORE)], normalize=False)
-        self.assertEqual(band["n"], 29)
-        self.assertAlmostEqual(band["p25"], 0.552, places=3)
-        self.assertAlmostEqual(band["p50"], 0.676, places=3)
+        self.assertEqual(band["n"], 25)
+        self.assertAlmostEqual(band["p25"], 0.567, places=3)
+        self.assertAlmostEqual(band["p50"], 0.689, places=3)
 
     def test_extended_unnormalized_matches_golden_values(self):
         band = cross_scaffold_band([s for s, _ in load_smi(EXTENDED)], normalize=False)
@@ -39,9 +39,9 @@ class TestBandReproduction(unittest.TestCase):
 
 class TestBandAfterNormalization(unittest.TestCase):
     def test_core_is_unchanged(self):
-        """0 of 29 core actives change tautomer, so the band must not move."""
+        """0 of 25 core actives change tautomer, so the band must not move."""
         band = cross_scaffold_band([s for s, _ in load_smi(CORE)], normalize=True)
-        self.assertAlmostEqual(band["p25"], 0.552, places=3)
+        self.assertAlmostEqual(band["p25"], 0.567, places=3)
 
     def test_extended_p25_drops_to_0680(self):
         """14 of 190 change tautomer; the threshold gets slightly stricter."""
@@ -70,7 +70,7 @@ class TestCommittedJsonMatchesTheFunction(unittest.TestCase):
                                 core_band["p25"], places=3)
         self.assertAlmostEqual(committed["actives_extended"]["p25"],
                                 extended_band["p25"], places=3)
-        self.assertAlmostEqual(committed["actives_core"]["p25"], 0.552, places=3)
+        self.assertAlmostEqual(committed["actives_core"]["p25"], 0.567, places=3)
         self.assertAlmostEqual(committed["actives_extended"]["p25"], 0.680,
                                 places=3)
 
@@ -78,7 +78,7 @@ class TestCommittedJsonMatchesTheFunction(unittest.TestCase):
 class TestLoadSmi(unittest.TestCase):
     def test_skips_comments_and_blank_lines(self):
         rows = load_smi("data/benchmark_panel.smi")
-        self.assertEqual(len(rows), 6)
+        self.assertEqual(len(rows), 4)
         self.assertIn("A1AFA", [label for _, label in rows])
 
 

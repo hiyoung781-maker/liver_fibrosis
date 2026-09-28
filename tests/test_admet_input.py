@@ -85,12 +85,14 @@ class TestWriteAdmetInput(unittest.TestCase):
         counts = write_admet_input(self.out, str(self.geometry),
                                    str(self.survivors))
         self.assertEqual(counts["written"], 1)
-        self.assertEqual(counts["panel"], 6)
+        # data/benchmark_panel.smi holds the 4 target-profile panel compounds
+        # (PANEL_COMPOUNDS + CHEMBL4649232 + A1AFA), not the pan-alphaV tools.
+        self.assertEqual(counts["panel"], 4)
         rows = list(csv.DictReader(open(self.out)))
         labels = [r["label"] for r in rows]
         self.assertIn("gen_00001", labels)
         self.assertNotIn("gen_00002", labels)
-        self.assertEqual(sum(1 for l in labels if l.startswith(PANEL_PREFIX)), 6)
+        self.assertEqual(sum(1 for l in labels if l.startswith(PANEL_PREFIX)), 4)
 
     def test_panel_labels_are_prefixed_so_they_can_be_separated(self):
         geometry_csv(self.geometry, [("gen_00001", 1, 1)])

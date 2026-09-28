@@ -120,7 +120,7 @@ class TestPanelPrecondition(unittest.TestCase):
         reference."""
         scored = objective.score_smiles(
             [s for s, _ in load_smi("data/benchmark_panel.smi")])
-        self.assertEqual(len(scored["smiles"]), 6)
+        self.assertEqual(len(scored["smiles"]), 4)
         self.assertTrue(all(scored["cooh"] > 0))
 
 

@@ -1,10 +1,10 @@
 {
   "actives_core": {
-    "n": 29,
-    "p25": 0.552,
-    "p50": 0.676,
+    "n": 25,
+    "p25": 0.567,
+    "p50": 0.689,
     "p75": 0.732,
-    "p90": 0.745
+    "p90": 0.751
   },
   "actives_extended": {
     "n": 190,
@@ -13,5 +13,5 @@
     "p75": 0.831,
     "p90": 0.922
   },
-  "_note": "Tautomer-canonicalized (blueprint 8.0). REPORTING CONTEXT ONLY - the novelty gate is Murcko scaffold membership, see data/known_scaffolds.smi. Pre-normalization values were core p25 0.552, extended p25 0.710."
+  "_note": "Tautomer-canonicalized (blueprint 8.0). REPORTING CONTEXT ONLY - the novelty gate is Murcko scaffold membership, see data/known_scaffolds.smi. Pre-normalization values were core p25 0.567, extended p25 0.710."
 }

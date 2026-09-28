@@ -12,47 +12,48 @@ ChEMBL release: ChEMBL_37 (2026-05-01)
 
 ## Tool compounds
 
+- PLN-1474: RGD-zwitterion, MW 431.6, TPSA 100.6, QED 0.462
 - bexotegrast: RGD-zwitterion, MW 492.6, TPSA 112.5, QED 0.291
 - CWHM-12: RGD-zwitterion, MW 590.5, TPSA 172.4, QED 0.245
 - GLPG0187: RGD-zwitterion, MW 595.7, TPSA 158.7, QED 0.273
-- PLN-1474: RGD-zwitterion, MW 431.6, TPSA 100.6, QED 0.462
 
 ### `actives_core.smi` — 5-fold scaffold split
 
 | fold | validation n | scaffolds | RGD-zwitterion | pIC50 range |
 |---|---|---|---|---|
 | 1 | 9 | 1 | 0 | 7.1–9.5 |
-| 2 | 5 | 3 | 1 | 7.7–9.2 |
-| 3 | 5 | 5 | 1 | 6.3–8.7 |
-| 4 | 5 | 5 | 0 | 6.1–9.8 |
-| 5 | 5 | 5 | 2 | 6.4–9.2 |
+| 2 | 4 | 2 | 0 | 7.5–9.0 |
+| 3 | 4 | 4 | 0 | 6.3–7.0 |
+| 4 | 4 | 4 | 0 | 6.4–9.8 |
+| 5 | 4 | 4 | 0 | 6.1–9.2 |
 
-No Murcko scaffold spans two folds. Chemotype cannot be stratified at this n: the core holds only 4 RGD-zwitterions in total, so they cannot be spread evenly over 5 scaffold-disjoint folds.
+No Murcko scaffold spans two folds. Chemotype cannot be stratified at this n: core holds only 0 RGD-zwitterion(s) in total, so they cannot be spread evenly over 5 scaffold-disjoint folds.
 
 ### `actives_core_B.smi` — 5-fold scaffold split
 
 | fold | validation n | scaffolds | RGD-zwitterion | pIC50 range |
 |---|---|---|---|---|
-| 1 | 39 | 21 | 33 | 6.1–10.0 |
-| 2 | 39 | 21 | 38 | 6.1–9.5 |
-| 3 | 39 | 22 | 34 | 6.1–10.7 |
-| 4 | 38 | 21 | 26 | 6.3–10.0 |
-| 5 | 38 | 21 | 37 | 6.2–10.0 |
+| 1 | 39 | 21 | 37 | 6.6–9.6 |
+| 2 | 38 | 20 | 37 | 6.1–10.0 |
+| 3 | 38 | 21 | 24 | 6.1–10.2 |
+| 4 | 38 | 21 | 33 | 6.1–10.7 |
+| 5 | 38 | 21 | 35 | 6.1–10.0 |
 
-No Murcko scaffold spans two folds. Chemotype cannot be stratified at this n: the core holds only 4 RGD-zwitterions in total, so they cannot be spread evenly over 5 scaffold-disjoint folds.
+No Murcko scaffold spans two folds. Chemotype cannot be stratified at this n: core_B holds only 166 RGD-zwitterion(s) in total, so they cannot be spread evenly over 5 scaffold-disjoint folds.
 
 ## Novelty calibration band
 
 Nearest-neighbour Tanimoto from each active to an active with a *different*
 Murcko scaffold, under the same fingerprint the scoring components use
-(Morgan radius 3, feature invariants, counts).
+(Morgan radius 3, feature invariants, counts), AFTER tautomer
+canonicalization (blueprint 8.0).
 
 | reference set | n | p25 | median | p75 | p90 |
 |---|---|---|---|---|---|
-| `actives_core` | 29 | 0.552 | 0.676 | 0.732 | 0.745 |
+| `actives_core` | 25 | 0.567 | 0.689 | 0.732 | 0.751 |
 | `actives_extended` | 190 | 0.680 | 0.765 | 0.831 | 0.922 |
 
-**This band is REPORTING CONTEXT ONLY, after tautomer canonicalization - it is not the novelty gate.** The gate is Murcko scaffold membership against `data/known_scaffolds.smi`. Report the full distribution and each lead's percentile within this band, not only the pass/fail count - the band is fingerprint-specific and the percentile survives a change of fingerprint in a way a bare cut-off does not.
+**This band is REPORTING CONTEXT, not the novelty gate.** The gate is Murcko scaffold membership - see `data/known_scaffolds.smi` and blueprint section 8.3. A distance cut-off was withdrawn because it passes 62% of molecules whose Murcko scaffold is IDENTICAL to a published active's. Report each lead's nearest-neighbour Tanimoto and its percentile within this band alongside the binary scaffold verdict: the percentile survives a change of fingerprint in a way a bare cut-off does not.
 
 ## Notes
 
@@ -110,11 +111,11 @@ The de novo prior's alphabet (33 tokens) carries **no stereochemistry**:
 # %10 ( ) - 0 1 2 3 4 5 6 7 8 9 = Br C Cl F N O S [N+] [N-] [O-] [S+] [n+] [nH] c n o s
 ```
 
-- `core`: 2/29 would survive as isomeric, **29/29 as written (flattened)**
-- `core_B`: 30/193 would survive as isomeric, **193/193 as written (flattened)**
+- `core`: 2/25 would survive as isomeric, **25/25 as written (flattened)**
+- `core_B`: 30/191 would survive as isomeric, **191/191 as written (flattened)**
 - `extended`: 30/190 would survive as isomeric, **190/190 as written (flattened)**
 - `similarity_refs`: 1/6 would survive as isomeric, **6/6 as written (flattened)**
-- `benchmark`: 0/6 would survive as isomeric, **6/6 as written (flattened)**
+- `benchmark`: 0/4 would survive as isomeric, **4/4 as written (flattened)**
 
 Every emitted SMILES is representable by the prior.
 
@@ -133,16 +134,16 @@ All core molecules carry a carboxylic acid.
 
 | file | n | role |
 |---|---|---|
-| `actives_core.smi` | 29 | TL-A input + inception |
-| `actives_core_B.smi` | 193 | TL-B input |
+| `actives_core.smi` | 25 | TL-A input + inception |
+| `actives_core_B.smi` | 191 | TL-B input |
 | `actives_extended.smi` | 190 | novelty NN baseline only |
 | `similarity_refs.smi` | 6 | one molecule per endpoint |
-| `benchmark_panel.smi` | 6 | section 3.4 positives |
+| `benchmark_panel.smi` | 4 | section 3.4 positives |
 
 | set | n | Murcko scaffolds | RGD-zwitterion | MW | TPSA | cLogP | QED |
 |---|---|---|---|---|---|---|---|
-| core (TL-A) | 29 | 19 | 4 (14%) | 464 | 145 | 1.69 | 0.41 |
-| core_B (TL-B) | 193 | 106 | 168 (87%) | 498 | 149 | 2.34 | 0.37 |
+| core (TL-A) | 25 | 15 | 0 (0%) | 452 | 145 | 1.37 | 0.41 |
+| core_B (TL-B) | 191 | 104 | 166 (87%) | 498 | 150 | 2.34 | 0.37 |
 | extended | 190 | 103 | 166 (87%) | 500 | 153 | 2.30 | 0.37 |
 | similarity_refs | 6 | 6 | 1 (17%) | 460 | 106 | 3.56 | 0.43 |
 

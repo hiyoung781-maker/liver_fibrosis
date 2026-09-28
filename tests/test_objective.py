@@ -140,8 +140,6 @@ class TestSpecNumbers(unittest.TestCase):
             "PLN-1474": 0.998,
             "bexotegrast": 0.878,
             "CHEMBL4649232": 0.060,
-            "GLPG0187": 0.001,
-            "CWHM-12": 0.001,
         }
         for label, value in expected.items():
             with self.subTest(label=label):

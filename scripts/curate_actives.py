@@ -7,7 +7,7 @@ The .smi files carry FLATTENED (non-isomeric) SMILES because that is what the
 generator can represent: the de novo `reinvent.prior` vocabulary contains no
 stereochemistry tokens at all (no @, @@, / or \\). Feeding isomeric SMILES to
 transfer learning would let read_smiles_csv_file() drop every stereocentre-bearing
-molecule silently - 27 of the core's 29. The isomeric form is kept in
+molecule silently - 23 of the core's 25. The isomeric form is kept in
 actives_annotated.csv, which is the record of truth and the input for docking.
 
   actives_core.smi      TL-A input (non-RGD) + RL inception memory
@@ -56,12 +56,24 @@ SABAT_DOC = "CHEMBL5500400"
 AVB1_TARGET = "CHEMBL2111407"
 LIGAND_CCD = "A1AFA"
 
-# All five are RGD mimetics.  They are in the core set for potency signal at the
-# user's direction; the chemotype column keeps their contribution separable at D3.
+# 패널 전용 참조 화합물. core/TL 입력에는 들어가지 않는다.
+#
+# v1은 이 넷을 "potency signal을 위해" core에 강제 주입했다. 그러나 REINVENT4의
+# 전이학습은 potency 필드가 없는 .smi 파일 하나만 읽으므로, 이들이 전달할 수 있는
+# 것은 Arg-mimic 구조뿐이다 - 이 프로젝트가 벗어나려는 바로 그 구조다.
+#
+# CWHM-12와 GLPG0187은 패널에서도 제외한다. ChEMBL 측정값 기준으로 CWHM-12는
+# αvβ8 0.2 / αvβ3 0.8 / αvβ1 1.8 nM 으로 αvβ1이 가장 약하고, GLPG0187은
+# 1.3/1.2/1.4/2.0/3.7 nM 으로 완전히 평탄하다. 목표 프로파일 참조군이 아니라
+# pan-αv이며, 선택성 역도킹(spec 10절)의 보정 대조군으로 재배치된다.
+#
 # "C8" from the blueprint is deliberately absent: it is not a Sabat compound but an
 # external comparator the paper cites, and the name resolves to nothing in PubChem.
 # See the "Notes" section of the curation log.
-TOOL_COMPOUNDS = ["bexotegrast", "CWHM-12", "GLPG0187", "PLN-1474"]
+PANEL_COMPOUNDS = ["PLN-1474", "bexotegrast"]
+
+# 선택성 역도킹 전용. 측정된 pan-αv ground truth를 제공한다.
+PAN_AV_REFERENCES = ["CWHM-12", "GLPG0187"]
 
 # Arg-mimetic basic heads.  A molecule carrying one binds in the zwitterionic RGD
 # mode; the 8W30 ligand and the Sabat series carry none.
@@ -397,11 +409,12 @@ def main() -> int:
         value = potency[molecule_id][0] if molecule_id in potency else None
         add(smiles, "ChEMBL", molecule_id, value)
 
-    # named tool compounds
+    # named tool compounds: panel references plus the pan-alphaV selectivity
+    # redocking controls. Neither group enters the core.
     tool_keys: dict[str, str] = {}  # name -> inchikey
     note("## Tool compounds")
     note()
-    for name in TOOL_COMPOUNDS:
+    for name in PANEL_COMPOUNDS + PAN_AV_REFERENCES:
         smiles = pubchem_smiles(name)
         if not smiles:
             note(f"- {name}: NOT RESOLVED in PubChem - excluded, structure not public under this name")
@@ -420,11 +433,13 @@ def main() -> int:
         k for k, r in records.items() if r["ic50_nM"] is not None and r["ic50_nM"] <= 1000
     }
     # A ChEMBL molecule earns a place in the core only as a CONFIRMED non-RGD active:
-    # an uncensored alphaVbeta1 IC50/Ki/Kd <= 1 uM.  The crystal ligand and the named
-    # tool compounds are admitted on their literature record instead.  Every ChEMBL
-    # molecule that fails the rule is listed under "Excluded from the core" below.
+    # an uncensored alphaVbeta1 IC50/Ki/Kd <= 1 uM.  The 8W30 crystal ligand is admitted
+    # on its structural record instead. No tool compound is injected: PANEL_COMPOUNDS
+    # and PAN_AV_REFERENCES are RGD mimetics reserved for the benchmark panel and the
+    # selectivity redocking controls. Every ChEMBL molecule that fails the rule is
+    # listed under "Excluded from the core" below.
     core_keys = {k for k in actives_1um if records[k]["chemotype"] == "non-RGD"}
-    core_keys |= {ligand_key} | set(tool_keys.values())
+    core_keys |= {ligand_key}
     core_keys = {k for k in core_keys if k}
     extended_keys = actives_1um
 
@@ -461,7 +476,7 @@ def main() -> int:
         reference_keys.append(pln)
     sabat = potent
 
-    panel_keys = [ligand_key] + list(tool_keys.values())
+    panel_keys = [ligand_key] + [tool_keys[n] for n in PANEL_COMPOUNDS if n in tool_keys]
     if sabat:
         panel_keys.append(sabat[0])  # most potent non-RGD Sabat compound = the cpd 25 class
 
@@ -486,7 +501,7 @@ def main() -> int:
         # delimiter="\t", so a space-separated "SMILES NAME" line is handed to the
         # tokenizer whole. Nothing errors - the name simply makes every molecule
         # fail the vocabulary check, and transfer learning would train on an empty
-        # set while inception rejects all 29 actives outright.
+        # set while inception rejects all 25 actives outright.
         lines += [
             f"{records[k]['smiles_flat']}\t"
             f"{records[k].get('tool_name') or records[k]['identifier']}"
@@ -499,18 +514,18 @@ def main() -> int:
 
     core = write_set(
         "actives_core.smi",
-        sorted(core_keys, key=lambda k: (records[k]["chemotype"], -(records[k]["pIC50"] or 0))),
+        sorted(core_keys, key=lambda k: (records[k]["chemotype"], -(records[k]["pIC50"] or 0), k)),
         [
             "TL-A input + RL inception memory.",
             "Every non-RGD ChEMBL molecule with an uncensored alphaVbeta1 IC50/Ki/Kd <= 1 uM,",
-            "plus the 8W30 crystal ligand and the named tool compounds.",
-            "The tool compounds are RGD mimetics, included for potency signal at the user's",
-            "direction; the chemotype column in actives_annotated.csv keeps them separable.",
+            "plus the 8W30 crystal ligand. Rule-derived only: no RGD-mimetic tool compound",
+            "is injected. Panel/selectivity reference compounds live in",
+            "benchmark_panel.smi and the pan-alphaV redocking set instead.",
         ],
     )
     core_b = write_set(
         "actives_core_B.smi",
-        sorted(core_b_keys, key=lambda k: (records[k]["chemotype"], -(records[k]["pIC50"] or 0))),
+        sorted(core_b_keys, key=lambda k: (records[k]["chemotype"], -(records[k]["pIC50"] or 0), k)),
         [
             "TL-B input: TL-A plus every confirmed RGD-zwitterion alphaVbeta1 active.",
             "The RGD mimetics carry the strongest binding signal but sit at the TPSA and QED",
@@ -520,7 +535,7 @@ def main() -> int:
     )
     extended = write_set(
         "actives_extended.smi",
-        sorted(extended_keys, key=lambda k: -(records[k]["pIC50"] or 0)),
+        sorted(extended_keys, key=lambda k: (-(records[k]["pIC50"] or 0), k)),
         [
             "Novelty NN-Tanimoto baseline ONLY.",
             "Every ChEMBL alphaVbeta1 molecule with a measured IC50/Ki/Kd <= 1 uM.",
@@ -548,15 +563,15 @@ def main() -> int:
     #
     # These folds diagnose TL; they do not define the model that generates. The
     # production prior trains on the FULL set (actives_core.smi / actives_core_B.smi)
-    # with the epoch count the folds identify - withholding 6 of 29 molecules
-    # permanently would discard 21% of the public non-RGD chemotype.
+    # with the epoch count the folds identify - withholding 5 of 25 molecules
+    # permanently would discard 20% of the public non-RGD chemotype.
     #
     # Folds are scaffold-disjoint because a random split leaked: 50% of the core's
     # validation molecules and 65% of core_B's shared a Murcko scaffold with a
     # training molecule, so held-out NLL measured recall of a near-twin rather than
     # generalisation. They are k folds rather than one split because a single split
-    # of 29 molecules over 19 scaffolds puts ~6 molecules in validation, where one
-    # molecule moves the estimate by 17% and the number is dominated by which
+    # of 25 molecules over 15 scaffolds puts ~5 molecules in validation, where one
+    # molecule moves the estimate by 20% and the number is dominated by which
     # scaffolds happened to land there. Report mean and range across folds.
     N_FOLDS = 5
     rng = np.random.default_rng(20260925)  # fixed seed: the folds must be reproducible
@@ -605,9 +620,10 @@ def main() -> int:
             note(f"| {i} | {len(fold)} | {len({records[k]['murcko_scaffold'] for k in fold})} "
                  f"| {rgd} | {span} |")
         note()
+        total_rgd = sum(1 for k in keys if records[k]["chemotype"] == "RGD-zwitterion")
         note(f"No Murcko scaffold spans two folds. Chemotype cannot be stratified at this "
-             f"n: the core holds only 4 RGD-zwitterions in total, so they cannot be spread "
-             f"evenly over {N_FOLDS} scaffold-disjoint folds.")
+             f"n: {label} holds only {total_rgd} RGD-zwitterion(s) in total, so they cannot "
+             f"be spread evenly over {N_FOLDS} scaffold-disjoint folds.")
         note()
 
     # ---- novelty calibration band (blueprint sections 8.3 and 9)
@@ -633,10 +649,12 @@ def main() -> int:
     note("| reference set | n | p25 | median | p75 | p90 |")
     note("|---|---|---|---|---|---|")
     band = {}
+    pre_norm = {}
     for label, keys in (("actives_core", core), ("actives_extended", extended)):
         smiles_list = [records[k]["smiles_flat"] for k in keys]
         q = cross_scaffold_band(smiles_list, normalize=True)
         band[label] = q
+        pre_norm[label] = cross_scaffold_band(smiles_list, normalize=False)
         note(f"| `{label}` | {q['n']} | {q['p25']:.3f} | {q['p50']:.3f} | "
              f"{q['p75']:.3f} | {q['p90']:.3f} |")
     note()
@@ -651,7 +669,8 @@ def main() -> int:
     band["_note"] = (
         "Tautomer-canonicalized (blueprint 8.0). REPORTING CONTEXT ONLY - the "
         "novelty gate is Murcko scaffold membership, see data/known_scaffolds.smi. "
-        "Pre-normalization values were core p25 0.552, extended p25 0.710."
+        f"Pre-normalization values were core p25 {pre_norm['actives_core']['p25']:.3f}, "
+        f"extended p25 {pre_norm['actives_extended']['p25']:.3f}."
     )
     (DATA / "novelty_band.json").write_text(json.dumps(band, indent=2) + "\n")
 
@@ -667,7 +686,8 @@ def main() -> int:
                   "similarity_ref": set(references), "benchmark": set(panel)}
     with (DATA / "actives_annotated.csv").open("w") as handle:
         handle.write(",".join(columns + list(membership)) + "\n")
-        for key, record in sorted(records.items(), key=lambda kv: -(kv[1]["pIC50"] or 0)):
+        for key, record in sorted(records.items(),
+                                   key=lambda kv: (-(kv[1]["pIC50"] or 0), kv[0])):
             row = [str(record.get(c, "")) for c in columns]
             row += ["1" if key in members else "0" for members in membership.values()]
             handle.write(",".join('"' + c.replace('"', '""') + '"' for c in row) + "\n")

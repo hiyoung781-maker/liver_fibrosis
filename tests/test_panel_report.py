@@ -18,12 +18,11 @@ from panel_report import (
     write_panel_smiles,
 )
 
-LABELS = ["A1AFA", "bexotegrast", "CWHM-12", "GLPG0187", "PLN-1474",
-          "CHEMBL4649232"]
+LABELS = ["A1AFA", "PLN-1474", "bexotegrast", "CHEMBL4649232"]
 
 
 class TestPanelRows(unittest.TestCase):
-    def test_reads_all_six_with_labels_in_file_order(self):
+    def test_reads_all_four_with_labels_in_file_order(self):
         rows = panel_rows()
         self.assertEqual([label for _, label in rows], LABELS)
 
@@ -55,7 +54,7 @@ class TestWritePanelSmiles(unittest.TestCase):
         a comment would be parsed as part of the SMILES."""
         labels, lines = self._write(normalize=False)
         self.assertEqual(labels, LABELS)
-        self.assertEqual(len(lines), 6)
+        self.assertEqual(len(lines), 4)
         for line in lines:
             self.assertNotIn("\t", line)
             self.assertNotIn(" ", line)
@@ -73,7 +72,7 @@ class TestWritePanelSmiles(unittest.TestCase):
         §8.0 requires both sides of a comparison to pass the same normalization,
         and §6.5 measured that the objective's verdict can flip with the tautomer
         written - 19 agent molecules swing between a perfect score and zero. The
-        panel turns out to need nothing: all six curated SMILES are already their
+        panel turns out to need nothing: all four curated SMILES are already their
         own canonical tautomer, so the as-curated and normalized arms coincide and
         §9.5's comparison against normalized generated molecules is symmetric for
         free.
@@ -89,7 +88,7 @@ class TestWritePanelSmiles(unittest.TestCase):
 
 
 class TestScorePanel(unittest.TestCase):
-    def test_scores_all_six_with_every_component(self):
+    def test_scores_all_four_with_every_component(self):
         result = score_panel(normalize=False)
         self.assertEqual(sorted(result), sorted(LABELS))
         for label, row in result.items():
