@@ -438,3 +438,28 @@ verification are structured as separate, independently unit-tested
 functions (`build_meeko_command`, `verify_receptor`) so this was testable
 without Meeko. Must be re-verified for real on the cluster where Meeko is
 available.
+
+## 2026-09-29 -- filelist path resolution fix (dock_autodock_gpu.py)
+
+Ran on the cluster with the real binary today. **The filelist BATCH FILE
+LAYOUT itself is now CONFIRMED correct** against v1.6-20-gbe06a13 (first
+line the `.fld` path, then per ligand one line of PDBQT path followed by one
+line of `--resnam` output name) -- the earlier "FILELIST FORMAT UNVERIFIED"
+note above is resolved; the format was never the bug.
+
+The observed failure was **path resolution, not format**: AutoDock-GPU
+resolves a relative path written inside the filelist against the
+*filelist's own directory*, not the process's working directory. A filelist
+at `docking/ligand_shards/filelist_0.txt` containing the relative fld path
+`docking/v2/maps/meeko_receptor.maps.fld` made AutoDock-GPU look for
+`docking/ligand_shards/docking/v2/maps/meeko_receptor.maps.fld` and fail
+with `Can't open fld file`. `write_filelist` now writes `Path(...).resolve()`
+absolute paths for all three entry kinds (fld, ligand PDBQT, output name) --
+same class of bug as the GPF `receptor` directive fix in
+`scripts/prepare_maps.py` (autogrid4 runs from inside the maps directory).
+
+Also fixed: `run_batch` was swallowing a failed shard silently -- a run that
+produced zero `.dlg` files exited as if it had succeeded, because nothing
+checked the process exit status or the actual outputs. `run_batch` now
+raises with the tail of the shard's log when a shard exits nonzero, or when
+it exits zero but produced no `.dlg` output.

@@ -2,6 +2,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
@@ -104,11 +105,29 @@ class TestWriteFilelist(unittest.TestCase):
                                   str(tmp_path / "out"),
                                   str(tmp_path / "filelist_0.txt"))
             lines = Path(path).read_text().splitlines()
-            self.assertEqual(lines[0], "receptor.maps.fld")
-            self.assertEqual(lines[1], "a.pdbqt")
-            self.assertEqual(lines[2], str(tmp_path / "out" / "a"))
-            self.assertEqual(lines[3], "b.pdbqt")
-            self.assertEqual(lines[4], str(tmp_path / "out" / "b"))
+            self.assertEqual(lines[0], str(Path("receptor.maps.fld").resolve()))
+            self.assertEqual(lines[1], str(Path("a.pdbqt").resolve()))
+            self.assertEqual(lines[2], str((tmp_path / "out" / "a").resolve()))
+            self.assertEqual(lines[3], str(Path("b.pdbqt").resolve()))
+            self.assertEqual(lines[4], str((tmp_path / "out" / "b").resolve()))
+
+    def test_every_written_path_is_absolute(self):
+        """DEFECT 1, observed verbatim on the cluster: AutoDock-GPU resolves a
+        relative path inside the filelist against the FILELIST'S OWN
+        directory, not the working directory. docking/v2/maps/meeko_receptor
+        .maps.fld became docking/ligand_shards/docking/v2/maps/... and failed
+        with "Can't open fld file". All three entry kinds must be absolute."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / "shards").mkdir()
+            path = write_filelist("docking/v2/maps/meeko_receptor.maps.fld",
+                                  ["docking/ligands/a.pdbqt",
+                                   "docking/ligands/b.pdbqt"],
+                                  "docking/out",
+                                  str(tmp_path / "shards" / "filelist_0.txt"))
+            for line in Path(path).read_text().splitlines():
+                self.assertTrue(Path(line).is_absolute(),
+                                f"non-absolute path written into filelist: {line}")
 
 
 class TestBuildFilelistCommand(unittest.TestCase):
@@ -230,6 +249,96 @@ class TestRunBatchSplitting(unittest.TestCase):
             self.assertEqual(cmd3[cmd3.index("--devnum") + 1], "4")
             self.assertEqual(plan["shards"][0]["devnum"], 1)
             self.assertEqual(plan["shards"][3]["devnum"], 4)
+
+
+class _FakeProcess:
+    """Stands in for subprocess.Popen so tests never invoke the real
+    autodock_gpu binary (not installed on this machine)."""
+
+    def __init__(self, status: int):
+        self._status = status
+
+    def wait(self) -> int:
+        return self._status
+
+
+class TestRunBatchFailureDetection(unittest.TestCase):
+    """DEFECT 2, observed on the cluster: a shard whose autodock_gpu process
+    exited nonzero (or exited zero but wrote no .dlg) was swallowed silently
+    -- run_batch returned a plan that looked fine, with zero .dlg files on
+    disk. That is the same failure shape as three earlier real regressions
+    in this project (a truncated CCD residue name zeroing every affinity, a
+    naive RMSD reporting 0.63 A as 6.13, an Open Babel mistyping promoting the
+    4th-best pose to 1st): the pipeline runs to completion and produces a
+    plausible-looking number. A printed warning would not have caught any of
+    those either -- run_batch must raise."""
+
+    def _make_index(self, tmp: Path, n: int) -> str:
+        index = tmp / "ligands.txt"
+        index.write_text("\n".join(f"lig_{i:03d}.pdbqt" for i in range(n)) + "\n")
+        return str(index)
+
+    def test_nonzero_exit_status_raises_with_log_tail_in_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / "maps").mkdir()
+            (tmp_path / "maps" / "receptor.maps.fld").write_text("x")
+            index = self._make_index(tmp_path, 2)
+
+            def fake_popen(command, stdout, stderr):
+                stdout.write("Error: Can't open fld file some/bad/path.fld.\n"
+                             "Error: get_gridinfo failed with fld file "
+                             "specified in file list.\n")
+                stdout.flush()
+                return _FakeProcess(status=1)
+
+            with patch("dock_autodock_gpu.subprocess.Popen", side_effect=fake_popen):
+                with self.assertRaises(RuntimeError) as ctx:
+                    run_batch(index, str(tmp_path / "maps"), str(tmp_path / "out"),
+                             gpus=1, shard_dir=str(tmp_path / "shards"))
+            self.assertIn("Can't open fld file", str(ctx.exception))
+
+    def test_zero_exit_but_no_dlg_output_still_raises(self):
+        """The exit status can lie: a shard can exit 0 having produced
+        nothing. That must be treated as a failure too."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / "maps").mkdir()
+            (tmp_path / "maps" / "receptor.maps.fld").write_text("x")
+            index = self._make_index(tmp_path, 2)
+
+            def fake_popen(command, stdout, stderr):
+                stdout.write("AutoDock-GPU version: v1.6-20-gbe06a13\n")
+                stdout.flush()
+                return _FakeProcess(status=0)  # exits "successfully"
+
+            with patch("dock_autodock_gpu.subprocess.Popen", side_effect=fake_popen):
+                with self.assertRaises(RuntimeError) as ctx:
+                    run_batch(index, str(tmp_path / "maps"), str(tmp_path / "out"),
+                             gpus=1, shard_dir=str(tmp_path / "shards"))
+            self.assertIn("0/2", str(ctx.exception))
+
+    def test_dlg_output_present_with_zero_exit_does_not_raise(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / "maps").mkdir()
+            (tmp_path / "maps" / "receptor.maps.fld").write_text("x")
+            out_dir = tmp_path / "out"
+            out_dir.mkdir()
+            index = self._make_index(tmp_path, 2)
+
+            def fake_popen(command, stdout, stderr):
+                stdout.write("done\n")
+                stdout.flush()
+                # simulate the real binary having written .dlg outputs
+                (out_dir / "lig_000.dlg").write_text("DOCKED: MODEL 1\n")
+                (out_dir / "lig_001.dlg").write_text("DOCKED: MODEL 1\n")
+                return _FakeProcess(status=0)
+
+            with patch("dock_autodock_gpu.subprocess.Popen", side_effect=fake_popen):
+                plan = run_batch(index, str(tmp_path / "maps"), str(out_dir),
+                                 gpus=1, shard_dir=str(tmp_path / "shards"))
+            self.assertEqual(plan["results"][0][0]["status"], 0)
 
 
 if __name__ == "__main__":

@@ -89,18 +89,30 @@ def write_filelist(fld: str, ligands: list[str], out_dir: str,
                    filelist_path: str) -> str:
     """Write one AutoDock-GPU --filelist batch file for a shard.
 
-    UNVERIFIED FORMAT: first line is the .fld map descriptor path, then for
-    each ligand a line with its PDBQT path followed by a line with its
-    --resnam output name (the ligand's stem). This is what AutoDock-GPU's
-    batch mode is documented to expect, but it has not been confirmed against
-    the real binary on this machine -- see the module docstring's AMENDMENT
-    note and results/v2_EXECUTION_CHECKLIST.md. Must be verified with a
-    two-ligand test before the full run.
+    CONFIRMED FORMAT (verified against the real v1.6-20-gbe06a13 binary on the
+    cluster): first line is the .fld map descriptor path, then for each
+    ligand a line with its PDBQT path followed by a line with its --resnam
+    output name (the ligand's stem). The layout itself was never wrong --
+    see results/v2_EXECUTION_CHECKLIST.md.
+
+    ALL THREE PATH KINDS MUST BE ABSOLUTE. AutoDock-GPU resolves any relative
+    path in a filelist against the filelist's OWN directory, not the process's
+    working directory -- observed directly on the cluster: a filelist at
+    docking/ligand_shards/filelist_0.txt containing the relative fld path
+    docking/v2/maps/meeko_receptor.maps.fld made AutoDock-GPU look for
+    docking/ligand_shards/docking/v2/maps/meeko_receptor.maps.fld and fail
+    with "Can't open fld file". This is the same class of bug already fixed
+    once in scripts/prepare_maps.py, where the GPF's `receptor` directive had
+    to become absolute because autogrid4 runs from inside the maps directory
+    (see prepare_maps.py's `Path(receptor).resolve()`) -- a program that
+    changes/implies its own working directory for a file it reads turns any
+    relative path in that file into a trap. Resolve everything here for the
+    same reason.
     """
-    lines = [fld]
+    lines = [str(Path(fld).resolve())]
     for ligand in ligands:
-        resnam = str(Path(out_dir) / Path(ligand).stem)
-        lines.append(ligand)
+        resnam = str((Path(out_dir) / Path(ligand).stem).resolve())
+        lines.append(str(Path(ligand).resolve()))
         lines.append(resnam)
     path = Path(filelist_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -206,12 +218,50 @@ def run_batch(ligands_index: str, maps_dir: str, out_dir: str, gpus: int = 1,
         return plan
 
     results = {}
+    failures = []
     for device, cmd, log, handle, process in processes:
         status = process.wait()
-        results.setdefault(device, []).append({"cmd": cmd, "status": status})
-    for _, _, log, handle, _ in processes:
         handle.close()
+        n_ligands = plan["shards"][device]["n_ligands"]
+        # count .dlg files this shard's resnam prefixes should have produced
+        shard_out_prefixes = [
+            Path(line).stem for i, line in
+            enumerate(Path(plan["shards"][device]["filelist"]).read_text()
+                     .splitlines())
+            if i >= 2 and i % 2 == 0
+        ]
+        produced = sum(1 for prefix in shard_out_prefixes
+                       if list(Path(out_dir).glob(f"{prefix}*.dlg")))
+        results.setdefault(device, []).append({"cmd": cmd, "status": status,
+                                               "dlg_produced": produced,
+                                               "n_ligands": n_ligands})
+        # A failure is a nonzero exit status OR an exit that produced no .dlg
+        # output at all -- a shard that "succeeds" with zero poses would hand
+        # every one of its ligands downstream as silently, plausibly docked
+        # with zero poses, the same failure shape (a plausible-looking number
+        # masking a real break) this project has hit three times before: the
+        # 5-char CCD residue name zeroing every affinity, the naive RMSD
+        # reporting 0.63 A as 6.13, and the Open Babel nitrogen mis-typing
+        # that promoted the fourth-best pose to first. A printed warning would
+        # not have stopped any of those from propagating -- this must raise.
+        if status != 0 or (n_ligands > 0 and produced == 0):
+            tail = ""
+            try:
+                tail = "\n".join(Path(log).read_text().splitlines()[-40:])
+            except OSError:
+                pass
+            failures.append(
+                f"shard {device} (devnum {plan['shards'][device]['devnum']}) "
+                f"failed: exit status {status}, {produced}/{n_ligands} "
+                f".dlg outputs found. Command: {' '.join(cmd)}\n"
+                f"--- tail of {log} ---\n{tail}"
+            )
     plan["results"] = results
+    if failures:
+        raise RuntimeError(
+            f"{len(failures)} of {len(processes)} autodock_gpu shard(s) "
+            "failed:\n\n" + "\n\n".join(failures)
+        )
     return plan
 
 
