@@ -8,6 +8,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from poses_to_complex import (LIGAND_CHAIN, MIDAS, MIDAS_LINK_CUTOFF,
                               build_complex, build_many, midas_link_record)
 
+# The isoform receptors do not use calcium: 6MK0's MIDAS is Mn B708 and
+# 9CZD's is Mg B2102 (results/v2_isoform_structures.md). A calcium-specific
+# LINK rule writes nothing for either, and PLIP then reports no metal
+# coordination for any isoform pose -- the exact artefact aa1155a fixed for
+# 8W30, reintroduced one isoform at a time.
+AVB3 = ("structures/6MK0.pdb", ("B", 708, "MN"))
+AVB6 = ("structures/9CZD.pdb", ("B", 2102, "MG"))
+
 RECEPTOR = "docking/v2/receptor_h.pdb"
 GOOD_POSE = "tests/fixtures/pose_ok.pdbqt"
 BROKEN_POSE = "tests/fixtures/pose_broken.pdbqt"
@@ -182,6 +190,46 @@ class TestLigandChainIsExplicit(unittest.TestCase):
             self.assertEqual(
                 len([l for l in Path(out).read_text().splitlines()
                      if l.startswith("LINK")]), 1)
+
+
+class TestMidasIsNotAlwaysCalcium(unittest.TestCase):
+    """Section 10 docks the same ligands against alphaVbeta3 (6MK0, Mn) and
+    alphaVbeta6 (9CZD, Mg). MIDAS was a module constant naming chain B
+    residue 501 and the resname CA, so every isoform complex would have been
+    built without a LINK and PLIP would have reported no metal coordination
+    for any of them."""
+
+    def test_the_default_still_describes_8W30(self):
+        self.assertEqual(MIDAS[0], "B")
+        self.assertEqual(MIDAS[1], 501)
+        self.assertEqual(MIDAS[2], "CA")
+
+    def test_a_manganese_midas_is_linked(self):
+        receptor = ["HETATM 7323 MN    MN B 708      10.000  20.000  30.000"
+                    "  1.00  0.00          MN  "]
+        ligand = ["HETATM    1  O   LIG B 900      10.000  20.000  32.500"
+                  "  1.00  0.00           O  "]
+        link = midas_link_record(ligand, receptor, midas=("B", 708, "MN"))
+        self.assertIsNotNone(link)
+        self.assertEqual(link[47:50].strip(), "MN")
+        self.assertEqual(int(link[52:56]), 708)
+
+    def test_the_calcium_default_finds_no_manganese(self):
+        # The failure this parameter exists to prevent, pinned.
+        receptor = ["HETATM 7323 MN    MN B 708      10.000  20.000  30.000"
+                    "  1.00  0.00          MN  "]
+        ligand = ["HETATM    1  O   LIG B 900      10.000  20.000  32.500"
+                  "  1.00  0.00           O  "]
+        self.assertIsNone(midas_link_record(ligand, receptor))
+
+    def test_a_magnesium_midas_is_linked(self):
+        receptor = ["HETATM 9999 MG    MG B2102      10.000  20.000  30.000"
+                    "  1.00  0.00          MG  "]
+        ligand = ["HETATM    1  O   LIG B 900      10.000  20.000  32.200"
+                  "  1.00  0.00           O  "]
+        link = midas_link_record(ligand, receptor, midas=("B", 2102, "MG"))
+        self.assertIsNotNone(link)
+        self.assertEqual(int(link[52:56]), 2102)
 
 
 if __name__ == "__main__":

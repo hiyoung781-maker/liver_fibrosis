@@ -68,11 +68,18 @@ LIGAND_RESNAME = "LIG"
 LIGAND_CHAIN = "B"
 LIGAND_RESSEQ_BASE = 900
 
-# The MIDAS calcium: chain B, residue 501. Ca B502 is 6.44 A from the crystal
-# ligand and does not participate; chain A's four calciums are 35-50 A away.
-# Naming it explicitly keeps a receptor edit from silently linking another
-# metal, which would fail every pose for a reason that looks chemical.
-MIDAS = ("B", 501)
+# 8W30's MIDAS: chain B, residue 501, calcium. Ca B502 is 6.44 A from the
+# crystal ligand and does not participate; chain A's four calciums are 35-50 A
+# away. Naming it explicitly keeps a receptor edit from silently linking
+# another metal, which would fail every pose for a reason that looks chemical.
+#
+# THE METAL IS NOT ALWAYS CALCIUM, so this is a default rather than a fact.
+# Section 10 docks against alphaVbeta3 (6MK0, Mn B708) and alphaVbeta6
+# (9CZD, Mg B2102). A calcium-specific rule writes no LINK for either, and
+# PLIP then reports no metal coordination for any isoform pose -- the exact
+# artefact fixed for 8W30 in aa1155a, reintroduced one isoform at a time.
+# Callers docking another receptor pass its own (chain, resseq, resname).
+MIDAS = ("B", 501, "CA")
 
 # Trigger window for emitting the LINK, NOT an interaction criterion. PLIP's
 # own METAL_DIST_MAX is 3.0 A, so a window above that can never manufacture a
@@ -110,24 +117,28 @@ def _element(line: str) -> str:
     return line[12:16].strip()[:1].upper()
 
 
-def midas_link_record(lig_lines: list, receptor_lines: list) -> Optional[str]:
+def midas_link_record(lig_lines: list, receptor_lines: list,
+                      midas: tuple = MIDAS) -> Optional[str]:
     """A PDB LINK joining the ligand's nearest metal-target atom to the MIDAS.
 
-    Returns None when the receptor has no Ca at MIDAS, when the ligand has no
-    O/N/S atom, or when the closest such atom is farther than
-    MIDAS_LINK_CUTOFF -- in every one of those cases there is no composite
-    ligand to declare, and PLIP's verdict on the pose stands unchanged.
+    `midas` is (chain, resseq, resname) -- 8W30's calcium by default, and the
+    isoform's own metal when docking one. Returns None when the receptor has
+    no such ion, when the ligand has no O/N/S atom, or when the closest such
+    atom is farther than MIDAS_LINK_CUTOFF -- in every one of those cases
+    there is no composite ligand to declare, and PLIP's verdict on the pose
+    stands unchanged.
 
     The column layout below is the one PLIP's get_linkage reads:
     name1 [12:16], resname1 [17:20], chain1 [21], resseq1 [22:26];
     name2 [42:46], resname2 [47:50], chain2 [51], resseq2 [52:56].
     """
+    chain, resseq, resname = midas
     metal = next(
         (l for l in receptor_lines
          if l.startswith(("ATOM", "HETATM"))
-         and l[17:20].strip().upper() == "CA"
-         and l[21] == MIDAS[0]
-         and l[22:26].strip() == str(MIDAS[1])),
+         and l[17:20].strip().upper() == resname.upper()
+         and l[21] == chain
+         and l[22:26].strip() == str(resseq)),
         None,
     )
     if metal is None:
@@ -170,7 +181,8 @@ def _ligand_pdb(pose_pdbqt: str, out: Path) -> str:
     return str(out)
 
 
-def build_complex(pose_pdbqt: str, receptor_pdb: str, out) -> Optional[str]:
+def build_complex(pose_pdbqt: str, receptor_pdb: str, out,
+                  midas: tuple = MIDAS) -> Optional[str]:
     """Build a single receptor+ligand complex PDB from a docked pose.
 
     Returns the path to the written complex on success. Returns None on any
@@ -207,7 +219,7 @@ def build_complex(pose_pdbqt: str, receptor_pdb: str, out) -> Optional[str]:
         # The LINK must precede the coordinate records: PLIP reads the whole
         # file either way, but a LINK after the ATOM block is not valid PDB
         # and other tools in this pipeline do read the complex.
-        link = midas_link_record(lig_lines, receptor)
+        link = midas_link_record(lig_lines, receptor, midas=midas)
         header = [link] if link else []
         out.write_text("\n".join(header + receptor + lig_lines + ["END"]) + "\n")
         return str(out)
@@ -216,7 +228,8 @@ def build_complex(pose_pdbqt: str, receptor_pdb: str, out) -> Optional[str]:
         return None
 
 
-def build_many(poses: list, receptor_pdb: str, out_dir) -> dict:
+def build_many(poses: list, receptor_pdb: str, out_dir,
+               midas: tuple = MIDAS) -> dict:
     """Build complexes for many poses, isolating any single-pose failure.
 
     Returns {"built": [paths...], "failed": [(pose, reason), ...]}. Every
@@ -228,7 +241,7 @@ def build_many(poses: list, receptor_pdb: str, out_dir) -> dict:
     failed = []
     for pose in poses:
         target = out_dir / (Path(pose).stem + ".complex.pdb")
-        result = build_complex(pose, receptor_pdb, target)
+        result = build_complex(pose, receptor_pdb, target, midas=midas)
         if result is None:
             failed.append((pose, "complex build failed"))
         else:

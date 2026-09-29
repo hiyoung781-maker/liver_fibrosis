@@ -45,8 +45,20 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-__all__ = ["METAL_NAMES", "SOLVENT_AND_ADDITIVES", "binding_site_residues",
+__all__ = ["DroppedNearLigandError", "METAL_NAMES",
+           "SOLVENT_AND_ADDITIVES", "binding_site_residues",
            "chains_near", "find_midas_ligand", "split_structure"]
+
+
+class DroppedNearLigandError(RuntimeError):
+    """A glycan or additive sits in the binding site.
+
+    Meeko has no residue template for these and stops on them, so they
+    have to come out of the receptor -- but one inside the pocket is
+    part of the pocket. Removing it would change the site while every
+    score still looked normal, which is how this project lost six
+    calciums to `obabel -p 7.4` once already.
+    """
 
 # Divalent cations that occupy MIDAS/ADMIDAS/SyMBS across the integrin family.
 METAL_NAMES = {"CA", "MG", "MN", "ZN", "CO", "NI", "CD"}
@@ -188,14 +200,42 @@ def binding_site_residues(lines: list, ligand_key: tuple,
 
 
 def split_structure(lines: list, ligand_key: tuple,
-                    keep_chains: set | None = None) -> tuple:
+                    keep_chains: set | None = None,
+                    near_cutoff: float = 4.5) -> tuple:
     """(receptor lines, ligand lines).
 
-    The receptor keeps its metals -- removing the MIDAS ion would delete the
-    interaction this whole campaign is about -- and drops waters, the ligand
-    itself, and any chain not in `keep_chains`.
+    The receptor keeps its polymer and its METALS -- removing the MIDAS ion
+    would delete the interaction this whole campaign is about -- and drops
+    the ligand itself, waters, glycans, cryoprotectants and other additives,
+    plus any chain not in `keep_chains`.
+
+    Glycans and additives have to go because Meeko has no residue template
+    for them and stops: 6MK0 carries 8 NAG, 9CZD carries NAG, four GOL and an
+    ACT. 8W30's prepared receptor had none, so the alphaVbeta1 path never met
+    this.
+
+    They never go silently. One within `near_cutoff` of the ligand is part of
+    the binding site, and raises DroppedNearLigandError rather than being
+    removed -- taking it out would change the pocket while every score still
+    looked normal.
     """
-    receptor, ligand = [], []
+    ligand = []
+    for line in lines:
+        if not line.startswith(("ATOM", "HETATM")):
+            continue
+        name = line[17:20].strip().upper()
+        try:
+            key = (name, line[21], int(line[22:26].strip()))
+        except ValueError:
+            key = (name, line[21], line[22:26].strip())
+        if key == ligand_key:
+            ligand.append(line)
+    if not ligand:
+        raise ValueError(f"ligand {ligand_key} not found")
+    ligand_xyz = [(float(l[30:38]), float(l[38:46]), float(l[46:54]))
+                  for l in ligand]
+
+    receptor, intruders = [], {}
     for line in lines:
         if not line.startswith(("ATOM", "HETATM")):
             continue
@@ -207,13 +247,29 @@ def split_structure(lines: list, ligand_key: tuple,
         except ValueError:
             key = (name, chain, seq)
         if key == ligand_key:
-            ligand.append(line)
-            continue
-        if name in ("HOH", "WAT", "DOD"):
             continue
         if keep_chains is not None and chain not in keep_chains:
             continue
+        # Metals stay; every other non-polymer HETATM goes.
+        if line.startswith("HETATM") and name not in METAL_NAMES \
+                and name in SOLVENT_AND_ADDITIVES:
+            if name not in ("HOH", "WAT", "DOD"):
+                try:
+                    xyz = (float(line[30:38]), float(line[38:46]),
+                           float(line[46:54]))
+                except ValueError:
+                    continue
+                if min(math.dist(xyz, l) for l in ligand_xyz) <= near_cutoff:
+                    intruders[key] = round(
+                        min(math.dist(xyz, l) for l in ligand_xyz), 2)
+            continue
         receptor.append(line)
+
+    if intruders:
+        raise DroppedNearLigandError(
+            f"these non-polymer residues sit within {near_cutoff} A of the "
+            f"ligand and would be removed: {intruders}. One of them is part "
+            "of the binding site; decide explicitly rather than dropping it.")
     return receptor, ligand
 
 

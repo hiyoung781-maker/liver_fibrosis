@@ -4,7 +4,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from prepare_isoform import (METAL_NAMES, binding_site_residues, chains_near,
+from prepare_isoform import (METAL_NAMES, DroppedNearLigandError,
+                             binding_site_residues, chains_near,
                              find_midas_ligand, split_structure)
 
 STRUCTURES = {"8W30": "8W30.pdb", "6MK0": "structures/6MK0.pdb",
@@ -108,6 +109,52 @@ class TestSplitAndSite(unittest.TestCase):
         site = binding_site_residues(lines("8W30"), found["ligand"], cutoff=5.0)
         self.assertIn(("B", 224), site)
         self.assertIn(("B", 132), site)
+
+
+@unittest.skipUnless(have("6MK0") and have("9CZD"), "isoform structures absent")
+class TestNonPolymerIsDropped(unittest.TestCase):
+    """Meeko has no residue template for glycans or cryoprotectants and stops
+    on them: 6MK0 carries 8 NAG, 9CZD carries NAG, four GOL and an ACT. 8W30
+    had none in its prepared receptor, so the alphaVbeta1 path never met this.
+
+    They are dropped, not kept -- but never silently. A glycan or additive
+    sitting in the binding site would be part of the site, and dropping it
+    would change the pocket while the score still looked normal."""
+
+    def test_glycans_and_additives_are_removed(self):
+        for pdb in ("6MK0", "9CZD"):
+            found = find_midas_ligand(lines(pdb))
+            receptor, _lig = split_structure(
+                lines(pdb), found["ligand"],
+                keep_chains=chains_near(lines(pdb), found["ligand"]))
+            names = {l[17:20].strip().upper() for l in receptor}
+            self.assertNotIn("NAG", names, pdb)
+            self.assertNotIn("GOL", names, pdb)
+            self.assertNotIn("ACT", names, pdb)
+
+    def test_the_midas_metal_is_not_dropped_with_them(self):
+        for pdb, metal in (("6MK0", "MN"), ("9CZD", "MG")):
+            found = find_midas_ligand(lines(pdb))
+            receptor, _lig = split_structure(
+                lines(pdb), found["ligand"],
+                keep_chains=chains_near(lines(pdb), found["ligand"]))
+            self.assertTrue(
+                [l for l in receptor
+                 if l[17:20].strip().upper() == metal
+                 and l[21] == found["metal"][1]
+                 and l[22:26].strip() == str(found["metal"][2])], pdb)
+
+    def test_an_additive_in_the_binding_site_stops_the_run(self):
+        # Synthetic: a glycerol placed on top of the ligand. Dropping it would
+        # change the pocket, so it has to be a decision someone makes.
+        found = find_midas_ligand(lines("8W30"))
+        lig = next(l for l in lines("8W30")
+                   if l.startswith("HETATM") and l[17:20].strip() == "A1A")
+        intruder = "HETATM99999  C1  GOL B 999    " + lig[30:54] + \
+                   "  1.00  0.00           C  "
+        with self.assertRaises(DroppedNearLigandError):
+            split_structure(lines("8W30") + [intruder], found["ligand"],
+                            keep_chains={"A", "B"})
 
 
 if __name__ == "__main__":
