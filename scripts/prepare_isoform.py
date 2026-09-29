@@ -339,11 +339,19 @@ def main(argv=None) -> int:
                 "argument exists to prevent.\n")
             return 1
 
+    from protomer import to_physiological
+
     try:
         ligand_mol = assign_from_template("\n".join(ligand + ["END"]), template)
     except TemplateMismatchError as exc:
         sys.stderr.write(f"{exc}\n")
         return 1
+
+    # The CCD template is drawn neutral. The campaign docks the species that
+    # binds at pH 7.4 -- carboxylate off, Arg-mimic head on -- and both
+    # isoform structures show that head 2.6-2.85 A from alphaV Asp218, a
+    # contact only a protonated nitrogen can make. See scripts/protomer.py.
+    ligand_mol = to_physiological(ligand_mol)
 
     sdf = out / "ligand.sdf"
     writer = Chem.SDWriter(str(sdf))
@@ -359,6 +367,8 @@ def main(argv=None) -> int:
         "midas_metal": list(found["metal"]),
         "midas_distance": round(found["distance"], 3),
         "ligand_template": template,
+        "protomer": Chem.MolToSmiles(ligand_mol),
+        "formal_charge": Chem.GetFormalCharge(ligand_mol),
         "ligand_ccd": args.ligand_ccd,
         "chains_all": all_chains,
         "chains_kept": sorted(keep),
@@ -373,6 +383,8 @@ def main(argv=None) -> int:
     print(f"  ligand         {found['ligand']}  {len(ligand)} atoms")
     print(f"  template       {args.ligand_ccd or '(explicit SMILES)'}")
     print(f"                 {Chem.MolToSmiles(ligand_mol)}")
+    print(f"  protomer       net charge {Chem.GetFormalCharge(ligand_mol):+d} "
+          f"(pH 7.4 species)")
     print(f"  MIDAS metal    {found['metal']}  at {found['distance']:.2f} A")
     print(f"  chains kept    {sorted(keep)}")
     print(f"  chains dropped {sorted(set(all_chains) - keep) or '(none)'}")

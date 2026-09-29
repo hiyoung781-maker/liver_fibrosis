@@ -12,6 +12,8 @@
   ],
   "midas_distance": 2.125,
   "ligand_template": "c1ccc2c(c1)nc(s2)C(=O)N[C@@H](CCNC(=O)CCCCc3ccc4cccnc4n3)C(=O)O",
+  "protomer": "O=C(CCCCc1ccc2cccnc2n1)NCC[C@H](NC(=O)c1nc2ccccc2s1)C(=O)[O-]",
+  "formal_charge": -1,
   "ligand_ccd": "JUY",
   "chains_all": [
     "A",

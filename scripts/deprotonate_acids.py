@@ -1,4 +1,12 @@
-"""Deprotonate carboxylic acids for docking in the adopted anion state (spec 7.4).
+"""Prepare the pH 7.4 species for docking (spec 7.4, extended by protomer.py).
+
+BATCH MODE NOW APPLIES THE FULL PROTOMER, not only the acid: carboxylates
+off AND basic heads on, through protomer.to_physiological. Spec 7.4
+registered the carboxylate alone, which left every Arg-mimic head neutral --
+and a neutral head has no donor for the 2.6-2.85 A contact to alphaV Asp218
+that both isoform crystal structures show. Vina has no electrostatic term to
+supply one. The single-molecule `deprotonate` below is unchanged and still
+does exactly what its name says.
 
 spec 7.4 pre-registers a redock in BOTH protonation states and states which
 one wins: "결정 접촉을 재현하는 쪽을 채택. 둘 다 재현하면 음이온을 택한다
@@ -116,6 +124,8 @@ def deprotonate_sdf(in_sdf: str, out_sdf: str) -> dict:
     """
     from rdkit import Chem
 
+    from protomer import to_physiological
+
     counts = {"read": 0, "deprotonated": 0, "unchanged": 0, "failed": 0}
     Path(out_sdf).parent.mkdir(parents=True, exist_ok=True)
     writer = Chem.SDWriter(out_sdf)
@@ -125,12 +135,15 @@ def deprotonate_sdf(in_sdf: str, out_sdf: str) -> dict:
             continue
         counts["read"] += 1
         name = mol.GetProp("_Name") if mol.HasProp("_Name") else ""
+        # The pH 7.4 species, not just the acid: an Arg-mimic head without
+        # its proton has no donor, and Vina has no electrostatics to supply
+        # one. See scripts/protomer.py.
         try:
-            out = deprotonate(mol)
-            counts["deprotonated"] += 1
-        except ValueError:
-            out = mol
-            counts["unchanged"] += 1
+            out = to_physiological(mol)
+            if Chem.MolToSmiles(out) != Chem.MolToSmiles(mol):
+                counts["deprotonated"] += 1
+            else:
+                counts["unchanged"] += 1
         except Exception:
             counts["failed"] += 1
             counts["read"] -= 1

@@ -43,19 +43,20 @@ def prepare_panel_ligands(out_dir: str, panel_smi: str = "data/benchmark_panel.s
     Uses the same embed() and prepare_one() the generated ligands went through, so a
     difference in the docking result cannot come from a difference in ligand prep.
 
-    That invariant is why `deprotonate` defaults to True. The redocking gate
-    adopted the anion (spec 7.4, both Uni-Dock arms passing), the generated
-    library is prepared deprotonated, and the section 9.1 affinity filter is a
-    PLN-1474 RELATIVE comparison -- a reference in a different charge state
-    from the candidates is not a comparison at all. Pass deprotonate=False
-    only if the campaign adopts the neutral state, which the neutral arm's
-    0.66 A also permits; then the library must switch with it.
+    That invariant is why `deprotonate` defaults to True. It now prepares the
+    full pH 7.4 species through protomer.to_physiological -- carboxylate off
+    AND basic head on -- not just the acid. PLN-1474, CWHM-12 and GLPG0187
+    are zwitterions, bexotegrast is +1; preparing them as -1 anions left the
+    Arg-mimic head without the donor both isoform structures show making a
+    2.6-2.85 A contact to alphaV Asp218. The section 9.1 affinity filter is a
+    PLN-1474 RELATIVE comparison, so reference and candidates must be in the
+    same protomer.
 
     A panel member with no carboxylic acid is written unchanged rather than
     dropped: the panel is scored, never trained on, and losing a reference
     would silently shrink the comparison.
     """
-    from deprotonate_acids import deprotonate as deprotonate_mol
+    from protomer import to_physiological
     from ligands_to_pdbqt import prepare_one
     from novelty import load_smi
     from prepare_ligands import embed
@@ -69,10 +70,7 @@ def prepare_panel_ligands(out_dir: str, panel_smi: str = "data/benchmark_panel.s
             failures.append(label)
             continue
         if deprotonate:
-            try:
-                mol = deprotonate_mol(mol)
-            except ValueError:
-                pass  # no carboxylic acid; keep the reference as it is
+            mol = to_physiological(mol)
         mol.SetProp("_Name", label)
         text = prepare_one(mol)
         if text is None:
