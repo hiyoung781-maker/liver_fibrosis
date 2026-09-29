@@ -37,12 +37,25 @@ PANEL_PREFIX = "PANEL_"
 
 
 def prepare_panel_ligands(out_dir: str, panel_smi: str = "data/benchmark_panel.smi",
-                          ) -> dict:
+                          deprotonate: bool = True) -> dict:
     """Embed and convert the panel to PDBQT, returning counts and the index path.
 
     Uses the same embed() and prepare_one() the generated ligands went through, so a
     difference in the docking result cannot come from a difference in ligand prep.
+
+    That invariant is why `deprotonate` defaults to True. The redocking gate
+    adopted the anion (spec 7.4, both Uni-Dock arms passing), the generated
+    library is prepared deprotonated, and the section 9.1 affinity filter is a
+    PLN-1474 RELATIVE comparison -- a reference in a different charge state
+    from the candidates is not a comparison at all. Pass deprotonate=False
+    only if the campaign adopts the neutral state, which the neutral arm's
+    0.66 A also permits; then the library must switch with it.
+
+    A panel member with no carboxylic acid is written unchanged rather than
+    dropped: the panel is scored, never trained on, and losing a reference
+    would silently shrink the comparison.
     """
+    from deprotonate_acids import deprotonate as deprotonate_mol
     from ligands_to_pdbqt import prepare_one
     from novelty import load_smi
     from prepare_ligands import embed
@@ -55,6 +68,11 @@ def prepare_panel_ligands(out_dir: str, panel_smi: str = "data/benchmark_panel.s
         if mol is None:
             failures.append(label)
             continue
+        if deprotonate:
+            try:
+                mol = deprotonate_mol(mol)
+            except ValueError:
+                pass  # no carboxylic acid; keep the reference as it is
         mol.SetProp("_Name", label)
         text = prepare_one(mol)
         if text is None:
@@ -76,6 +94,12 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--panel", default="data/benchmark_panel.smi")
+    parser.add_argument("--no-deprotonate", action="store_true",
+                        help="Prepare the panel as neutral acids. The default is "
+                             "deprotonated, matching the anion state the redocking "
+                             "gate adopted and the state the generated library is "
+                             "prepared in; the section 9.1 affinity filter only "
+                             "compares if reference and candidates match.")
     parser.add_argument("--receptor", default="docking/receptor.pdbqt")
     parser.add_argument("--autobox-ligand", default="docking/ligand_ref.sdf")
     parser.add_argument("--ligand-dir", default="docking/panel_pdbqt")
@@ -88,7 +112,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     print("preparing panel ligands (same pipeline as the generated set)")
-    prep = prepare_panel_ligands(args.ligand_dir, args.panel)
+    prep = prepare_panel_ligands(args.ligand_dir, args.panel,
+                                 deprotonate=not args.no_deprotonate)
     print(f"  written  {prep['written']}")
     if prep["failures"]:
         print(f"  FAILED   {', '.join(prep['failures'])}")

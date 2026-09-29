@@ -363,14 +363,11 @@ for ARM in TL-A-prime TL-C; do
 
   ls docking/v2/ligands_pdbqt_anion/${ARM}/*.pdbqt > docking/v2/ligand_index_anion_${ARM}.txt
 done
-
-# 패널도 같은 처리를 받아야 한다 - 기준값과 후보가 같은 상태여야 비교가 성립한다
-python scripts/deprotonate_acids.py --sdf-dir docking/v2/panel --out-dir docking/v2/panel_anion
-python scripts/ligands_to_pdbqt.py --sdf-dir docking/v2/panel_anion --out-dir docking/v2/panel_pdbqt_anion
-ls docking/v2/panel_pdbqt_anion/*.pdbqt > docking/v2/panel_index_anion.txt
 ```
 
-`deprotonated + unchanged + failed = read`가 맞는지, `failed`가 0인지 확인한다.
+`deprotonated + unchanged + failed = read`가 맞는지, `failed`가 0인지 확인한다. `ligands_to_pdbqt.py`가 인덱스(`.../ligands.txt`)를 직접 쓰므로 `ls > ...`는 필요 없다.
+
+패널은 `dock_panel.py`가 SMILES에서 준비·도킹까지 한다. **기본값이 탈양성자화**로 바뀌었다 — 그 함수의 존재 이유가 *"도킹 결과 차이가 리간드 준비 차이에서 올 수 없게 한다"*이고, 라이브러리가 음이온이므로 패널도 음이온이어야 그 불변식이 성립한다. §9.1의 affinity 필터는 PLN-1474 **상대** 비교라서, 기준과 후보의 전하 상태가 다르면 비교 자체가 성립하지 않는다.
 
 ### 3b.3 두 아암 재도킹 + affinity 기준값 재산출
 
@@ -388,13 +385,16 @@ done
 **패널도 같은 실행에 포함해야 한다.** §9.1의 affinity 하드 필터는 PLN-1474 상대값이고, 그 기준값은 **같은 엔진·같은 박스**에서 나와야 한다. AD4로 얻은 어떤 값도 Vina 점수에 쓸 수 없다.
 
 ```bash
-python scripts/dock_unidock.py \
-    --receptor       docking/v2/meeko_receptor.pdbqt \
-    --ligand-index   docking/v2/panel_index_anion.txt \
-    --out-dir        docking/v2/unidock/panel \
-    --autobox-ligand docking/ligand_ref.sdf \
-    --gpus 1
+python scripts/dock_panel.py \
+    --receptor        docking/v2/meeko_receptor.pdbqt \
+    --autobox-ligand  docking/ligand_ref.sdf \
+    --ligand-dir      docking/v2/panel_pdbqt_anion \
+    --pose-dir        docking/v2/unidock/panel \
+    --out-sdf         docking/v2/unidock/panel_poses.sdf \
+    --out-csv         results/v2_panel_geometry.csv
 ```
+
+`--no-deprotonate`는 캠페인이 중성 상태를 채택할 때만 쓴다(중성 아암도 0.66 Å으로 통과했으므로 가능한 선택이지만, 그 경우 라이브러리도 같이 되돌려야 한다).
 
 이후 §5(복합체 변환 → PLIP)와 하류 단계는 입력 디렉터리만 `docking/v2/unidock/...`로 바꿔 그대로 진행한다.
 
