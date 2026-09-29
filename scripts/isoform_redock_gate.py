@@ -36,7 +36,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-__all__ = ["RMSD_CUTOFF", "midas_ligand_contact", "verdict"]
+__all__ = ["RMSD_CUTOFF", "midas_ligand_contact", "pose_table", "verdict"]
 
 # Section 10.3: "alphaVbeta1과 동일한 기준이다." The same 2.0 A that the
 # alphaVbeta1 gate used, and that AutoDock-GPU failed at 2.15 A.
@@ -78,8 +78,49 @@ def verdict(rmsd, plip_midas: bool) -> dict:
     return {"passed": not failed, "failed": failed}
 
 
+def pose_table(records: list, gated_rank: int) -> list:
+    """Rows for the per-pose record, best affinity first.
+
+    A failed gate has to say WHICH failure it is. If no pose comes near the
+    crystal, the search did not find the binding mode; if a pose does and the
+    scoring function ranks another first, that is the ranking failure
+    AutoDock-GPU showed on alphaVbeta1. Both are a FAIL -- the marked row is
+    the verdict -- but they are different findings and the analysis that
+    follows differs.
+    """
+    ordered = sorted(
+        records,
+        key=lambda r: (r.get("affinity") is None,
+                       r.get("affinity") if r.get("affinity") is not None else 0.0,
+                       r.get("rank", 0)))
+    return [{"rank": r["rank"], "affinity": r["affinity"], "rmsd": r["rmsd"],
+             "plip_midas": r["plip_midas"], "gated": r["rank"] == gated_rank}
+            for r in ordered]
+
+
+def _format_pose_table(rows: list) -> list:
+    lines = [
+        "## 전체 포즈 기록",
+        "",
+        "게이트는 표시된 행이다(§10.3은 상위 포즈로 판정한다). 나머지는 "
+        "**어느 종류의 실패인지**를 말한다 — 결정 포즈 근처에 아무 포즈도 없으면 "
+        "탐색이 결합 양식을 못 찾은 것이고, 가까운 포즈가 있는데 점수가 다른 것을 "
+        "1위로 올렸다면 그것은 순위 실패다. 대안 판정이 아니다.",
+        "",
+        "| | 포즈 | affinity | RMSD | PLIP MIDAS |",
+        "|---|---|---|---|---|",
+    ]
+    for r in rows:
+        aff = f"{r['affinity']:.2f}" if r["affinity"] is not None else "-"
+        rmsd = f"{r['rmsd']:.2f}" if r["rmsd"] is not None else "계산 불가"
+        lines.append(f"| {'<-' if r['gated'] else ''} | {r['rank']} | {aff} | "
+                     f"{rmsd} | {'예' if r['plip_midas'] else '아니오'} |")
+    lines.append("")
+    return lines
+
+
 def _report(name: str, manifest: dict, measurement: dict, decision: dict,
-            n_poses: int) -> str:
+            n_poses: int, rows: list | None = None) -> str:
     ok = decision["passed"]
     rmsd = measurement["rmsd"]
     lines = [
@@ -107,6 +148,8 @@ def _report(name: str, manifest: dict, measurement: dict, decision: dict,
     ]
     if measurement.get("rmsd_note"):
         lines += [f"RMSD 미산출 사유: {measurement['rmsd_note']}", ""]
+    if rows:
+        lines += _format_pose_table(rows)
     lines += ["---", ""]
     if ok:
         lines.append(
@@ -174,6 +217,10 @@ def main(argv=None) -> int:
     p.add_argument("--poses", required=True,
                     help="Uni-Dock output PDBQT from redocking the crystal ligand.")
     p.add_argument("--plip-bin", default="plip")
+    p.add_argument("--all-poses", action="store_true",
+                    help="Measure every pose, not only the one the gate judges, "
+                         "and record them. The verdict is unchanged: it always "
+                         "comes from the top pose by affinity.")
     p.add_argument("--workdir", type=Path, default=None)
     p.add_argument("--out", type=Path, required=True)
     args = p.parse_args(argv)
@@ -187,16 +234,21 @@ def main(argv=None) -> int:
     top = best_pose(poses)
 
     def run(workdir: Path) -> int:
-        measurement = _measure(top, isoform_dir, manifest, workdir, args.plip_bin)
+        to_measure = poses if args.all_poses else [top]
+        records = [_measure(p, isoform_dir, manifest, workdir, args.plip_bin)
+                   for p in to_measure]
+        measurement = next(r for r in records if r["rank"] == top["rank"])
         decision = verdict(measurement["rmsd"], measurement["plip_midas"])
+        rows = pose_table(records, top["rank"]) if args.all_poses else None
         report = _report(isoform_dir.name, manifest, measurement, decision,
-                         len(poses))
+                         len(poses), rows)
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(report)
         args.out.with_suffix(".json").write_text(json.dumps(
             {"isoform": isoform_dir.name, "poses_file": args.poses,
              "n_poses": len(poses), "manifest": manifest,
-             "measurement": measurement, "verdict": decision}, indent=2) + "\n")
+             "measurement": measurement, "verdict": decision,
+             "all_poses": rows}, indent=2) + "\n")
         print(report)
         return 0 if decision["passed"] else 1
 
