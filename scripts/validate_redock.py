@@ -49,6 +49,7 @@ __all__ = [
     "RMSD_CUTOFF",
     "best_pose",
     "measure_redocked_pose",
+    "pose_table",
     "verdict",
     "reproducibility",
 ]
@@ -274,8 +275,57 @@ def measure_redocked_pose(pose: dict, receptor_pdb: str, reference_sdf: str,
     }
 
 
+def pose_table(records: list, gated_rank: int) -> list:
+    """Rows for the per-pose diagnostic table, best affinity first.
+
+    This table is a RECORD, not a second gate. spec 7.4 gates on the top pose
+    and that is the row marked `<-`; the rest exist so a failed gate can say
+    whether the engine missed by a little on every pose or only on the one
+    that scored best. Reading a passing row here as a pass would be choosing
+    the pose after seeing the answer, which is the thing pre-registration
+    exists to prevent.
+    """
+    ordered = sorted(
+        records,
+        key=lambda r: (r.get("affinity") is None,
+                       r.get("affinity") if r.get("affinity") is not None else 0.0,
+                       r.get("rank", 0)),
+    )
+    return [
+        {"rank": r["rank"], "affinity": r["affinity"], "ca_dist": r["ca_dist"],
+         "donor_dist": r["donor_dist"], "rmsd": r["rmsd"],
+         "plip_metal_ca501": r["plip_metal_ca501"],
+         "plip_hbond_asn224": r["plip_hbond_asn224"],
+         "gated": r["rank"] == gated_rank}
+        for r in ordered
+    ]
+
+
+def _format_pose_table(rows: list) -> list:
+    lines = [
+        "",
+        "## Every pose, for the record",
+        "",
+        "The gate is the marked row (spec 7.4 gates on the top pose by "
+        "affinity). The others say whether the engine missed by a little "
+        "everywhere or only here; they are not alternative verdicts.",
+        "",
+        "| | pose | affinity | Ca dist | Asn224 dist | RMSD | PLIP metal | PLIP H-bond |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for r in rows:
+        aff = f"{r['affinity']:.2f}" if r["affinity"] is not None else "-"
+        rmsd = f"{r['rmsd']:.2f}" if r["rmsd"] != float("inf") else "n/a"
+        lines.append(
+            f"| {'<-' if r['gated'] else ''} | {r['rank']} | {aff} | "
+            f"{r['ca_dist']:.2f} | {r['donor_dist']:.2f} | {rmsd} | "
+            f"{'yes' if r['plip_metal_ca501'] else 'no'} | "
+            f"{'yes' if r['plip_hbond_asn224'] else 'no'} |")
+    return lines
+
+
 def _gate_report(label: str, dlg: str, measurement: dict, decision: dict,
-                 n_poses: int) -> str:
+                 n_poses: int, rows: list | None = None) -> str:
     ok = decision["passed"]
     lines = [
         "# Redocking validation gate (spec section 7.4)",
@@ -324,6 +374,8 @@ def _gate_report(label: str, dlg: str, measurement: dict, decision: dict,
             "raised. Per spec 7.4 the gate follows PLIP: "
             + ", ".join(decision["disagreements"]) + ".",
         ]
+    if rows:
+        lines += _format_pose_table(rows)
     lines += ["", "---", ""]
     if ok:
         lines.append(
@@ -355,6 +407,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
                     help="Label recording which protonation state of the control "
                          "was docked. The state is decided in ligand preparation "
                          "upstream; this only records it in the report.")
+    p.add_argument("--all-poses", action="store_true",
+                    help="Measure every pose in the .dlg, not only the one the "
+                         "gate judges, and record them in the report. The "
+                         "verdict is unchanged: it always comes from the top "
+                         "pose by affinity.")
     p.add_argument("--reproducibility", action="store_true",
                     help="Seed-variation mode (spec 7.7): reduce the top-pose "
                          "affinity of each --dlg to sd and range.")
@@ -369,16 +426,22 @@ def _run_gate(args, workdir: Path) -> int:
     dlg = args.dlg[0]
     poses = parse_dlg(Path(dlg).read_text())
     top = best_pose(poses)
-    measurement = measure_redocked_pose(top, args.receptor, args.reference,
-                                        workdir, args.plip_bin)
+
+    to_measure = poses if args.all_poses else [top]
+    records = [measure_redocked_pose(p, args.receptor, args.reference,
+                                     workdir, args.plip_bin) for p in to_measure]
+    measurement = next(r for r in records if r["rank"] == top["rank"])
     decision = verdict(measurement)
-    report = _gate_report(args.protonation, dlg, measurement, decision, len(poses))
+    rows = pose_table(records, top["rank"]) if args.all_poses else None
+    report = _gate_report(args.protonation, dlg, measurement, decision,
+                          len(poses), rows)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(report)
     args.out.with_suffix(".json").write_text(json.dumps(
         {"dlg": dlg, "n_poses": len(poses), "protonation": args.protonation,
-         "measurement": measurement, "verdict": decision}, indent=2) + "\n")
+         "measurement": measurement, "verdict": decision,
+         "all_poses": rows}, indent=2) + "\n")
     print(report)
     return 0 if decision["passed"] else 1
 

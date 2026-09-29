@@ -4,7 +4,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from validate_redock import CRYSTAL_CONTACTS, best_pose, verdict
+from validate_redock import (CRYSTAL_CONTACTS, best_pose, pose_table,
+                             verdict)
 
 
 def m(ca=2.68, donor=2.92, rmsd=0.63, plip_metal=True, plip_hbond=True):
@@ -81,6 +82,34 @@ class TestBestPose(unittest.TestCase):
         # failure; silently returning None would report it as the latter.
         with self.assertRaises(ValueError):
             best_pose([])
+
+
+def _rec(rank, affinity, rmsd=1.0):
+    return {"rank": rank, "affinity": affinity, "ca_dist": 2.6,
+            "donor_dist": 2.8, "rmsd": rmsd, "plip_metal_ca501": True,
+            "plip_hbond_asn224": True}
+
+
+class TestPoseTable(unittest.TestCase):
+    """--all-poses records every pose so a failed gate can say whether the
+    engine missed by a little on every pose or only on the one that scored
+    best. It is a RECORD, not a second gate: exactly one row is marked as
+    the gated one, and it is the top pose by affinity."""
+
+    def test_rows_are_ordered_best_affinity_first(self):
+        rows = pose_table([_rec(1, -5.89), _rec(5, -6.77), _rec(3, -6.30)], 5)
+        self.assertEqual([r["rank"] for r in rows], [5, 3, 1])
+
+    def test_exactly_one_row_is_marked_as_the_gated_pose(self):
+        rows = pose_table([_rec(1, -5.89), _rec(5, -6.77)], 5)
+        self.assertEqual([r["rank"] for r in rows if r["gated"]], [5])
+
+    def test_a_better_rmsd_on_another_pose_does_not_move_the_mark(self):
+        # The whole point: pose 1 redocks better but scores worse. Marking it
+        # would be choosing the pose after seeing the answer.
+        rows = pose_table([_rec(1, -5.89, rmsd=0.6), _rec(5, -6.77, rmsd=2.15)], 5)
+        self.assertTrue(next(r for r in rows if r["rank"] == 5)["gated"])
+        self.assertFalse(next(r for r in rows if r["rank"] == 1)["gated"])
 
 
 if __name__ == "__main__":
