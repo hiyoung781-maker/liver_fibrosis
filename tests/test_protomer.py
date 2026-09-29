@@ -145,5 +145,50 @@ class TestTheKnownDiscrepancy(unittest.TestCase):
         self.assertEqual(Chem.GetFormalCharge(mol), 0)
 
 
+class TestExplicitHydrogens(unittest.TestCase):
+    """A molecule from embed() carries hydrogens as ATOMS. Raising the
+    hydrogen COUNT on one of its nitrogens leaves a single implicit hydrogen
+    where every other atom's are explicit, and Meeko refuses the whole
+    molecule: "RDKit molecule has implicit Hs. Need explicit Hs." That is how
+    PLN-1474 and bexotegrast -- the two references carrying an Arg-mimic head,
+    and PLN-1474 sets the affinity cutoff -- dropped out of the panel."""
+
+    @staticmethod
+    def _embedded(smiles):
+        from rdkit.Chem import AllChem
+        mol = Chem.AddHs(Chem.MolFromSmiles(smiles))
+        AllChem.EmbedMolecule(mol, randomSeed=0xf00d)
+        return mol
+
+    PLN = "CC1(C(=O)NC(CCCCCCCc2ccc3c(n2)NCCC3)C(=O)O)CCOCC1"
+
+    def test_no_implicit_hydrogen_survives(self):
+        out = to_physiological(self._embedded(self.PLN))
+        self.assertEqual(sum(a.GetNumImplicitHs() for a in out.GetAtoms()), 0)
+
+    def test_the_proton_is_added_as_an_atom(self):
+        before = self._embedded(self.PLN)
+        after = to_physiological(before)
+        n_h_before = sum(1 for a in before.GetAtoms() if a.GetAtomicNum() == 1)
+        n_h_after = sum(1 for a in after.GetAtoms() if a.GetAtomicNum() == 1)
+        # one proton on, one off the carboxylate
+        self.assertEqual(n_h_after, n_h_before)
+        self.assertEqual(Chem.GetFormalCharge(after), 0)
+
+    def test_heavy_atoms_do_not_move(self):
+        import numpy as np
+        before = self._embedded(self.PLN)
+        after = to_physiological(before)
+        a = Chem.RemoveHs(before).GetConformer().GetPositions()
+        b = Chem.RemoveHs(after).GetConformer().GetPositions()
+        self.assertEqual(a.shape, b.shape)
+        self.assertAlmostEqual(float(np.abs(a - b).max()), 0.0, places=9)
+
+    def test_a_molecule_without_explicit_hydrogens_still_works(self):
+        # The SMILES path, which the rest of these tests use.
+        out = to_physiological(Chem.MolFromSmiles(self.PLN))
+        self.assertEqual(Chem.GetFormalCharge(out), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

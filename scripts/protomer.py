@@ -85,8 +85,17 @@ def protonate_bases(mol: Chem.Mol) -> Chem.Mol:
     Rules are applied in order and an atom already charged is skipped, so a
     nitrogen matching two patterns is protonated once.
     """
+    # Does the input carry hydrogens as ATOMS? A molecule from embed() does;
+    # one from MolFromSmiles does not. Incrementing the hydrogen COUNT on a
+    # molecule of the first kind leaves one implicit hydrogen on that
+    # nitrogen and nowhere else, and Meeko refuses the result with "RDKit
+    # molecule has implicit Hs. Need explicit Hs." -- which is how PLN-1474
+    # and bexotegrast, the two references carrying an Arg-mimic head,
+    # silently dropped out of the panel.
+    explicit = any(a.GetAtomicNum() == 1 for a in mol.GetAtoms())
+
     out = Chem.RWMol(mol)
-    done: set[int] = set()
+    done: list[int] = []
     for smarts, _reason in BASIC_RULES.values():
         pattern = Chem.MolFromSmarts(smarts)
         if pattern is None:
@@ -98,10 +107,17 @@ def protonate_bases(mol: Chem.Mol) -> Chem.Mol:
             if atom.GetFormalCharge() != 0:
                 continue
             atom.SetFormalCharge(1)
-            atom.SetNumExplicitHs(atom.GetTotalNumHs() + 1)
-            atom.SetNoImplicit(True)
-            done.add(index)
+            if not explicit:
+                atom.SetNumExplicitHs(atom.GetTotalNumHs() + 1)
+                atom.SetNoImplicit(True)
+            done.append(index)
+
     result = out.GetMol()
+    if explicit and done:
+        # Add the proton as an ATOM, positioned geometrically, so the
+        # molecule stays all-explicit and no heavy atom moves.
+        Chem.SanitizeMol(result)
+        result = Chem.AddHs(result, addCoords=True, onlyOnAtoms=done)
     Chem.SanitizeMol(result)
     return result
 
