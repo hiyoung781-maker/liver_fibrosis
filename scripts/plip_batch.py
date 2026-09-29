@@ -16,8 +16,14 @@ criterion that was not recorded cannot be applied afterwards -- v1 discarded
 42,419 poses and could then apply no criterion retrospectively at all. The
 per-kind counts are therefore written for every pose regardless of verdict.
 
-CPU, NOT GPU. PLIP has no GPU implementation; run this on cpu64. The 8gpu
-partition bills 8 node-hours per wall hour whether or not a GPU is touched.
+CPU, NOT GPU. PLIP has no GPU implementation; run this on a cpu64-only node.
+The 8gpu partition bills 8 node-hours per wall hour whether or not a GPU is
+touched, and the guide's CPU queues are cpu32-only and cpu64-only.
+
+RESUMABLE. 53,000 poses is long enough that a run gets interrupted -- one
+already was, every worker's plip killed with SIGINT. --resume reads the
+partial CSV back and skips the poses already in it, so an interruption costs
+minutes rather than hours. A truncated final row is not counted as done.
 
 A pose that PLIP cannot process is recorded with status="failed" and kept in
 the output. Dropping it would silently shrink the denominator of every pass
@@ -38,7 +44,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from run_plip import INTERACTION_KINDS
 
-__all__ = ["FIELDS", "iter_poses", "row_from_record", "run_pose"]
+__all__ = ["FIELDS", "already_done", "iter_poses", "row_from_record",
+           "run_pose", "thread_limits"]
 
 # poses_to_complex.LIGAND_RESNAME, as PLIP reports it in <identifiers><hetid>.
 PLIP_HETID = "LIG"
@@ -46,6 +53,41 @@ PLIP_HETID = "LIG"
 FIELDS = (["label", "pose", "affinity", "status",
            "metal_ca501", "hbond_asn224", "tyr178_contact", "hydrophobic_pocket"]
           + [f"n_{kind}" for kind in INTERACTION_KINDS])
+
+
+def thread_limits() -> dict:
+    """Thread-count variables to pin to 1 in each worker.
+
+    64 worker processes each importing numpy will each size a thread pool to
+    the whole node, so the node runs 64x64 threads over 64 cores and spends
+    its time in the scheduler. The user's own node template sets
+    OMP_NUM_THREADS=1 for this reason; the workers set it for themselves here
+    so a plain command line does not have to remember.
+    """
+    return {name: "1" for name in
+            ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+             "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS")}
+
+
+def already_done(out_csv) -> set:
+    """(label, pose) pairs a previous, interrupted run already wrote.
+
+    The interruption lands mid-write, so the final line can be a fragment.
+    A short row is dropped rather than counted, because counting it would
+    leave that pose permanently unmeasured with nothing to show for it.
+    """
+    path = Path(out_csv)
+    if not path.exists():
+        return set()
+    done = set()
+    with open(path, newline="") as handle:
+        for row in csv.DictReader(handle):
+            if row.get("label") and row.get("pose") and row.get("status"):
+                try:
+                    done.add((row["label"], int(row["pose"])))
+                except ValueError:
+                    continue
+    return done
 
 
 def iter_poses(pose_dir: str, pattern: str = "*_out.pdbqt"):
@@ -123,6 +165,7 @@ _CONTEXT: dict = {}
 
 
 def _init(receptor_pdb: str, plip_bin: str) -> None:
+    os.environ.update(thread_limits())
     _CONTEXT["receptor"] = receptor_pdb
     _CONTEXT["plip_bin"] = plip_bin
 
@@ -143,6 +186,10 @@ def main(argv=None) -> int:
     p.add_argument("--jobs", type=int, default=os.cpu_count() or 1,
                     help="Worker processes. PLIP is CPU-only; run on cpu64.")
     p.add_argument("--chunk", type=int, default=32)
+    p.add_argument("--resume", action="store_true",
+                    help="Skip poses already present in --out-csv and append. "
+                         "A 53,000-pose run that is interrupted then costs "
+                         "minutes to finish rather than starting over.")
     args = p.parse_args(argv)
 
     if not Path(args.receptor).exists():
@@ -153,22 +200,34 @@ def main(argv=None) -> int:
     if not entries:
         sys.stderr.write(f"{args.pose_dir}: no poses found\n")
         return 2
+
+    total = len(entries)
+    done = already_done(args.out_csv) if args.resume else set()
+    if done:
+        entries = [e for e in entries if (e["label"], e["pose"]) not in done]
+        print(f"resuming: {len(done)} of {total} poses already recorded")
     print(f"{len(entries)} poses from {args.pose_dir} on {args.jobs} workers",
           flush=True)
+    if not entries:
+        print("nothing left to do")
+        return 0
 
     args.out_csv.parent.mkdir(parents=True, exist_ok=True)
     counts = {"ok": 0}
-    with open(args.out_csv, "w", newline="") as handle:
+    append = bool(done)
+    with open(args.out_csv, "a" if append else "w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=FIELDS)
-        writer.writeheader()
+        if not append:
+            writer.writeheader()
         with ProcessPoolExecutor(max_workers=args.jobs, initializer=_init,
                                  initargs=(args.receptor, args.plip_bin)) as pool:
-            for done, row in enumerate(
+            for n, row in enumerate(
                     pool.map(_work, entries, chunksize=args.chunk), start=1):
                 writer.writerow(row)
+                handle.flush()
                 counts[row["status"]] = counts.get(row["status"], 0) + 1
-                if done % 2000 == 0:
-                    print(f"  {done}/{len(entries)}", flush=True)
+                if n % 2000 == 0:
+                    print(f"  {n}/{len(entries)}", flush=True)
 
     print(f"wrote {args.out_csv}")
     for status, n in sorted(counts.items()):

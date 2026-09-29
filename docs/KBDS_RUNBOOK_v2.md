@@ -472,21 +472,28 @@ done
 포즈마다 복합체를 만들고 PLIP을 돌려 한 줄씩 쓴다. 약 53,000 포즈.
 
 ```bash
-# 로그인 노드에서, 저장소 안에서 제출한다 (가이드 p.19)
-ssh bdata-login01
-cd ~/liver_fibrosis && mkdir -p logs
-sbatch slurm/v2_plip.sbatch
+# 예약해 둔 cpu64-only 노드에서 (~/kbds 의 노드 스크립트로 잡는다)
+cd ~/liver_fibrosis
+unset LD_LIBRARY_PATH
 
-squeue -u $USER          # 진행 확인
+for ARM in TL-A-prime TL-C; do
+  python scripts/plip_batch.py \
+      --pose-dir docking/v2/unidock/${ARM} \
+      --receptor docking/v2/receptor_h.pdb \
+      --out-csv  results/v2_${ARM}/plip.csv \
+      --jobs 64 --resume
+done
 ```
 
-**제출 위치가 중요하다.** 스크립트 경로는 제출한 디렉터리 기준이다 — 홈에서 제출하면 `Unable to open file slurm/v2_plip.sbatch`가 난다. sbatch가 없다는 뜻이 아니다.
+**로그인 노드에서 돌리지 말 것.** 로그인 노드에서 `--jobs 64`로 돌렸더니 모든 워커의 `plip`이 SIGINT로 죽었다(`exited -2`, numpy import 중 `KeyboardInterrupt`). 스케줄러 정책이지 도킹이나 화학의 실패가 아니다.
 
-**직접 실행하지 말 것.** 로그인 노드에서 `--jobs 64`로 맨손 실행했더니 모든 워커의 `plip`이 SIGINT로 죽었다(`exited -2`, numpy import 중 `KeyboardInterrupt`). 스케줄러 정책이지 도킹이나 화학의 실패가 아니다.
+**CPU 노드에서 돌릴 것.** PLIP에는 GPU 구현이 없고, `8gpu`는 GPU를 안 써도 시간당 8 노드시간을 과금한다. 가이드 p.18의 CPU 큐는 `cpu32-only`(0.5)와 `cpu64-only`(1)다.
 
-**파티션은 `cpu64-only`다.** 가이드 p.18의 큐 표에 CPU 큐는 `cpu32-only`(0.5 노드시간)와 `cpu64-only`(1 노드시간)뿐이고 **`cpu64`는 없다.** `8gpu`는 GPU를 안 써도 시간당 8 노드시간을 과금하므로 PLIP을 거기서 돌리면 할당량만 태운다. 모든 큐가 배타적 노드 정책이라 `--exclusive`는 불필요하다.
+**`unset LD_LIBRARY_PATH`를 먼저.** `autodock_gpu` 때문에 내보낸 그 변수가 같은 셸의 Open Babel을 깨뜨린다(§0).
 
-sbatch 스크립트가 `LD_LIBRARY_PATH`를 `unset`하고 `plip -h`·`obabel -V`를 실제로 실행해본 뒤 시작한다.
+`--resume`은 중간에 끊긴 실행을 이어받는다. 이미 CSV에 있는 포즈를 건너뛰고 이어 쓰며, 쓰다 만 마지막 줄은 완료로 세지 않는다. 53,000 포즈짜리 실행이 한 번 끊긴 적이 있으므로 기본으로 붙여 쓴다.
+
+워커는 자기 프로세스에서 `OMP_NUM_THREADS` 등을 1로 고정한다. 그러지 않으면 64개 워커가 각자 노드 전체 크기의 스레드 풀을 만들어 64코어 위에서 64×64개 스레드가 다툰다.
 
 `plip`과 `obabel`이 기본 PATH에 없으면 `--plip-bin`에 절대경로를 준다. **`LD_LIBRARY_PATH`가 설정된 셸에서 돌리지 말 것** — §0의 Open Babel ABI 충돌.
 

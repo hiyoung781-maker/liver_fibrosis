@@ -5,7 +5,8 @@ from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from plip_batch import FIELDS, iter_poses, row_from_record
+from plip_batch import (FIELDS, already_done, iter_poses,
+                        row_from_record, thread_limits)
 
 TWO_POSES = """\
 MODEL 1
@@ -89,6 +90,61 @@ class TestRowFromRecord(unittest.TestCase):
         row = row_from_record({"label": "a", "pose": 1, "affinity": None},
                               self.EMPTY)
         self.assertEqual(set(row), set(FIELDS))
+
+
+class TestResume(unittest.TestCase):
+    """53,000 poses is long enough that the run gets interrupted -- it already
+    was once, every worker's plip killed with SIGINT. Starting over throws
+    away hours of finished work, so a partial CSV is read back and its poses
+    skipped."""
+
+    HEADER = ",".join(FIELDS)
+
+    def test_no_csv_means_nothing_is_done(self):
+        with TemporaryDirectory() as tmp:
+            self.assertEqual(already_done(Path(tmp) / "absent.csv"), set())
+
+    def test_finished_poses_are_read_back_as_label_pose_pairs(self):
+        with TemporaryDirectory() as tmp:
+            csv_path = Path(tmp) / "plip.csv"
+            csv_path.write_text(
+                self.HEADER + "\n"
+                + "gen_00001,1,-6.9,ok" + ",0" * (len(FIELDS) - 4) + "\n"
+                + "gen_00001,2,-6.8,ok" + ",0" * (len(FIELDS) - 4) + "\n")
+            self.assertEqual(already_done(csv_path),
+                             {("gen_00001", 1), ("gen_00001", 2)})
+
+    def test_a_header_only_csv_is_not_mistaken_for_finished_work(self):
+        with TemporaryDirectory() as tmp:
+            csv_path = Path(tmp) / "plip.csv"
+            csv_path.write_text(self.HEADER + "\n")
+            self.assertEqual(already_done(csv_path), set())
+
+    def test_a_truncated_last_row_is_not_counted_as_done(self):
+        # The interruption lands mid-write: the last line can be a fragment,
+        # and counting it done would leave one pose permanently unmeasured.
+        with TemporaryDirectory() as tmp:
+            csv_path = Path(tmp) / "plip.csv"
+            csv_path.write_text(
+                self.HEADER + "\n"
+                + "gen_00001,1,-6.9,ok" + ",0" * (len(FIELDS) - 4) + "\n"
+                + "gen_00002,1,-6.5")
+            self.assertEqual(already_done(csv_path), {("gen_00001", 1)})
+
+
+class TestThreadLimits(unittest.TestCase):
+    """64 worker processes each importing numpy will each start a thread pool
+    sized to the whole node, so the node runs 64x64 threads fighting for 64
+    cores. The user's own node template sets OMP_NUM_THREADS=1 for the same
+    reason; the workers here set it for themselves so a plain command line
+    does not have to remember."""
+
+    def test_every_common_thread_variable_is_pinned_to_one(self):
+        limits = thread_limits()
+        self.assertEqual(set(limits.values()), {"1"})
+        for name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+                     "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+            self.assertIn(name, limits)
 
 
 if __name__ == "__main__":
