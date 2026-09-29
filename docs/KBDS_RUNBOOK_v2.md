@@ -253,13 +253,17 @@ python scripts/dock_autodock_gpu.py \
 python scripts/validate_redock.py --protonation anion \
     --dlg       docking/v2/poses/control_anion/CONTROL_crystal.dlg \
     --receptor  docking/v2/receptor_h.pdb \
-    --reference docking/ligand_ref_anion.sdf \
+    --reference docking/v2/ligands_pdbqt_anion/CONTROL_crystal.pdbqt \
     --workdir   docking/v2/redock_gate_anion \
     --all-poses \
     --out       results/v2_redock_gate_anion.md
 ```
 
-`--reference`가 음이온 SDF인 이유는 **좌표가 아니라 그래프** 때문이다. `CalcRMS`는 두 분자가 같은 그래프여야 동작하는데 중성 COOH와 카복실레이트는 결합차수·전하가 다르다. `ligand_ref_anion.sdf`의 좌표는 결정 좌표와 **원자 변위 0.000000000 Å로 동일**하므로 비교 대상은 바뀌지 않는다.
+`--reference`는 **SDF가 아니라 준비된 대조군 PDBQT**를 준다. 도킹 포즈는 `PDBQT → Open Babel → SDF` 경로로 RDKit에 도착하고 Open Babel이 그 과정에서 양성자화를 다시 인식하는데, 참조를 SDF로 주면 두 쪽의 인식이 갈린다. 실측: 음이온 대조군의 참조 SDF는 `...C(=O)[O-]`로, 그 자신의 도킹 포즈는 `...C(=O)O`로 읽혔다. 부분구조 일치 0건인데 `CalcRMS`가 숫자를 돌려줬다 — 2.151 Å, AutoDock 자신의 reference RMSD는 같은 포즈에 1.46 Å.
+
+`CalcRMS`는 대칭 등가인 모든 매핑 중 **최솟값**을 고르므로 올바른 대응의 RMSD를 **넘을 수 없다**. 넘었다면 올바른 대응을 못 찾은 것이다. 참조를 PDBQT로 주면 양쪽이 같은 변환기를 거쳐 인식이 같아지고, `.dlg` 포즈는 입력 PDBQT의 원자 순서를 그대로 갖고 있으므로 대응이 엔진 자신의 것이 된다.
+
+이제 그래프가 다르면 `validate_redock.py`는 숫자를 내지 않고 두 SMILES를 찍으며 기준 (c)를 **실패로 기록**한다. 측정되지 않은 값이 사전등록 기준을 결정하는 일은 없다.
 
 **이건 사후에 기준을 바꾸는 게 아니라 등록된 절차를 마저 실행하는 것이다.** 문턱 2.0 Å은 그대로다.
 

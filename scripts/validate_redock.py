@@ -51,6 +51,7 @@ __all__ = [
     "best_pose",
     "measure_redocked_pose",
     "pose_table",
+    "rmsd_to_reference",
     "verdict",
     "reproducibility",
 ]
@@ -231,39 +232,68 @@ def _pose_to_sdf(pdbqt_path: Path, sdf_path: Path) -> None:
             + (f":\n{message}" if message else ""))
 
 
-def _load_reference(reference_sdf: str):
+def _load_reference(reference: str, workdir: Path):
+    """Read the RMSD reference, routing a PDBQT through the same converter.
+
+    THE REFERENCE SHOULD BE THE PREPARED CONTROL PDBQT, not the crystal SDF.
+    A docked pose reaches RDKit as PDBQT -> Open Babel -> SDF, and Open Babel
+    re-perceives protonation on the way: measured on the cluster, the anion
+    control's reference SDF read back as ...C(=O)[O-] while its own docked
+    pose read back as ...C(=O)O. Different graphs, zero substructure matches,
+    and CalcRMS returned a number anyway -- 2.151 A, where AutoDock's own
+    reference RMSD for that pose is 1.46 A. Routing both sides through the
+    same converter makes the perception identical, and the .dlg pose carries
+    the input PDBQT's atom order, so the correspondence is the engine's own.
+    """
     from rdkit import Chem
-    ref = next(iter(Chem.SDMolSupplier(reference_sdf, removeHs=False)), None)
+
+    path = Path(reference)
+    if path.suffix.lower() == ".pdbqt":
+        converted = workdir / (path.stem + ".reference.sdf")
+        _pose_to_sdf(path, converted)
+        path = converted
+    ref = next(iter(Chem.SDMolSupplier(str(path), removeHs=False)), None)
     if ref is None:
-        raise ValueError(f"{reference_sdf}: RDKit could not read a reference molecule")
+        raise ValueError(f"{path}: RDKit could not read a reference molecule")
     return ref
 
 
-def _rmsd_to_reference(pose_mol, reference_mol):
-    """Symmetry-aware RMSD, or (None, reason) when the graphs cannot be matched.
+def rmsd_to_reference(pose_mol, reference_mol):
+    """Symmetry-aware RMSD, or (None, reason) when the graphs do not match.
 
-    CalcRMS needs the two molecules to be the same graph. The pose arrives
-    through PDBQT -> Open Babel, whose perceived bond orders need not match
-    the reference SDF's, and CalcRMS then raises rather than returning a
-    number. Assigning the reference's bond orders onto the pose fixes the
-    common case; when even that fails, this returns no number and names the
-    reason, because a fabricated RMSD would silently decide criterion (c).
+    CalcRMS minimises over every symmetry-equivalent atom mapping, so its
+    result can never EXCEED the correct correspondence's RMSD. When it does,
+    it did not find the correct correspondence -- which is what happened on
+    the cluster, silently, because the two molecules were not the same graph
+    and CalcRMS returned a value rather than refusing.
+
+    The graphs are therefore compared first, by canonical SMILES, and a
+    mismatch produces no number at all. Criterion (c) is then recorded as
+    failed with the reason, never as passed, and never as a number that looks
+    measured. AssignBondOrdersFromTemplate is deliberately NOT used as a
+    rescue here: on the cluster it warned "More than one matching pattern
+    found", picked one, and returned the same wrong 2.151 A.
     """
     from rdkit import Chem
-    from rdkit.Chem import AllChem
 
     from pose_geometry import crystal_rmsd
 
+    pose_heavy = Chem.RemoveHs(pose_mol)
+    ref_heavy = Chem.RemoveHs(reference_mol)
+    pose_smiles = Chem.MolToSmiles(pose_heavy)
+    ref_smiles = Chem.MolToSmiles(ref_heavy)
+    if pose_smiles != ref_smiles:
+        return None, (
+            "pose and reference are not the same molecular graph, so no atom "
+            "correspondence exists and any RMSD would be meaningless:\n"
+            f"      pose {pose_smiles}\n"
+            f"      ref  {ref_smiles}\n"
+            "    Pass the PREPARED CONTROL PDBQT as --reference so both sides "
+            "are perceived by the same converter.")
     try:
         return crystal_rmsd(pose_mol, reference_mol), None
     except (ValueError, RuntimeError) as exc:
-        first = str(exc)
-    try:
-        fixed = AllChem.AssignBondOrdersFromTemplate(reference_mol, pose_mol)
-        return crystal_rmsd(fixed, reference_mol), None
-    except (ValueError, RuntimeError) as exc:
-        return None, (f"CalcRMS could not match the pose to the reference "
-                      f"({first}); after AssignBondOrdersFromTemplate: {exc}")
+        return None, f"CalcRMS failed on matching graphs: {exc}"
 
 
 def measure_redocked_pose(pose: dict, receptor_pdb: str, reference_sdf: str,
@@ -294,7 +324,8 @@ def measure_redocked_pose(pose: dict, receptor_pdb: str, reference_sdf: str,
         raise ValueError(f"{pose_sdf}: RDKit could not read the converted pose")
 
     geometry = measure_pose(mol, anchor_atoms(receptor_pdb))
-    rmsd, rmsd_note = _rmsd_to_reference(mol, _load_reference(reference_sdf))
+    rmsd, rmsd_note = rmsd_to_reference(
+        mol, _load_reference(reference_sdf, workdir))
 
     complex_pdb = build_complex(str(pose_pdbqt), receptor_pdb,
                                 workdir / f"{stem}.complex.pdb")
@@ -448,7 +479,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
                     help="Protonated receptor PDB: supplies the Ca501/Asn224 "
                          "anchors AND is the receptor half of the PLIP complex.")
     p.add_argument("--reference", default="docking/ligand_ref.sdf",
-                    help="Crystal ligand pose, for the symmetry-aware RMSD.")
+                    help="Crystal ligand pose for the symmetry-aware RMSD. Give "
+                         "the PREPARED CONTROL PDBQT, not the SDF: both sides "
+                         "are then perceived by the same converter, and a pose "
+                         "carries the input PDBQT's atom order. An SDF whose "
+                         "protonation Open Babel re-perceives differently "
+                         "produces no RMSD at all, by design.")
     p.add_argument("--plip-bin", default="plip", help="Path to the PLIP executable.")
     p.add_argument("--workdir", type=Path, default=None,
                     help="Where per-pose intermediates are written "

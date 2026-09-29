@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from validate_redock import (CRYSTAL_CONTACTS, best_pose, pose_table,
-                             verdict)
+                             rmsd_to_reference, verdict)
 
 
 def m(ca=2.68, donor=2.92, rmsd=0.63, plip_metal=True, plip_hbond=True):
@@ -110,6 +110,45 @@ class TestPoseTable(unittest.TestCase):
         rows = pose_table([_rec(1, -5.89, rmsd=0.6), _rec(5, -6.77, rmsd=2.15)], 5)
         self.assertTrue(next(r for r in rows if r["rank"] == 5)["gated"])
         self.assertFalse(next(r for r in rows if r["rank"] == 1)["gated"])
+
+
+class TestRmsdRefusesMismatchedGraphs(unittest.TestCase):
+    """CalcRMS minimises over every symmetry-equivalent atom mapping, so its
+    result can never EXCEED the correct correspondence's RMSD. On the cluster
+    it returned 2.151 A for a pose AutoDock itself measures at 1.46 A against
+    the same reference -- because Open Babel re-protonated the carboxylate on
+    the way out of the .dlg, so the pose read back as ...C(=O)O while the
+    reference SDF was ...C(=O)[O-]. Zero substructure matches, and a number
+    returned anyway. A number that decides a pre-registered criterion must not
+    come from a correspondence that does not exist."""
+
+    @staticmethod
+    def _mol(smiles):
+        from rdkit import Chem
+        from rdkit.Chem import AllChem
+        mol = Chem.AddHs(Chem.MolFromSmiles(smiles))
+        AllChem.EmbedMolecule(mol, randomSeed=0xf00d)
+        return mol
+
+    def test_no_number_when_the_graphs_differ(self):
+        rmsd, note = rmsd_to_reference(self._mol("CC(=O)O"),
+                                       self._mol("CC(=O)[O-]"))
+        self.assertIsNone(rmsd)
+        self.assertIn("not the same molecular graph", note)
+
+    def test_the_note_names_both_graphs(self):
+        # The cluster failure was invisible precisely because nothing printed
+        # what the two molecules actually were.
+        _rmsd, note = rmsd_to_reference(self._mol("CC(=O)O"),
+                                        self._mol("CC(=O)[O-]"))
+        self.assertIn("C(=O)O", note)
+        self.assertIn("[O-]", note)
+
+    def test_matching_graphs_still_produce_a_number(self):
+        mol = self._mol("CC(=O)O")
+        rmsd, note = rmsd_to_reference(mol, mol)
+        self.assertIsNone(note)
+        self.assertAlmostEqual(rmsd, 0.0, places=6)
 
 
 if __name__ == "__main__":
