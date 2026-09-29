@@ -233,7 +233,7 @@ v2 배치는 **중성**으로 돌았다(`docking/ligand_ref.sdf`에 `M  CHG` 레
 
 ```bash
 # 결정 좌표를 그대로 두고 형식전하만 바꾼다 (원자 변위 0.000000000 Å)
-python scripts/deprotonate_control.py
+python scripts/deprotonate_acids.py
 
 python scripts/prepare_ligands.py --control-only \
     --control docking/ligand_ref_anion.sdf \
@@ -345,15 +345,40 @@ grep CONTROL_crystal docking/v2/ligand_index_TL-A-prime.txt > docking/v2/control
   (이 런북의 이전 판은 여기에 "중성"이라고 적었다. 근거로 든 *"§7.4가 음이온을 선호한 이유는 AutoDock4에 정전기 항이 있어서이고 Vina에는 없다"*가 정확하지 않았다. §7.4는 **두 가지** 이유를 적었고 — *"pH 7.4의 실제 존재 형태이고, 점수함수가 이제 전하를 본다"* — 앞의 것은 엔진과 무관하다. 게다가 Vina에 명시적 쿨롱 항이 없어도 두 상태의 점수는 실제로 갈린다: 카복실레이트가 되면 COOH 회전결합이 사라져 비틀림 수가 6에서 5로 줄고 수소결합 원자 유형이 바뀐다(중성 −6.718, 음이온 −6.913). 원문 규칙을 뒤집을 근거가 성립하지 않으므로 원문을 따른다.)
 - **미통과** → **두 엔진 모두 사전등록 게이트에 실패했다는 뜻이다.** 그 자체가 이 캠페인의 주요 결과이며, 리드를 선정하지 않고 그 사실을 보고한다. 문턱을 옮기지 않는다.
 
-### 3b.2 두 아암 재도킹 + affinity 기준값 재산출
+### 3b.2 라이브러리를 음이온으로 다시 준비
 
-리간드 PDBQT는 그대로 쓴다(Uni-Dock과 AutoDock-GPU 모두 PDBQT를 받는다).
+**기존 PDBQT를 그대로 쓰면 안 된다.** 게이트가 채택한 상태는 음이온인데, 생성 리간드는 중성 카복실산으로 준비되어 있다(생존자 PDBQT의 `REMARK SMILES`가 `...C(=O)O...`). 대조군이 검증한 것과 다른 상태로 라이브러리를 도킹하면 프로토콜 검증이 그 도킹에 적용되지 않는다.
+
+재임베딩이 아니다 — 형식전하 편집과 산성 수소 제거뿐이고 **중원자 좌표는 바뀌지 않는다**(테스트가 0 Å으로 고정). 분자 하나에 카복실산이 여럿이면 전부 탈양성자화한다(pH 7.4의 실제 상태). 카복실산이 없는 분자는 그대로 통과시키고 세어 둔다.
+
+```bash
+for ARM in TL-A-prime TL-C; do
+  python scripts/deprotonate_acids.py \
+      --sdf-dir docking/v2/ligands/${ARM} \
+      --out-dir docking/v2/ligands_anion/${ARM}
+
+  python scripts/ligands_to_pdbqt.py \
+      --sdf-dir docking/v2/ligands_anion/${ARM} \
+      --out-dir docking/v2/ligands_pdbqt_anion/${ARM}
+
+  ls docking/v2/ligands_pdbqt_anion/${ARM}/*.pdbqt > docking/v2/ligand_index_anion_${ARM}.txt
+done
+
+# 패널도 같은 처리를 받아야 한다 - 기준값과 후보가 같은 상태여야 비교가 성립한다
+python scripts/deprotonate_acids.py --sdf-dir docking/v2/panel --out-dir docking/v2/panel_anion
+python scripts/ligands_to_pdbqt.py --sdf-dir docking/v2/panel_anion --out-dir docking/v2/panel_pdbqt_anion
+ls docking/v2/panel_pdbqt_anion/*.pdbqt > docking/v2/panel_index_anion.txt
+```
+
+`deprotonated + unchanged + failed = read`가 맞는지, `failed`가 0인지 확인한다.
+
+### 3b.3 두 아암 재도킹 + affinity 기준값 재산출
 
 ```bash
 for ARM in TL-A-prime TL-C; do
   python scripts/dock_unidock.py \
       --receptor       docking/v2/meeko_receptor.pdbqt \
-      --ligand-index   docking/v2/ligand_index_${ARM}.txt \
+      --ligand-index   docking/v2/ligand_index_anion_${ARM}.txt \
       --out-dir        docking/v2/unidock/${ARM} \
       --autobox-ligand docking/ligand_ref.sdf \
       --gpus 8
@@ -365,7 +390,7 @@ done
 ```bash
 python scripts/dock_unidock.py \
     --receptor       docking/v2/meeko_receptor.pdbqt \
-    --ligand-index   docking/v2/panel_index.txt \
+    --ligand-index   docking/v2/panel_index_anion.txt \
     --out-dir        docking/v2/unidock/panel \
     --autobox-ligand docking/ligand_ref.sdf \
     --gpus 1
@@ -373,7 +398,7 @@ python scripts/dock_unidock.py \
 
 이후 §5(복합체 변환 → PLIP)와 하류 단계는 입력 디렉터리만 `docking/v2/unidock/...`로 바꿔 그대로 진행한다.
 
-### 3b.3 기록에 반드시 남길 것
+### 3b.4 기록에 반드시 남길 것
 
 기하 기준(§8.5b)이 **결정 포즈와 2.15 Å 대체 포즈를 구별하지 못했다.** 2.15 Å 포즈도 Ca501 2.51 Å, Asn224 2.81 Å로 기준 안에 있었고 PLIP도 두 상호작용을 모두 보고했다. 이 한계는 엔진을 바꿔도 사라지지 않으며, 기하 게이트 통과가 결정 결합 양식의 재현을 보장하지 않는다는 뜻이다. 리드 보고서에 명시한다.
 
