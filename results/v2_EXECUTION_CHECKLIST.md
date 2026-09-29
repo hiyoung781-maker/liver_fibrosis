@@ -300,3 +300,53 @@ prepare the receptor with `obabel -xr -h` (hydrogens included); do not pass
 `obabel -p 7.4` — it silently drops all six calcium ions (an earlier post-mortem
 found the affinity still looked healthy afterwards, which is why this is a hard
 constraint and not a suggestion).
+
+---
+
+**Task 12 — PLIP batch run (spec section 8.0).** `scripts/run_plip.py` provides
+`run_plip(complex_pdb, out_dir, plip_bin=...)` and `parse_report(xml_text,
+hetid=None)`. PLIP has no GPU implementation; it is CPU-bound at roughly 1
+second per pose. Run it on the **cpu64** partition, one pose per worker,
+**never** on 8gpu -- 8gpu bills 8 node-hours per wall-hour regardless of GPU
+use, and PLIP cannot use a GPU at all. With ~85,000 poses across two docking
+arms, parallelism across 64 cores is what makes the batch tractable (roughly
+85,000 / 64 ≈ 22 minutes of wall time at full occupancy, versus over 23 hours
+serial).
+
+PLIP and Open Babel are installed but not on the default PATH:
+`/home/seyoung/miniconda3/envs/docking/bin/plip` and
+`/home/seyoung/miniconda3/envs/docking/bin/obabel`. Batch jobs must reference
+these absolute paths (or prepend that bin directory to PATH) explicitly, the
+same way Task 11's `poses_to_complex.py` requires `obabel` to resolve.
+
+Example per-worker invocation:
+
+```bash
+/home/seyoung/miniconda3/envs/docking/bin/plip -f <complex.pdb> -o <out_dir> -x -q
+```
+
+PLIP writes its XML report as `<input-stem>_report.xml` in `<out_dir>`, not
+`report.xml` -- `run_plip()` globs for `*_report.xml` to find it regardless of
+the input filename.
+
+Verified against real PLIP 3.0.1 output on the deposited `8W30.pdb` (13
+binding sites) and on a real docked pose built via
+`scripts/poses_to_complex.py` from `docking/v2/receptor_h.pdb` +
+`docking/panel_pdbqt/PANEL_A1AFA.pdbqt`. On 8W30, PLIP truncates the
+five-character CCD code `A1AFA` to the three-character hetid `A1A`, and
+composes the ligand's binding site with the adjacent calcium, so its
+longname is `A1A-CA` -- `parse_report(..., hetid="A1A")` isolates that one
+site from the other 12 (mostly calcium and glycan sites) without merging
+them. All measured values (metal_complexes at 2.62/2.45/2.50/2.39 Å
+coordination 4 Ca; hydrogen_bonds at Asn224 2.63 Å don_angle 156.61 with
+protisdon False, Tyr133 3.17, Ser134 3.47, and two further Asn224 entries at
+3.23/3.27; hydrophobic_interactions Tyr178 3.70 Å, Leu225 3.69 Å; zero
+pi_stacks) matched the brief's reference values exactly through this parser.
+
+The real PANEL_A1AFA pose (built through the PDBQT path, not the SDF path)
+came back from PLIP as a single `LIG` site with zero detected interactions
+-- confirming `parse_report` returns empty lists for a real no-interaction
+pose rather than raising, and that it did not exhibit the ligand-fragmented-
+across-two-sites artifact noted in Task 11 (that artifact was seen on an
+SDF-to-PDBQT-to-PDB conversion path; the pipeline's real inputs are prepared
+PDBQT files and did not show it here).
