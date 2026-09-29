@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -J avb1_plip_v2
-#SBATCH -p cpu64
+#SBATCH -p cpu64-only
 #SBATCH --time 06:00:00
 #SBATCH --nodes 1
 #SBATCH -o logs/plip_v2_%j.out
@@ -8,14 +8,23 @@
 #
 # PLIP over every docked pose of both arms (~53,000). See scripts/plip_batch.py.
 #
-#   mkdir -p logs && sbatch slurm/v2_plip.sbatch
+#   [bdata-login01]$ cd ~/liver_fibrosis && mkdir -p logs
+#   [bdata-login01]$ sbatch slurm/v2_plip.sbatch
 #
-# cpu64, NOT 8gpu. PLIP has no GPU implementation, and the 8gpu partition bills
-# 8 node-hours per wall hour whether or not a GPU is touched.
+# SUBMIT FROM THE LOGIN NODE, from inside the repository. The user guide
+# (p.19) gives `[bdata-login01]$ sbatch [script]`, and the script path is
+# relative to where you submit from.
 #
-# AND NOT THE LOGIN NODE. Running this with --jobs 64 on bdata-login01 had every
-# worker's plip killed with SIGINT (exit -2, KeyboardInterrupt inside numpy's
-# import). That is the scheduler's policy, not a docking or chemistry failure.
+# PARTITION cpu64-only, not 8gpu. The guide's queue table (p.18) names the CPU
+# queues cpu32-only and cpu64-only -- "cpu64" does not exist. cpu64-only bills
+# 1 node-hour per wall hour against 8gpu's 8, and PLIP has no GPU
+# implementation, so a GPU queue would burn the allocation for nothing.
+# All queues are exclusive-node, so --exclusive is not needed.
+#
+# DO NOT RUN THIS DIRECTLY ON A NODE. Run as a bare command with --jobs 64 on
+# bdata-login01, every worker's plip was killed with SIGINT (exit -2,
+# KeyboardInterrupt inside numpy's import). That is the scheduler's policy,
+# not a docking or chemistry failure.
 
 set -euo pipefail
 
