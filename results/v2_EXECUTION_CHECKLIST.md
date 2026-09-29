@@ -235,3 +235,68 @@ in `TestRunBatchSplitting`, without invoking the binary.
 the CLI exits 1 with a pointer to this checklist entry if it is not found. The format
 caveat above must be resolved (or `parse_dlg` corrected) before batch `.dlg` output is
 trusted for the geometry gate.
+
+## Task 10: Redock validation gate, protonation decision, engine reproducibility
+
+**Status as of this entry: not yet run.** `scripts/validate_redock.py` implements
+and unit-tests the gate itself (`verdict()`, `CRYSTAL_CONTACTS`, `RMSD_CUTOFF`,
+`reproducibility()`) — `tests/test_validate_redock.py`, 5/5 passing, including the
+distance/PLIP disagreement case (spec's whole point for criterion d). `autodock_gpu`
+is not installed anywhere on this machine (checked: not on PATH, not in any conda
+env), so none of the three real runs below have executed; the CLI checks
+`shutil.which("autodock_gpu")` and refuses to fabricate output when it is absent
+instead of faking a result.
+
+**Step 1 — redock the crystal ligand and apply the gate.** Once `autodock_gpu` is
+available on K-BDS:
+
+```bash
+python scripts/validate_redock.py --protonation neutral --out results/v2_redock_neutral.json
+python scripts/validate_redock.py --protonation anion   --out results/v2_redock_anion.json
+```
+
+Measure `ca_dist`/`donor_dist` with `pose_geometry.measure_pose`, RMSD to the
+crystal pose with `pose_geometry.crystal_rmsd` (`rdMolAlign.CalcRMS`, symmetry- and
+mapping-aware — never index-wise coordinate subtraction, see that module's
+docstring), and the two PLIP booleans by running PLIP 3.0.1 on the redocked
+complex and checking for the metal complex (Ca site, reported as hetid `A1A`
+composed `A1A-CA` — PLIP truncates the five-character CCD code `A1AFA`) and the
+Asn224 hydrogen bond. Feed the five measurements into `verdict()`. **If neither
+protonation state passes the gate, stop here and revert to the Uni-Dock regime**
+per the plan.
+
+**Step 2 — the protonation decision (pre-registered here, before any numbers
+exist).** Dock the control ligand in both neutral (COOH) and anion (COO-) forms.
+Adopt whichever form reproduces the crystal contacts (passes `verdict()`); **if
+both pass, adopt the anion.** This reverses the v1 choice of neutral, which was
+partly justified by Vina having no electrostatic term — AutoDock4's scoring
+function does have one, so that justification no longer applies with the engine
+switch to AutoDock-GPU/AD4. Record the outcome and the reasoning in
+`results/v2_redock_validation.md`.
+
+**Step 3 — engine reproducibility measurement (spec section 7.7).** Affinity is
+now a hard filter, not a tie-break: in v1, 5 of 20 leads sat within 0.05 kcal/mol
+of the cutoff, smaller than the 0.16 kcal/mol difference measured between two
+engines. Dock the same ligand (A1AFA and PLN-1474) ten times each, varying only
+the seed:
+
+```bash
+python scripts/validate_redock.py --reproducibility \
+    --ligands A1AFA PLN-1474 --seeds 1..10 \
+    --out results/v2_engine_reproducibility.json
+```
+
+For each ligand, take the best-passing-pose affinity per seed and reduce with
+`reproducibility()` to get `sd` and `range`. Task 18's lead-filter report must
+state how many candidate molecules sit within this measured engine noise of the
+affinity cutoff — the filter is still applied, but molecules sitting on the
+boundary must not be silently hidden.
+
+**Gate:** `autodock_gpu` must be present on K-BDS before any of the three steps
+above can run; `shutil.which` is checked first and the CLI exits 1 with a pointer
+to this entry if the binary is not found. Do not weaken
+`scripts/prepare_receptor_pdbqt.py`'s nitrogen donor-to-acceptor ratio check, and
+prepare the receptor with `obabel -xr -h` (hydrogens included); do not pass
+`obabel -p 7.4` — it silently drops all six calcium ions (an earlier post-mortem
+found the affinity still looked healthy afterwards, which is why this is a hard
+constraint and not a suggestion).
