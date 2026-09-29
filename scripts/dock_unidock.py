@@ -37,6 +37,7 @@ every shard the same size mixture.
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
@@ -45,9 +46,49 @@ import numpy as np
 from rdkit import Chem, RDLogger
 
 __all__ = ["DEFAULTS", "box_from_ligand", "build_command", "split_index",
-           "run_multi_gpu"]
+           "parse_unidock_pdbqt", "run_multi_gpu"]
 
 RDLogger.DisableLog("rdApp.*")
+
+# `REMARK VINA RESULT:` carries three numbers; the first is the affinity in
+# kcal/mol, the other two are Vina's own lower- and upper-bound RMSD from the
+# best mode and are not used here.
+_VINA_RESULT = re.compile(r"REMARK\s+VINA RESULT:\s*(-?\d+\.?\d*)")
+
+
+def parse_unidock_pdbqt(text: str) -> list[dict]:
+    """Poses from a Uni-Dock output PDBQT, shaped like parse_dlg's output.
+
+    The redocking gate (spec 7.4) was written against AutoDock-GPU's .dlg.
+    Reverting to Uni-Dock -- that section's own pre-registered consequence --
+    means the same gate must read Uni-Dock output, so this returns the same
+    {rank, affinity, pdbqt_block} records and validate_redock stays engine-
+    agnostic.
+
+    A pose whose energy remark is missing keeps the pose with affinity None,
+    the same rule parse_dlg follows: a v1 regression put score extraction
+    inside the structure-parsing try and took the pose count to zero. An
+    absent score must cost the score, never the pose.
+    """
+    poses: list[dict] = []
+    block: list[str] = []
+    affinity = None
+    inside = False
+    for line in text.splitlines():
+        if line.startswith("MODEL"):
+            block, affinity, inside = [line], None, True
+            continue
+        if not inside:
+            continue
+        match = _VINA_RESULT.search(line)
+        if match:
+            affinity = float(match.group(1))
+        block.append(line)
+        if line.startswith("ENDMDL"):
+            poses.append({"rank": len(poses) + 1, "affinity": affinity,
+                          "pdbqt_block": "\n".join(block)})
+            inside = False
+    return poses
 
 # Pinned to the smina redocking run that section 8.5(a) validated.
 # Pinned to the smina redocking run that section 8.5(a) validated, EXCEPT for the two

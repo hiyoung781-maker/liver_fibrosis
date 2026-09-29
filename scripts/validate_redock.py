@@ -406,12 +406,14 @@ def _format_pose_table(rows: list) -> list:
 
 
 def _gate_report(label: str, dlg: str, measurement: dict, decision: dict,
-                 n_poses: int, rows: list | None = None) -> str:
+                 n_poses: int, rows: list | None = None,
+                 engine: str = "AutoDock-GPU") -> str:
     ok = decision["passed"]
     lines = [
         "# Redocking validation gate (spec section 7.4)",
         "",
-        f"Control ligand `.dlg`: `{dlg}`",
+        f"Engine: **{engine}**",
+        f"Control ligand poses: `{dlg}`",
         f"Poses parsed: {n_poses}. Gate applied to the TOP pose by affinity "
         f"(rank {measurement['rank']}, "
         f"{measurement['affinity']} kcal/mol).",
@@ -472,9 +474,14 @@ def _gate_report(label: str, dlg: str, measurement: dict, decision: dict,
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--dlg", nargs="+", required=True,
+    source = p.add_mutually_exclusive_group(required=True)
+    source.add_argument("--dlg", nargs="+", default=None,
                     help="AutoDock-GPU .dlg for the redocked control ligand. "
                          "With --reproducibility, one .dlg per seed.")
+    source.add_argument("--poses", nargs="+", default=None,
+                    help="Uni-Dock output PDBQT for the redocked control "
+                         "ligand, as an alternative to --dlg. The gate is the "
+                         "same; only the parser differs.")
     p.add_argument("--receptor", default="docking/v2/receptor_h.pdb",
                     help="Protonated receptor PDB: supplies the Ca501/Asn224 "
                          "anchors AND is the receptor half of the PLIP complex.")
@@ -506,11 +513,24 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _run_gate(args, workdir: Path) -> int:
-    from dock_autodock_gpu import parse_dlg
+def _pose_source(args):
+    """(paths, parser, engine name) for whichever engine produced the poses.
 
-    dlg = args.dlg[0]
-    poses = parse_dlg(Path(dlg).read_text())
+    The gate judges geometry, not an engine, so it reads either AutoDock-GPU's
+    .dlg or Uni-Dock's output PDBQT and treats them identically from there on.
+    """
+    if args.dlg:
+        from dock_autodock_gpu import parse_dlg
+        return args.dlg, parse_dlg, "AutoDock-GPU"
+    from dock_unidock import parse_unidock_pdbqt
+    return args.poses, parse_unidock_pdbqt, "Uni-Dock"
+
+
+def _run_gate(args, workdir: Path) -> int:
+    paths, parse, engine = _pose_source(args)
+
+    dlg = paths[0]
+    poses = parse(Path(dlg).read_text())
     top = best_pose(poses)
 
     to_measure = poses if args.all_poses else [top]
@@ -520,12 +540,13 @@ def _run_gate(args, workdir: Path) -> int:
     decision = verdict(measurement)
     rows = pose_table(records, top["rank"]) if args.all_poses else None
     report = _gate_report(args.protonation, dlg, measurement, decision,
-                          len(poses), rows)
+                          len(poses), rows, engine)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(report)
     args.out.with_suffix(".json").write_text(json.dumps(
-        {"dlg": dlg, "n_poses": len(poses), "protonation": args.protonation,
+        {"poses_file": dlg, "engine": engine,
+         "n_poses": len(poses), "protonation": args.protonation,
          "measurement": measurement, "verdict": decision,
          "all_poses": rows}, indent=2) + "\n")
     print(report)
@@ -533,11 +554,11 @@ def _run_gate(args, workdir: Path) -> int:
 
 
 def _run_reproducibility(args, workdir: Path) -> int:
-    from dock_autodock_gpu import parse_dlg
+    paths, parse, _engine = _pose_source(args)
 
     per_seed = []
-    for dlg in args.dlg:
-        poses = parse_dlg(Path(dlg).read_text())
+    for dlg in paths:
+        poses = parse(Path(dlg).read_text())
         top = best_pose(poses)
         if top["affinity"] is None:
             raise ValueError(f"{dlg}: top pose carries no parsed affinity; "
@@ -579,7 +600,7 @@ def main(argv=None) -> int:
 
     missing = [f for f in ([args.receptor] if not args.reproducibility else [])
                + ([args.reference] if not args.reproducibility else [])
-               + list(args.dlg) if not Path(f).exists()]
+               + list(args.dlg or args.poses) if not Path(f).exists()]
     if missing:
         sys.stderr.write("missing input file(s): " + ", ".join(missing) + "\n")
         return 2
