@@ -430,32 +430,64 @@ done
 
 ---
 
-## 5. 복합체 변환 → PLIP (cpu64)
+## 5. 기하 필터 → PLIP (cpu64)
+
+**§4의 AutoDock-GPU 경로는 폐기됐다(§3b).** 아래는 Uni-Dock 출력 기준이다.
+
+### 5.1 포즈 수 검수 — 파일 개수를 세지 말 것
+
+Uni-Dock은 `MODEL` 블록이 없는 파일을 쓰고도 exit 0으로 끝난다. 포즈 0개인 리간드는 **도킹 실패**이지 필터 탈락이 아니며, 둘을 섞으면 통과율의 분모가 틀어진다.
 
 ```bash
 for ARM in TL-A-prime TL-C; do
-  python scripts/poses_to_complex.py \
-      --in  docking/v2/poses/${ARM} \
-      --out docking/v2/complexes/${ARM}
-
-  python scripts/run_plip.py \
-      --in      docking/v2/complexes/${ARM} \
-      --reports docking/v2/plip_reports/${ARM} \
-      --out     results/v2_${ARM}/plip.csv \
-      --jobs 64
-
-  python scripts/pose_geometry.py \
-      --poses    docking/v2/poses/${ARM} \
-      --receptor docking/v2/receptor.pdbqt \
-      --out      results/v2_${ARM}/geometry.csv
+  case $ARM in TL-A-prime) WANT=4514 ;; TL-C) WANT=5212 ;; esac
+  python scripts/pose_census.py --pose-dir docking/v2/unidock/$ARM --expected $WANT \
+      --out-csv results/v2_${ARM}/pose_census.csv \
+      --out-json results/v2_${ARM}/pose_census.json
 done
 ```
 
-**PLIP은 `cpu64`에서 돌릴 것.** GPU 구현이 없다. `8gpu` 파티션은 GPU 사용 여부와 무관하게 시간당 8 node-hour를 과금하므로 거기서 돌리면 할당량만 태운다. 포즈당 약 1초이고 두 아암 합쳐 약 85,000 포즈이므로 64코어에서 30분대다.
+측정값(2026-09-29): TL-A′ 중앙값 3개·평균 4.10, TL-C 중앙값 6개·평균 6.62, 포즈 0개 리간드 없음. **두 아암의 포즈 수가 계통적으로 다르므로** 기하 게이트 통과율은 리간드 단위와 포즈 수 층화 두 가지로 보고한다 — 근거는 `results/v2_redock_gate_decision.md`.
 
-주의: `plip`과 `obabel`이 기본 PATH에 없으면 **절대경로**를 쓸 것. PLIP은 XML을 `<stem>_report.xml`로 쓴다(`report.xml`이 아니다).
+### 5.2 기하 필터 (§8.5b)
 
----
+```bash
+for ARM in TL-A-prime TL-C; do
+  python scripts/poses_to_sdf.py \
+      --pose-dir docking/v2/unidock/${ARM} \
+      --out-sdf  docking/v2/unidock/${ARM}_poses.sdf
+
+  python scripts/pose_geometry.py \
+      --poses    docking/v2/unidock/${ARM}_poses.sdf \
+      --receptor docking/v2/receptor_h.pdb \
+      --out-csv  results/v2_${ARM}/geometry.csv \
+      --out-sdf  docking/v2/unidock/${ARM}_passing.sdf
+done
+```
+
+`--receptor` 기본값은 v1의 `docking/receptor.pdb`다. **반드시 명시할 것.**
+
+### 5.3 PLIP — 포즈 단위, cpu64
+
+포즈마다 복합체를 만들고 PLIP을 돌려 한 줄씩 쓴다. 약 53,000 포즈.
+
+```bash
+for ARM in TL-A-prime TL-C; do
+  python scripts/plip_batch.py \
+      --pose-dir docking/v2/unidock/${ARM} \
+      --receptor docking/v2/receptor_h.pdb \
+      --out-csv  results/v2_${ARM}/plip.csv \
+      --jobs 64
+done
+```
+
+**`cpu64`에서 돌릴 것.** PLIP에는 GPU 구현이 없고, `8gpu`는 GPU 사용 여부와 무관하게 시간당 8 node-hour를 과금한다.
+
+`plip`과 `obabel`이 기본 PATH에 없으면 `--plip-bin`에 절대경로를 준다. **`LD_LIBRARY_PATH`가 설정된 셸에서 돌리지 말 것** — §0의 Open Babel ABI 충돌.
+
+CSV에는 §8.0의 네 기준(`metal_ca501`, `hbond_asn224`, `tyr178_contact`, `hydrophobic_pocket`)과 **상호작용 종류별 원시 개수**가 함께 들어간다. cpd 25 기반 게이트 결정이 아직 나지 않았고, **기록하지 않은 기준은 나중에 적용할 수 없기 때문이다** — v1이 포즈 42,419개를 버려 어떤 기준도 소급 적용하지 못한 것이 이 규칙의 출처다.
+
+PLIP이 처리하지 못한 포즈는 `status` 열에 사유를 달고 **CSV에 남는다.** 빼버리면 하류의 모든 통과율이 조용히 분모를 잃는다.
 
 ## 6. 여기서 멈춘다
 
