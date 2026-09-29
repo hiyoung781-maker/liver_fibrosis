@@ -6,14 +6,13 @@
 엔진이 Vina에서 AD4로 바뀌므로 affinity 값은 v1(Uni-Dock/Vina)과 비교할 수
 없다. PLN-1474의 기준값도 이 엔진에서 새로 산출한다.
 
-FORMAT CAVEAT: autodock_gpu is not installed anywhere on this machine (checked:
-not on PATH, not in any conda env), so the .dlg parser below could not be run
-against real output. The DOCKED:-prefixed .dlg format with an "Estimated Free
-Energy of Binding" line is the classic AutoDock4-lineage output that
-AutoDock-GPU inherits (it implements the AD4 scoring function over precomputed
-grid maps), and AutoDock-GPU also offers an alternate --xmloutput mode this
-module does NOT handle. Treat parse_dlg as UNVERIFIED against a real binary
-until confirmed on K-BDS -- see results/v2_EXECUTION_CHECKLIST.md.
+FORMAT CONFIRMED against the real binary (v1.6-20-gbe06a13) on K-BDS: the
+DOCKED:-prefixed .dlg with an "Estimated Free Energy of Binding" line is what
+AutoDock-GPU writes, and parse_dlg reads it (20 poses off the control ligand,
+affinities -5.89/-6.23/-6.30/-6.30/-6.02). Two things that run entails:
+AutoDock-GPU also offers an alternate --xmloutput mode this module does NOT
+handle, and the DOCKED blocks come out in RUN order, NOT energy order -- see
+validate_redock.best_pose, which sorts explicitly rather than taking poses[0].
 
 BATCH CLI. Task 16 drives this module as `python scripts/dock_autodock_gpu.py
 --ligands <index> --maps <dir> --out <dir>`, so a batch entry point is provided
@@ -39,14 +38,14 @@ Two changes from the original one-process-per-ligand design:
 1. --filelist batching. AutoDock-GPU issues one invocation per SHARD now, not
    per ligand, using --filelist instead of --lfile: a bare per-ligand process
    reloads the grid maps every time, and with ~9,726 ligands that reload
-   overhead can exceed the docking itself. FILELIST FORMAT CAVEAT: the layout
-   written here (first line the .fld path, then one line of ligand PDBQT path
-   followed by one line of its --resnam output name, per ligand) is what
-   AutoDock-GPU's batch mode is documented to expect, but it could NOT be
-   verified against the real binary -- it is not installed on this
-   development machine. This is UNVERIFIED in the same sense as parse_dlg's
-   FORMAT CAVEAT above, and must be confirmed with a two-ligand test run
-   before the full 9,726-ligand batch -- see results/v2_EXECUTION_CHECKLIST.md.
+   overhead can exceed the docking itself. FILELIST FORMAT CONFIRMED against
+   the real binary: first line the .fld path, then one line of ligand PDBQT
+   path followed by one line of its --resnam output name, per ligand. The
+   layout was never wrong; the trap was that AutoDock-GPU resolves any
+   RELATIVE path in a filelist against the FILELIST's own directory, which
+   made a correct-looking filelist produce zero .dlg files. write_filelist
+   resolves all three path kinds -- see its docstring. Full run: 8 shards,
+   4,514 + 5,212 .dlg files, every shard log ending "ran without errors."
 
 2. --devnum, not CUDA_VISIBLE_DEVICES. --devnum is AutoDock-GPU's own device
    selector and avoids a layer of indirection, but it COUNTS FROM 1, not 0.
@@ -184,8 +183,8 @@ def run_batch(ligands_index: str, maps_dir: str, out_dir: str, gpus: int = 1,
 
     Ligands are split round-robin over `gpus` shards (dock_unidock.split_index,
     so the round-robin logic and its size-class reasoning live in exactly one
-    place). Each shard gets one --filelist batch file (write_filelist -- see
-    its UNVERIFIED format note) and one autodock_gpu invocation pinned to its
+    place). Each shard gets one --filelist batch file (write_filelist -- every
+    path in it absolute, see its docstring) and one autodock_gpu invocation pinned to its
     device via --devnum, which counts from 1: shard index `device` (zero-based)
     is pinned with `--devnum device + 1`.
     """

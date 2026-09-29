@@ -51,6 +51,12 @@ autodock_gpu --help | head -5 || true
 eval "$(conda shell.bash hook)"
 conda activate "${ENV_NAME:-reinvent}"
 
+# autodock_gpu is linked against a newer libstdc++ than the compute nodes ship.
+# Observed on the cluster: it aborts at start with a GLIBCXX version error while
+# the conda env already carries a new enough libstdc++ in its own lib directory.
+# This MUST come after `conda activate`, since $CONDA_PREFIX is what that sets.
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+
 LIGANDS="${LIGANDS:-docking/v2/ligands_pdbqt/ligands.txt}"
 MAPS="${MAPS:-docking/v2/maps}"
 OUT="${OUT:-docking/v2/dlg}"
@@ -60,10 +66,12 @@ mkdir -p "$OUT"
 
 echo
 echo "== AutoDock-GPU batch run: $LIGANDS -> $OUT ($GPUS shards) =="
-echo "REMINDER: the --filelist layout written by write_filelist() is UNVERIFIED" \
-     "against the real binary (see the Task 9 AMENDMENT note in" \
-     "results/v2_EXECUTION_CHECKLIST.md). Confirm it on a two-ligand test before" \
-     "trusting this run's output at scale."
+# The --filelist layout and the .dlg parser are both CONFIRMED against the real
+# binary (v1.6-20-gbe06a13) on the cluster: 8 shards, 4,514 + 5,212 .dlg files,
+# every shard log ending "All jobs (N) ran without errors." The one trap found
+# was that AutoDock-GPU resolves relative paths in a filelist against the
+# FILELIST's own directory, which write_filelist now avoids by resolving all
+# three path kinds -- see its docstring.
 python scripts/dock_autodock_gpu.py --ligands "$LIGANDS" --maps "$MAPS" \
     --out "$OUT" --gpus "$GPUS"
 
