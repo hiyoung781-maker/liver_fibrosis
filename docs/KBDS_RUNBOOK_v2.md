@@ -215,6 +215,9 @@ PATH=$HOME/miniconda3/envs/docking/bin:$PATH \
 시드를 바꿔 대조군을 다시 도킹한 뒤, 시드별 `.dlg`를 한꺼번에 넘긴다.
 
 ```bash
+# 대조군 한 줄만 뽑아 인덱스를 만든다 (--ligands 는 PDBQT 경로 목록이다)
+grep CONTROL_crystal docking/v2/ligand_index_TL-A-prime.txt > docking/v2/control_index.txt
+
 for S in 1 2 3 4 5 6 7 8 9 10; do
   python scripts/dock_autodock_gpu.py \
       --ligands docking/v2/control_index.txt --maps docking/v2/maps \
