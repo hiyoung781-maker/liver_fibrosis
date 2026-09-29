@@ -1,0 +1,10 @@
+{
+  "stage_1_geometry": 222,
+  "stage_2_caco2": 77,
+  "stage_3_affinity": 48,
+  "stage_4_toxicity": 0,
+  "leads": [],
+  "admet_missing": [
+    "CONTROL_crystal"
+  ]
+}
