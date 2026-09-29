@@ -31,6 +31,39 @@ __all__ = ["convert_dir", "poses_from_pdbqt"]
 RDLogger.DisableLog("rdApp.*")
 
 
+def mol_from_pdbqt_block(text: str, name: str = "pose"):
+    """One RDKit molecule from a PDBQT MODEL block, through Meeko.
+
+    OPEN BABEL IS NOT USED HERE, AND THAT IS THE POINT. A Meeko PDBQT carries
+    its own `REMARK SMILES`, so the bond orders are recorded rather than
+    guessed -- while Open Babel infers them from coordinates and gets fused
+    N-heterocycles wrong. Measured on this project's own crystal ligands: it
+    reduced 6MK0's aromatic 1,8-naphthyridine to a tetrahydronaphthyridine and
+    turned 9CZD's tetrahydronaphthyridine into an imine, inverting the
+    hydrogen-bonding character of the group that binds alphaV Asp218 in both.
+    8W30's A1AFA has no such ring, which is the only reason the alphaVbeta1
+    path was unharmed.
+
+    Returns None rather than raising, so one bad pose cannot stop a batch.
+    """
+    from meeko import PDBQTMolecule, RDKitMolCreate
+
+    try:
+        with rdBase.BlockLogs():
+            pdbqt = PDBQTMolecule(text, name=name, skip_typing=True)
+            mols = RDKitMolCreate.from_pdbqt_mol(pdbqt)
+    except Exception:  # noqa: BLE001 - one pose must not stop a batch
+        return None
+    for mol in mols or []:
+        if mol is not None and mol.GetNumConformers():
+            single = Chem.Mol(mol)
+            single.RemoveAllConformers()
+            single.AddConformer(mol.GetConformer(0), assignId=True)
+            single.SetProp("_Name", name)
+            return single
+    return None
+
+
 def poses_from_pdbqt(path: str, label: str | None = None) -> list[Chem.Mol]:
     """Every pose in one Uni-Dock output PDBQT, as RDKit molecules with coordinates.
 

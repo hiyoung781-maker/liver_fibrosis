@@ -212,24 +212,30 @@ def _probe(command: list, label: str) -> Optional[str]:
 
 
 def _pose_to_sdf(pdbqt_path: Path, sdf_path: Path) -> None:
-    """Convert one docked pose to SDF, saying what Open Babel said on failure.
+    """Convert one docked pose to SDF through MEEKO, not Open Babel.
 
-    capture_output hides stderr inside the exception, so a CalledProcessError
-    reached the user naming only the command -- the same swallowed-reason
-    defect fixed in run_plip. Open Babel's own message is raised instead.
+    A Meeko PDBQT carries its own `REMARK SMILES`, so bond orders are read
+    back rather than inferred. Open Babel infers them from coordinates and
+    gets fused N-heterocycles wrong -- measured on this project's crystal
+    ligands, it reduced 6MK0's aromatic 1,8-naphthyridine and turned 9CZD's
+    tetrahydronaphthyridine into an imine, inverting the hydrogen-bonding
+    character of the alphaV-binding head in both.
     """
-    probe = subprocess.run(["obabel", str(pdbqt_path), "-osdf", "-O",
-                            str(sdf_path)], capture_output=True, timeout=120)
-    message = (probe.stderr or b"").decode("utf-8", "replace").strip()
-    if probe.returncode != 0:
+    from rdkit import Chem
+
+    from poses_to_sdf import mol_from_pdbqt_block
+
+    mol = mol_from_pdbqt_block(Path(pdbqt_path).read_text(),
+                               name=Path(pdbqt_path).stem)
+    if mol is None:
         raise ValueError(
-            f"obabel exited {probe.returncode} converting {pdbqt_path}:\n"
-            + "\n".join(message.splitlines()[-10:]))
-    if not sdf_path.exists() or sdf_path.stat().st_size == 0:
-        # Open Babel can exit 0 having written nothing; that is a failure here.
-        raise ValueError(
-            f"obabel exited 0 but wrote no molecule to {sdf_path}"
-            + (f":\n{message}" if message else ""))
+            f"Meeko could not rebuild a molecule from {pdbqt_path}. A PDBQT "
+            "without a usable REMARK SMILES cannot be read back without "
+            "guessing its bond orders, and guessing is the defect this path "
+            "exists to avoid.")
+    writer = Chem.SDWriter(str(sdf_path))
+    writer.write(mol)
+    writer.close()
 
 
 def _load_reference(reference: str, workdir: Path):

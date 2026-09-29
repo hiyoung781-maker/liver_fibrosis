@@ -88,3 +88,66 @@ RCSB 검색 API(UniProt 정합) + Data API로 각 아이소폼의 전체 구조�
 2. §10.3 재도킹 검증 — 각 구조의 자체 리간드를 같은 프로토콜로, RMSD < 2.0 Å + PLIP 금속 배위. **통과 못 하면 그 아이소폼 제외**
 3. §10.4 보정 게이트 — 참조 6종만으로 실행 가능, 필터 결과와 무관
 4. §9.1 필터 통과 분자에 대한 Δ 계산과 rank-sum
+
+
+---
+
+# 철회 (2026-09-30) — §10.3 두 판정 모두 무효, 리간드 전처리 결함
+
+**두 아이소폼 게이트는 결정 리간드가 아닌 분자를 도킹했다.** 판정을 철회하고 재실행한다.
+
+## 원인 — Open Babel의 결합차수 추정
+
+`prepare_isoform.py`가 `ligand.pdb`를 `obabel -osdf`로 변환했다. Open Babel은 결합차수를 **좌표에서 추정**하며, 융합 N-헤테로고리에서 실패한다. PDB 화학성분사전(CCD)과 대조한 결과:
+
+| 리간드 | CCD (정답) | Open Babel이 만든 것 | 오류 |
+|---|---|---|---|
+| **JUY** (6MK0) | `c3ccc4cccnc4n3` — **방향족** 1,8-나프티리딘 | `c1ccc2c(n1)NCCC2` — 테트라하이드로 | **이중결합 3개 환원.** 수용체 N이 공여체 N–H로 |
+| **A1A6H** (9CZD) | `c3ccc4c(n3)NCCC4` — 테트라하이드로나프티리딘 | `c2ccc3c(n2)N=CCC3` — 이민 | **공여체 N–H가 sp2 수용체로** |
+| A1AFA (8W30) | `c1ccc(cc1)C[C@@H](C(=O)O)NC(=O)c2ccc(cc2Cl)Cl` | 동일 | **없음** |
+
+두 오류 모두 **αV 서브유닛 Asp218에 결합하는 Arg-mimic 머리**에 있고, 수소결합 공여/수용 성질을 반대로 뒤집는다. 고리 기하와 Meeko가 그 위에 세우는 회전결합 트리도 함께 틀어진다.
+
+**8W30이 무사했던 이유가 이것으로 설명된다.** A1AFA는 페닐알라닌 아마이드로 융합 N-헤테로고리가 없어, 추정이 틀릴 것이 없었다. αvβ1 게이트는 유효하고 두 아이소폼 게이트는 무효다 — 두 아이소폼이 같은 5.5 Å에서 실패한 공통 원인이 여기 있었다.
+
+도킹된 포즈 PDBQT의 `REMARK SMILES`를 Meeko로 읽어 확인했다. 기록된 분자가 실제로 틀린 형태다.
+
+## 앞선 감사가 이것을 놓친 이유
+
+수용체·금속·참조 좌표·Fab 제거·RMSD 계산을 모두 점검했고 전부 정상이었다. **리간드의 화학 자체는 점검 대상에 없었다.** RMSD 참조가 "결정 좌표와 일치"한다는 확인은 좌표만 본 것이고, 그 좌표에 얹힌 분자가 결정 리간드와 같은 분자인지는 묻지 않았다.
+
+## 수정
+
+`scripts/ligand_template.py` — 결합차수를 **기탁된 화학성분에서** 가져온다. 연결성은 좌표에서, 결합차수는 템플릿에서. 템플릿이 추출된 리간드와 맞지 않으면 **예외를 던진다** — 그럴듯한 무언가를 만들어내는 것이 애초에 잘못된 분자를 도킹하게 만든 경로다.
+
+`prepare_isoform.py`는 이제 `--ligand-ccd` 또는 `--ligand-smiles`를 **요구**하며, obabel을 쓰지 않는다. 다섯 글자 CCD 코드는 PDB 잔기 칸에 안 맞아 잘리므로(9CZD의 A1A6H가 파일에는 A1A) 전체 id를 줘야 한다.
+
+재실행 결과:
+
+| | 템플릿 | 산출 SMILES |
+|---|---|---|
+| avb3 | JUY | `O=C(CCCCc1ccc2cccnc2n1)NCC[C@H](NC(=O)c1nc2ccccc2s1)C(=O)O` |
+| avb6 | A1A6H | `O=C(O)[C@H](c1cc(F)ccc1[C@@H]1CCCCO1)N1CC[C@@H](OCCCCc2ccc3c(n2)NCCC3)C1` |
+
+입체화학도 복원됐다 — Open Babel은 주지 못했다.
+
+## Open Babel을 전처리에서 걷어냈다
+
+포즈 변환 두 곳도 Meeko로 바꿨다. Meeko가 만든 PDBQT는 `REMARK SMILES`에 결합차수를 **기록**하므로 읽어서 복원하면 되고, 추측할 이유가 없다.
+
+| 위치 | 이전 | 이후 |
+|---|---|---|
+| `validate_redock._pose_to_sdf` | `obabel -osdf` | `poses_to_sdf.mol_from_pdbqt_block` (Meeko) |
+| `poses_to_complex._ligand_pdb` | `obabel -opdb -h` | Meeko + `AddHs(addCoords=True)` |
+| `prepare_isoform` 리간드 SDF | `obabel -osdf` | CCD 템플릿 |
+
+테스트 픽스처 `pose_midas*.pdbqt`도 obabel로 만든 것이어서 `REMARK SMILES`가 없었고, Meeko 경로에서 읽히지 않았다. CCD 템플릿 + Meeko로 다시 만들었다 — 실제 파이프라인이 리간드를 만드는 방식과 같아졌다.
+
+## 재실행 필요
+
+1. 두 아이소폼 수용체·리간드 재준비 (완료, 로컬)
+2. **두 아이소폼 재도킹** (K-BDS)
+3. §10.3 게이트 재판정
+4. 통과하면 §10.4 보정 게이트와 Δ 축으로 진행
+
+αvβ1 쪽 결과는 영향받지 않는다. A1AFA에 이 오류가 없었고, 그 게이트의 RMSD는 원자 순서 대응으로 독립 검증됐다.

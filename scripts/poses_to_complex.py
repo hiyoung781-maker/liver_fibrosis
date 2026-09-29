@@ -167,17 +167,28 @@ def midas_link_record(lig_lines: list, receptor_lines: list,
 
 
 def _ligand_pdb(pose_pdbqt: str, out: Path) -> str:
-    """Add explicit hydrogens to the docked ligand pose and convert to PDB.
+    """Rebuild the docked pose through MEEKO and write it as PDB with hydrogens.
 
-    -h adds hydrogens appropriate for the existing bonding/charges in the
-    PDBQT; it does not take a pH argument (unlike -p, which is avoided here
-    and everywhere else in this project because it has been observed to
-    silently drop metal ions from receptor structures).
+    PLIP computes donor-H...acceptor angles, so the ligand needs explicit
+    hydrogens, and it needs them on the RIGHT molecule. A Meeko PDBQT records
+    its bond orders in `REMARK SMILES`; Open Babel, which this used to call,
+    infers them from coordinates and gets fused N-heterocycles wrong -- it
+    reduced 6MK0's aromatic 1,8-naphthyridine and turned 9CZD's
+    tetrahydronaphthyridine into an imine, which inverts donor and acceptor
+    in the group that binds alphaV Asp218.
+
+    AddHs(addCoords=True) places hydrogens geometrically and leaves every
+    heavy atom where the docking put it.
     """
-    subprocess.run(
-        ["obabel", pose_pdbqt, "-opdb", "-O", str(out), "-h"],
-        check=True, capture_output=True, timeout=120,
-    )
+    from rdkit import Chem
+
+    from poses_to_sdf import mol_from_pdbqt_block
+
+    mol = mol_from_pdbqt_block(Path(pose_pdbqt).read_text(),
+                               name=Path(pose_pdbqt).stem)
+    if mol is None:
+        raise ValueError(f"Meeko could not rebuild a molecule from {pose_pdbqt}")
+    Chem.MolToPDBFile(Chem.AddHs(mol, addCoords=True), str(out))
     return str(out)
 
 

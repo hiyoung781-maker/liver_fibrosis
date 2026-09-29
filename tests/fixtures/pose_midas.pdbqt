@@ -1,46 +1,43 @@
-REMARK  Name = docking/ligand_crystal.pdb
-REMARK  from 8W30; A1AFA renamed LIG (5-char CCD code exceeds PDB resName field)
-REMARK  5 active torsions:
-REMARK  status: ('A' for Active; 'I' for Inactive)
-REMARK    1  A    between atoms: C4_1  and  C7_4
-REMARK    2  A    between atoms: N_5  and  CA_6
-REMARK    3  A    between atoms: CA_6  and  C_7
-REMARK    4  A    between atoms: CA_6  and  CB_9
-REMARK    5  A    between atoms: CB_9  and  CG_10
-REMARK                            x       y       z     vdW  Elec       q    Type
-REMARK                         _______ _______ _______ _____ _____    ______ ____
+REMARK SMILES O=C(N[C@@H](Cc1ccccc1)C(=O)O)c1ccc(Cl)cc1Cl
+REMARK SMILES IDX 4 1 3 2 2 3 1 4 15 6 21 7 16 8 20 9 17 10 18 11 22 12 19 13
+REMARK SMILES IDX 12 14 13 15 14 16 5 18 6 19 7 20 11 21 8 22 10 23 9 24
+REMARK H PARENT 3 5 14 17
 ROOT
-ATOM      1  C7  LIG B 505       1.578 114.244  40.652  1.00  0.00    +0.000 C 
-ATOM      2  N   LIG B 505       2.801 114.864  40.583  1.00  0.00    +0.000 NA
-ATOM      3  O8  LIG B 505       0.858 114.192  41.637  1.00  0.00    +0.000 OA
+ATOM      1  CA  LIG B 505       3.442 115.304  41.805  1.00  0.00    +0.196 C 
 ENDROOT
-BRANCH   1   4
-ATOM      4  C4  LIG B 505       1.155 113.591  39.410  1.00  0.00    +0.000 A 
-ATOM      5  C5  LIG B 505       0.343 112.395  37.088  1.00  0.00    +0.000 A 
-ATOM      6  C6  LIG B 505       0.505 114.333  38.454  1.00  0.00    +0.000 A 
-ATOM      7  C1  LIG B 505       1.403 112.251  39.224  1.00  0.00    +0.000 A 
-ATOM      8  C2  LIG B 505       0.995 111.655  38.052  1.00  0.00    +0.000 A 
-ATOM      9  C3  LIG B 505       0.096 113.733  37.287  1.00  0.00    +0.000 A 
-ATOM     10 CL10 LIG B 505       0.197 116.008  38.711  1.00  0.00    +0.000 Cl
-ATOM     11 CL9  LIG B 505      -0.178 111.661  35.611  1.00  0.00    +0.000 Cl
-ENDBRANCH   1   4
-BRANCH   2  12
-ATOM     12  CA  LIG B 505       3.442 115.304  41.805  1.00  0.00    +0.000 C 
-BRANCH  12  13
-ATOM     13  C   LIG B 505       3.769 116.787  41.823  1.00  0.00    +0.000 C 
-ATOM     14  O   LIG B 505       3.625 117.380  40.720  1.00  0.00    +0.000 OA
-ATOM     15  OXT LIG B 505       4.142 117.229  42.944  1.00  0.00    +0.000 OA
-ENDBRANCH  12  13
-BRANCH  12  16
-ATOM     16  CB  LIG B 505       4.779 114.625  42.054  1.00  0.00    +0.000 C 
-BRANCH  16  17
-ATOM     17  CG  LIG B 505       4.587 113.325  42.761  1.00  0.00    +0.000 A 
-ATOM     18  CD1 LIG B 505       4.657 113.255  44.132  1.00  0.00    +0.000 A 
-ATOM     19  CD2 LIG B 505       4.340 112.177  42.046  1.00  0.00    +0.000 A 
-ATOM     20  CE1 LIG B 505       4.481 112.053  44.778  1.00  0.00    +0.000 A 
-ATOM     21  CE2 LIG B 505       4.166 110.973  42.686  1.00  0.00    +0.000 A 
-ATOM     22  CZ  LIG B 505       4.236 110.909  44.056  1.00  0.00    +0.000 A 
-ENDBRANCH  16  17
-ENDBRANCH  12  16
-ENDBRANCH   2  12
-TORSDOF 5
+BRANCH   1   2
+ATOM      2  N   LIG B 505       2.801 114.864  40.583  1.00  0.00    -0.338 N 
+ATOM      3  C7  LIG B 505       1.578 114.244  40.652  1.00  0.00    +0.253 C 
+ATOM      4  O8  LIG B 505       0.858 114.192  41.637  1.00  0.00    -0.269 OA
+ATOM      5  H   UNL     1       3.258 115.015  39.672  1.00  0.00    +0.164 HD
+BRANCH   3   6
+ATOM      6  C4  LIG B 505       1.155 113.591  39.410  1.00  0.00    +0.058 A 
+ATOM      7  C6  LIG B 505       0.505 114.333  38.454  1.00  0.00    +0.055 A 
+ATOM      8  C1  LIG B 505       1.403 112.251  39.224  1.00  0.00    +0.017 A 
+ATOM      9  C3  LIG B 505       0.096 113.733  37.287  1.00  0.00    +0.041 A 
+ATOM     10  C2  LIG B 505       0.995 111.655  38.052  1.00  0.00    +0.021 A 
+ATOM     11  C5  LIG B 505       0.343 112.395  37.088  1.00  0.00    +0.042 A 
+ATOM     12 CL10 LIG B 505       0.197 116.008  38.711  1.00  0.00    -0.083 Cl
+ATOM     13 CL9  LIG B 505      -0.178 111.661  35.611  1.00  0.00    -0.084 Cl
+ENDBRANCH   3   6
+ENDBRANCH   1   2
+BRANCH   1  14
+ATOM     14  C   LIG B 505       3.769 116.787  41.823  1.00  0.00    +0.326 C 
+ATOM     15  O   LIG B 505       3.625 117.380  40.720  1.00  0.00    -0.250 OA
+BRANCH  14  16
+ATOM     16  OXT LIG B 505       4.142 117.229  42.944  1.00  0.00    -0.480 OA
+ATOM     17  H   UNL     1       4.375 118.186  43.046  1.00  0.00    +0.296 HD
+ENDBRANCH  14  16
+ENDBRANCH   1  14
+BRANCH   1  18
+ATOM     18  CB  LIG B 505       4.779 114.625  42.054  1.00  0.00    +0.072 C 
+BRANCH  18  19
+ATOM     19  CG  LIG B 505       4.587 113.325  42.761  1.00  0.00    -0.045 A 
+ATOM     20  CD1 LIG B 505       4.657 113.255  44.132  1.00  0.00    +0.004 A 
+ATOM     21  CD2 LIG B 505       4.340 112.177  42.046  1.00  0.00    +0.004 A 
+ATOM     22  CE1 LIG B 505       4.481 112.053  44.778  1.00  0.00    +0.000 A 
+ATOM     23  CE2 LIG B 505       4.166 110.973  42.686  1.00  0.00    +0.000 A 
+ATOM     24  CZ  LIG B 505       4.236 110.909  44.056  1.00  0.00    +0.000 A 
+ENDBRANCH  18  19
+ENDBRANCH   1  18
+TORSDOF 6

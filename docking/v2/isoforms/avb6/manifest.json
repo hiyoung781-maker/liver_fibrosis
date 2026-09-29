@@ -11,6 +11,8 @@
     2102
   ],
   "midas_distance": 2.185,
+  "ligand_template": "c1cc(c(cc1F)[C@@H](C(=O)O)N2CC[C@H](C2)OCCCCc3ccc4c(n3)NCCC4)[C@@H]5CCCCO5",
+  "ligand_ccd": "A1A6H",
   "chains_all": [
     "A",
     "B",

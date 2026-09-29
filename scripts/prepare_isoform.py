@@ -33,6 +33,18 @@ Section 10.2's own structure list did not survive review: none of 1L5G,
 written. alphaVbeta3 moved to 6MK0 and alphaVbeta6 to 9CZD; alpha5beta1 and
 alphaVbeta8 have no small-molecule structure in the PDB at all and are
 excluded. See results/v2_isoform_structures.md.
+
+THE LIGAND'S BOND ORDERS COME FROM A TEMPLATE, NEVER FROM GEOMETRY. The
+first version of this script wrote the ligand SDF with Open Babel, which
+infers bond orders from coordinates and got BOTH isoform ligands wrong in
+the Arg-mimic head: 6MK0's aromatic 1,8-naphthyridine came back reduced to a
+tetrahydronaphthyridine, and 9CZD's tetrahydronaphthyridine came back as an
+imine. Each error inverts the hydrogen-bonding character of the group that
+binds the alphaV subunit's Asp218, so the section 10.3 gate asked whether
+the crystal pose of a molecule that was not the crystal ligand could be
+reproduced. --ligand-ccd is therefore required, and scripts/ligand_template
+refuses any template that does not match the extracted ligand. See
+results/v2_isoform_structures.md.
 """
 
 from __future__ import annotations
@@ -40,7 +52,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -283,8 +294,22 @@ def main(argv=None) -> int:
                          "chaperones. See chains_near's docstring for the "
                          "measured per-chain distances.")
     p.add_argument("--site-cutoff", type=float, default=5.0)
-    p.add_argument("--obabel", default="obabel")
+    p.add_argument("--ligand-ccd",
+                    help="The ligand's PDB chemical component id, used to fetch "
+                         "its deposited bond orders. Give the FULL id: a "
+                         "five-character code does not fit the PDB residue "
+                         "field, so 9CZD's A1A6H appears in the file as A1A.")
+    p.add_argument("--ligand-smiles",
+                    help="The template SMILES directly, instead of fetching it.")
     args = p.parse_args(argv)
+
+    if not args.ligand_ccd and not args.ligand_smiles:
+        sys.stderr.write(
+            "one of --ligand-ccd or --ligand-smiles is required. The ligand's "
+            "bond orders are taken from its deposited chemical component, "
+            "never inferred from coordinates: Open Babel's perception got both "
+            "isoform ligands wrong in the group that binds alphaV Asp218.\n")
+        return 2
 
     lines = Path(args.structure).read_text().splitlines()
     found = find_midas_ligand(lines)
@@ -297,14 +322,34 @@ def main(argv=None) -> int:
     (out / "receptor.pdb").write_text("\n".join(receptor + ["END"]) + "\n")
     (out / "ligand.pdb").write_text("\n".join(ligand + ["END"]) + "\n")
 
-    sdf = out / "ligand.sdf"
+    from rdkit import Chem
+
+    from ligand_template import (TemplateMismatchError, assign_from_template,
+                                 ccd_smiles)
+
+    template = args.ligand_smiles
+    if template is None:
+        try:
+            template = ccd_smiles(args.ligand_ccd)
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(
+                f"could not fetch the chemical component {args.ligand_ccd!r}: "
+                f"{exc}\nPass --ligand-smiles instead. Bond orders are never "
+                "inferred from coordinates here -- that is the defect this "
+                "argument exists to prevent.\n")
+            return 1
+
     try:
-        subprocess.run([args.obabel, str(out / "ligand.pdb"), "-osdf",
-                        "-O", str(sdf)], check=True, capture_output=True,
-                       timeout=120)
-    except Exception as exc:  # noqa: BLE001
-        sys.stderr.write(f"obabel could not convert the ligand: {exc}\n")
+        ligand_mol = assign_from_template("\n".join(ligand + ["END"]), template)
+    except TemplateMismatchError as exc:
+        sys.stderr.write(f"{exc}\n")
         return 1
+
+    sdf = out / "ligand.sdf"
+    writer = Chem.SDWriter(str(sdf))
+    ligand_mol.SetProp("_Name", f"XTAL_{out.name}")
+    writer.write(ligand_mol)
+    writer.close()
 
     all_chains = sorted({l[21] for l in lines
                          if l.startswith("ATOM")})
@@ -313,6 +358,8 @@ def main(argv=None) -> int:
         "ligand": list(found["ligand"]),
         "midas_metal": list(found["metal"]),
         "midas_distance": round(found["distance"], 3),
+        "ligand_template": template,
+        "ligand_ccd": args.ligand_ccd,
         "chains_all": all_chains,
         "chains_kept": sorted(keep),
         "chains_dropped": sorted(set(all_chains) - keep),
@@ -324,6 +371,8 @@ def main(argv=None) -> int:
 
     print(f"{args.structure}")
     print(f"  ligand         {found['ligand']}  {len(ligand)} atoms")
+    print(f"  template       {args.ligand_ccd or '(explicit SMILES)'}")
+    print(f"                 {Chem.MolToSmiles(ligand_mol)}")
     print(f"  MIDAS metal    {found['metal']}  at {found['distance']:.2f} A")
     print(f"  chains kept    {sorted(keep)}")
     print(f"  chains dropped {sorted(set(all_chains) - keep) or '(none)'}")
