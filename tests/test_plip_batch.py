@@ -5,8 +5,8 @@ from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from plip_batch import (FIELDS, already_done, iter_poses,
-                        row_from_record, thread_limits)
+from plip_batch import (FIELDS, StaleResumeError, already_done,
+                        iter_poses, row_from_record, thread_limits)
 
 TWO_POSES = """\
 MODEL 1
@@ -104,7 +104,7 @@ class TestResume(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             self.assertEqual(already_done(Path(tmp) / "absent.csv"), set())
 
-    def test_finished_poses_are_read_back_as_label_pose_pairs(self):
+    def test_finished_poses_are_read_back_with_their_affinity(self):
         with TemporaryDirectory() as tmp:
             csv_path = Path(tmp) / "plip.csv"
             csv_path.write_text(
@@ -112,7 +112,7 @@ class TestResume(unittest.TestCase):
                 + "gen_00001,1,-6.9,ok" + ",0" * (len(FIELDS) - 4) + "\n"
                 + "gen_00001,2,-6.8,ok" + ",0" * (len(FIELDS) - 4) + "\n")
             self.assertEqual(already_done(csv_path),
-                             {("gen_00001", 1), ("gen_00001", 2)})
+                             {("gen_00001", 1, "-6.9"), ("gen_00001", 2, "-6.8")})
 
     def test_a_header_only_csv_is_not_mistaken_for_finished_work(self):
         with TemporaryDirectory() as tmp:
@@ -129,7 +129,7 @@ class TestResume(unittest.TestCase):
                 self.HEADER + "\n"
                 + "gen_00001,1,-6.9,ok" + ",0" * (len(FIELDS) - 4) + "\n"
                 + "gen_00002,1,-6.5")
-            self.assertEqual(already_done(csv_path), {("gen_00001", 1)})
+            self.assertEqual(already_done(csv_path), {("gen_00001", 1, "-6.9")})
 
 
 class TestThreadLimits(unittest.TestCase):
@@ -145,6 +145,45 @@ class TestThreadLimits(unittest.TestCase):
         for name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
                      "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
             self.assertIn(name, limits)
+
+
+class TestResumeRefusesAnotherRunsCsv(unittest.TestCase):
+    """A re-docking with corrected protomers produced new poses under the same
+    labels and pose numbers. --resume matched on (label, pose) alone, declared
+    "34485 of 34183 poses already recorded" -- more than exist -- and skipped
+    almost everything, leaving a CSV of the PREVIOUS run's interactions that
+    would have flowed straight into the funnel.
+
+    The affinity is part of the key, so a pose whose docking changed is
+    redone, and a count above the current one is refused outright."""
+
+    HEADER = ",".join(FIELDS)
+
+    def _csv(self, tmp, rows):
+        path = Path(tmp) / "plip.csv"
+        path.write_text(self.HEADER + "\n" + "".join(
+            f"{l},{p},{a},ok" + ",0" * (len(FIELDS) - 4) + "\n"
+            for l, p, a in rows))
+        return path
+
+    def test_a_pose_whose_affinity_changed_is_not_counted_done(self):
+        with TemporaryDirectory() as tmp:
+            path = self._csv(tmp, [("gen_00001", 1, "-6.900")])
+            done = already_done(path)
+            self.assertIn(("gen_00001", 1, "-6.900"), done)
+            self.assertNotIn(("gen_00001", 1, "-7.100"), done)
+
+    def test_more_recorded_than_present_is_refused(self):
+        with TemporaryDirectory() as tmp:
+            path = self._csv(tmp, [("a", 1, "-6.9"), ("a", 2, "-6.8"),
+                                   ("b", 1, "-7.0")])
+            with self.assertRaises(StaleResumeError):
+                already_done(path, n_current=2)
+
+    def test_an_equal_or_smaller_count_resumes_normally(self):
+        with TemporaryDirectory() as tmp:
+            path = self._csv(tmp, [("a", 1, "-6.9"), ("a", 2, "-6.8")])
+            self.assertEqual(len(already_done(path, n_current=5)), 2)
 
 
 if __name__ == "__main__":

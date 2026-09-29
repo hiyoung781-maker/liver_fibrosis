@@ -44,8 +44,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from run_plip import INTERACTION_KINDS
 
-__all__ = ["FIELDS", "already_done", "iter_poses", "row_from_record",
-           "run_pose", "thread_limits"]
+__all__ = ["FIELDS", "StaleResumeError", "already_done", "iter_poses",
+           "row_from_record", "run_pose", "thread_limits"]
+
+
+class StaleResumeError(RuntimeError):
+    """The CSV holds more rows than the pose directory has poses.
+
+    It is therefore another run's output. Resuming onto it skipped 18,524 of
+    18,626 poses after a re-docking with corrected protomers, and reported
+    "34485 of 34183 poses already recorded" -- more than existed -- while
+    writing a file that mixed two runs.
+    """
 
 # poses_to_complex.LIGAND_RESNAME, as PLIP reports it in <identifiers><hetid>.
 PLIP_HETID = "LIG"
@@ -69,8 +79,17 @@ def thread_limits() -> dict:
              "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS")}
 
 
-def already_done(out_csv) -> set:
-    """(label, pose) pairs a previous, interrupted run already wrote.
+def already_done(out_csv, n_current: int | None = None) -> set:
+    """(label, pose, affinity) triples a previous, interrupted run wrote.
+
+    THE AFFINITY IS PART OF THE KEY. Labels and pose numbers repeat across
+    docking runs, so keying on them alone let a re-docking resume onto the
+    PREVIOUS run's file and skip almost every pose. Including the affinity
+    means a pose whose docking changed is measured again, while an identical
+    re-run still resumes.
+
+    `n_current` is the number of poses now present; more rows than that means
+    the file belongs to another run entirely and StaleResumeError is raised.
 
     The interruption lands mid-write, so the final line can be a fragment.
     A short row is dropped rather than counted, because counting it would
@@ -84,9 +103,15 @@ def already_done(out_csv) -> set:
         for row in csv.DictReader(handle):
             if row.get("label") and row.get("pose") and row.get("status"):
                 try:
-                    done.add((row["label"], int(row["pose"])))
+                    done.add((row["label"], int(row["pose"]),
+                              row.get("affinity") or ""))
                 except ValueError:
                     continue
+    if n_current is not None and len(done) > n_current:
+        raise StaleResumeError(
+            f"{path} holds {len(done)} finished poses but the pose directory "
+            f"has {n_current}. It is another run's output -- delete it and "
+            "start over, or point --out-csv somewhere else.")
     return done
 
 
@@ -202,9 +227,16 @@ def main(argv=None) -> int:
         return 2
 
     total = len(entries)
-    done = already_done(args.out_csv) if args.resume else set()
+    try:
+        done = already_done(args.out_csv, len(entries)) if args.resume else set()
+    except StaleResumeError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 2
     if done:
-        entries = [e for e in entries if (e["label"], e["pose"]) not in done]
+        entries = [e for e in entries
+                   if (e["label"], e["pose"],
+                       "" if e["affinity"] is None else f"{e['affinity']}")
+                   not in done]
         print(f"resuming: {len(done)} of {total} poses already recorded")
     print(f"{len(entries)} poses from {args.pose_dir} on {args.jobs} workers",
           flush=True)
