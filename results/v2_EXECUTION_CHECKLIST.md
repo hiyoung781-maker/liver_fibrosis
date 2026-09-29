@@ -177,3 +177,61 @@ AutoDockTools installed) before this step can produce `receptor.maps.fld`.
 `prepare_maps.py`'s own exit status already fails loudly if the computed
 grid does not cover the search box, before autogrid4 would ever be invoked
 on a bad GPF.
+
+## Task 9: AutoDock-GPU execution wrapper and .dlg parser
+
+**Not run in this session:** `autodock_gpu` is not installed anywhere on this
+development machine (not on PATH, not in any conda env). `scripts/dock_autodock_gpu.py`
+implements `build_command` (pins `--nrun 20`, `--seed`, `--ffile`/`--lfile`/`--resnam`),
+`parse_dlg` (returns a pose with `affinity=None` rather than dropping it when the
+energy line is missing — the v1 regression: score extraction must not share a `try`
+with structure parsing), and re-exports `dock_unidock.box_from_ligand` unchanged so
+the search box cannot diverge from Task 8's grid. `tests/test_dock_autodock_gpu.py`
+(13/13) covers all of this against the brief's literal `.dlg` fixture and needs no
+GPU.
+
+**FORMAT UNVERIFIED.** The brief's fixture assumes AutoDock-GPU writes `.dlg` with
+`DOCKED:`-prefixed lines and an `Estimated Free Energy of Binding` field — the
+classic AutoDock4-lineage format AutoDock-GPU inherits (it implements the AD4 scoring
+function over precomputed grid maps, so affinities from this engine are NOT
+comparable to v1's Uni-Dock/Vina numbers; PLN-1474's reference is recomputed on this
+engine separately). AutoDock-GPU also offers an alternate `--xmloutput` mode this
+module does not handle. The binary being absent here means this format could not be
+checked against real output. **Before the large run on K-BDS, run `autodock_gpu` on
+one ligand and diff its actual `.dlg` against the fixture in
+`tests/test_dock_autodock_gpu.py` — if the real format differs (e.g. a different
+energy-line label or block delimiter), `parse_dlg` must be fixed before any batch
+run's poses are trusted.**
+
+**Batch CLI**, added in this task because Task 16 calls it (`build_command`/`parse_dlg`
+alone were the brief's only interfaces):
+
+```bash
+python scripts/dock_autodock_gpu.py --ligands docking/v2/ligands_pdbqt/ligands.txt \
+    --maps docking/v2/maps --out docking/v2/dlg --gpus 8
+```
+
+`--ligands` is a plain-text file, one prepared ligand PDBQT path per line — the same
+convention as `dock_unidock`'s `--ligand_index` and `ligands_to_pdbqt.py`'s index
+output. (Task 16's own brief names this file `<file.smi>`; per the standing pattern
+in this plan of citing a CLI flag or file that turns out not to exist, that name is
+treated as intent rather than a requirement to parse SMILES — AutoDock-GPU takes
+PDBQT, not SMILES.) `--maps` is the directory `prepare_maps.py` + `autogrid4` wrote;
+`find_fld` locates its single `*.maps.fld` file and raises if zero or more than one
+is present, so a mixed-receptor maps directory fails loudly rather than silently
+docking against the wrong grid. The ligand list is split round-robin (via
+`dock_unidock.split_index`) across `--gpus` processes, one `autodock_gpu` process per
+GPU pinned with `CUDA_VISIBLE_DEVICES`, for the same measured reason as Task 6/7's
+split: v1's ligands sort into small/medium/large torsion classes (4,627/3,128/8 at
+ceilings 8/16/20), so a contiguous shard can collect every large ligand and straggle
+long after the rest. Every command requests `NRUN=20` poses per ligand — the
+geometry gate (spec §8.5b) selects by interaction, not score, so a handful of
+energy-ranked poses would defeat it. The splitting/command-construction logic
+(round-robin correctness, `NRUN`, map path wiring) is unit-tested with `dry_run=True`
+in `TestRunBatchSplitting`, without invoking the binary.
+
+**Gate:** `autodock_gpu` must be present on K-BDS before this batch run can execute;
+`shutil.which` is checked before any subprocess is spawned (absent `--dry-run`) and
+the CLI exits 1 with a pointer to this checklist entry if it is not found. The format
+caveat above must be resolved (or `parse_dlg` corrected) before batch `.dlg` output is
+trusted for the geometry gate.
