@@ -43,6 +43,41 @@ class TestGridCoversSearchBox(unittest.TestCase):
             self.assertTrue(maps_cover_box(gpf, BOX))
 
 
+class TestReceptorPathIsAbsolute(unittest.TestCase):
+    def test_receptor_line_is_absolute(self):
+        """autogrid4 must be invoked with the maps directory as its working
+        directory (gridfld/map/elecmap/dsolvmap are all resolved relative to
+        it). If the receptor line instead carries the caller's relative path
+        (e.g. "docking/v2/receptor.pdbqt"), autogrid4 fails with 'can't find
+        or open receptor PDBQT file' -- an error that names a missing file,
+        not a path-resolution problem, so it sends the reader looking in the
+        wrong place. Writing an absolute path avoids that failure entirely."""
+        with TemporaryDirectory() as tmp:
+            gpf = write_gpf(BOX, "docking/receptor.pdbqt", Path(tmp) / "r.gpf")
+            receptor_line = [l for l in Path(gpf).read_text().splitlines()
+                              if l.startswith("receptor ")][0]
+            receptor_path = receptor_line.split(maxsplit=1)[1]
+            self.assertTrue(Path(receptor_path).is_absolute())
+
+    def test_map_and_gridfld_filenames_stay_bare_basenames(self):
+        """map/gridfld/elecmap/dsolvmap filenames must stay relative to the
+        working directory, since that's how autogrid4 writes its outputs
+        into the maps directory; absolutising them would scatter the maps
+        instead of collecting them there."""
+        with TemporaryDirectory() as tmp:
+            gpf = write_gpf(BOX, "docking/receptor.pdbqt", Path(tmp) / "r.gpf")
+            text = Path(gpf).read_text().splitlines()
+            for prefix in ("gridfld ", "elecmap ", "dsolvmap "):
+                line = [l for l in text if l.startswith(prefix)][0]
+                fname = line.split(maxsplit=1)[1]
+                self.assertFalse(Path(fname).is_absolute())
+                self.assertEqual(fname, Path(fname).name)
+            for line in [l for l in text if l.startswith("map ")]:
+                fname = line.split(maxsplit=1)[1]
+                self.assertFalse(Path(fname).is_absolute())
+                self.assertEqual(fname, Path(fname).name)
+
+
 class TestCalciumIsTyped(unittest.TestCase):
     def test_gpf_requests_a_calcium_map(self):
         """The MIDAS Ca2+ is the single most important contact in this binding

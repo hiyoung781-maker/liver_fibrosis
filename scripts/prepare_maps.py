@@ -60,7 +60,7 @@ def write_gpf(box: dict, receptor: str, out: Path) -> str:
         f"spacing {SPACING}",
         f"receptor_types {' '.join(RECEPTOR_TYPES)}",
         f"ligand_types {' '.join(LIGAND_TYPES)}",
-        f"receptor {receptor}",
+        f"receptor {Path(receptor).resolve()}",
         f"gridcenter {cx:.3f} {cy:.3f} {cz:.3f}",
         "smooth 0.5",
     ]
@@ -126,7 +126,8 @@ def main(argv: list[str] | None = None) -> int:
 
     glg_path = gpf_path.with_suffix(".glg")
     print("\nautogrid4 is not run by this script. To generate the maps where "
-          "autogrid4 is available, run:")
+          "autogrid4 is available, run (the GPF's receptor path is absolute "
+          "for this reason -- autogrid4 must run from inside the maps dir):")
     print(f"  (cd {out_dir} && autogrid4 -p {gpf_path.name} -l {glg_path.name})")
     return 0
 
