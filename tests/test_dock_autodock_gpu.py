@@ -5,7 +5,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from dock_autodock_gpu import NRUN, build_command, find_fld, parse_dlg, run_batch
+from dock_autodock_gpu import (NRUN, build_command, build_filelist_command,
+                               find_fld, parse_dlg, run_batch, write_filelist)
 
 DLG = """\
 DOCKED: MODEL        1
@@ -91,14 +92,62 @@ class TestFindFld(unittest.TestCase):
                 find_fld(tmp)
 
 
+class TestWriteFilelist(unittest.TestCase):
+    """write_filelist의 배치 파일 레이아웃 - UNVERIFIED, 실제 바이너리로 두
+    리간드짜리 시험 실행을 거쳐 확인해야 한다 (모듈 docstring/체크리스트 참고)."""
+
+    def test_fld_first_then_ligand_and_resnam_alternating(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            path = write_filelist("receptor.maps.fld",
+                                  ["a.pdbqt", "b.pdbqt"],
+                                  str(tmp_path / "out"),
+                                  str(tmp_path / "filelist_0.txt"))
+            lines = Path(path).read_text().splitlines()
+            self.assertEqual(lines[0], "receptor.maps.fld")
+            self.assertEqual(lines[1], "a.pdbqt")
+            self.assertEqual(lines[2], str(tmp_path / "out" / "a"))
+            self.assertEqual(lines[3], "b.pdbqt")
+            self.assertEqual(lines[4], str(tmp_path / "out" / "b"))
+
+
+class TestBuildFilelistCommand(unittest.TestCase):
+    def test_uses_filelist_not_lfile(self):
+        """CHANGE 1: 배치 경로는 리간드 하나당 프로세스가 아니라 샤드당
+        --filelist 배치 파일 하나를 쓴다."""
+        cmd = build_filelist_command("shard0.txt", devnum=1, seed=42)
+        self.assertIn("--filelist", cmd)
+        self.assertIn("shard0.txt", cmd)
+        self.assertNotIn("--lfile", cmd)
+
+    def test_devnum_counts_from_one(self):
+        """CHANGE 2: --devnum은 1부터 센다 (CUDA_VISIBLE_DEVICES와 다르게).
+        여기서 어긋나면 조용히 엉뚱한 GPU로 가거나, GPU가 더 적은 장비에서
+        실패한다."""
+        cmd = build_filelist_command("shard0.txt", devnum=1, seed=42)
+        self.assertIn("--devnum", cmd)
+        self.assertEqual(cmd[cmd.index("--devnum") + 1], "1")
+
+    def test_nrun_20_on_every_filelist_command(self):
+        cmd = build_filelist_command("shard0.txt", devnum=1, seed=42)
+        self.assertIn("--nrun", cmd)
+        self.assertEqual(cmd[cmd.index("--nrun") + 1], "20")
+
+
 class TestRunBatchSplitting(unittest.TestCase):
-    """run_batch의 리간드 분배/명령 구성 로직만 검증한다 - dry_run=True라서
-    autodock_gpu 바이너리는 전혀 호출되지 않는다 (이 머신에는 설치돼 있지 않다)."""
+    """run_batch의 리간드 분배/샤드별 filelist/명령 구성 로직만 검증한다 -
+    dry_run=True라서 autodock_gpu 바이너리는 전혀 호출되지 않는다 (이 머신에는
+    설치돼 있지 않다)."""
 
     def _make_index(self, tmp: Path, n: int) -> str:
         index = tmp / "ligands.txt"
         index.write_text("\n".join(f"lig_{i:03d}.pdbqt" for i in range(n)) + "\n")
         return str(index)
+
+    def _filelist_ligands(self, filelist_path: str) -> list[str]:
+        lines = Path(filelist_path).read_text().splitlines()
+        # line 0 is the fld path; ligand paths are the odd-position entries.
+        return [Path(lines[i]).name for i in range(1, len(lines), 2)]
 
     def test_round_robin_not_contiguous(self):
         """v1의 근거: 리간드가 small/medium/large 크기 클래스로 나뉘어(4627/3128/8,
@@ -115,16 +164,14 @@ class TestRunBatchSplitting(unittest.TestCase):
                              gpus=3, shard_dir=str(tmp_path / "shards"),
                              dry_run=True)
 
-            shard0_ligs = [Path(cmd[cmd.index("--lfile") + 1]).name
-                          for cmd in plan["shards"][0]["commands"]]
-            shard1_ligs = [Path(cmd[cmd.index("--lfile") + 1]).name
-                          for cmd in plan["shards"][1]["commands"]]
+            shard0_ligs = self._filelist_ligands(plan["shards"][0]["filelist"])
+            shard1_ligs = self._filelist_ligands(plan["shards"][1]["filelist"])
             self.assertEqual(shard0_ligs, ["lig_000.pdbqt", "lig_003.pdbqt",
                                            "lig_006.pdbqt"])
             self.assertEqual(shard1_ligs, ["lig_001.pdbqt", "lig_004.pdbqt",
                                            "lig_007.pdbqt"])
 
-    def test_every_ligand_gets_a_command_and_none_are_dropped_or_duplicated(self):
+    def test_every_ligand_gets_into_exactly_one_shards_filelist(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             (tmp_path / "maps").mkdir()
@@ -135,13 +182,12 @@ class TestRunBatchSplitting(unittest.TestCase):
                              gpus=4, shard_dir=str(tmp_path / "shards"),
                              dry_run=True)
 
-            all_ligs = [Path(cmd[cmd.index("--lfile") + 1]).name
-                       for info in plan["shards"].values()
-                       for cmd in info["commands"]]
+            all_ligs = [lig for info in plan["shards"].values()
+                       for lig in self._filelist_ligands(info["filelist"])]
             self.assertEqual(sorted(all_ligs),
                              sorted(f"lig_{i:03d}.pdbqt" for i in range(11)))
 
-    def test_every_command_uses_nrun_20_and_the_discovered_fld(self):
+    def test_every_shard_command_uses_nrun_20_filelist_and_the_discovered_fld(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             (tmp_path / "maps").mkdir()
@@ -155,9 +201,35 @@ class TestRunBatchSplitting(unittest.TestCase):
 
             self.assertEqual(plan["fld"], str(fld))
             for info in plan["shards"].values():
-                for cmd in info["commands"]:
-                    self.assertIn(str(fld), cmd)
-                    self.assertEqual(int(cmd[cmd.index("--nrun") + 1]), 20)
+                cmd = info["command"]
+                self.assertIn("--filelist", cmd)
+                self.assertNotIn("--lfile", cmd)
+                self.assertEqual(int(cmd[cmd.index("--nrun") + 1]), 20)
+                # fld path lives inside the shard's filelist, not on the cmdline.
+                self.assertEqual(Path(info["filelist"]).read_text().splitlines()[0],
+                                 str(fld))
+
+    def test_shard_0_gets_devnum_1_and_shard_3_gets_devnum_4(self):
+        """CHANGE 2, pinned at the run_batch level: shard index 0 (0-based,
+        matching dock_unidock.split_index) must map to --devnum 1 and shard
+        index 3 to --devnum 4. An off-by-one here silently docks on the wrong
+        GPU or fails on a machine with fewer devices."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            (tmp_path / "maps").mkdir()
+            (tmp_path / "maps" / "receptor.maps.fld").write_text("x")
+            index = self._make_index(tmp_path, 40)
+
+            plan = run_batch(index, str(tmp_path / "maps"), str(tmp_path / "out"),
+                             gpus=4, shard_dir=str(tmp_path / "shards"),
+                             dry_run=True)
+
+            cmd0 = plan["shards"][0]["command"]
+            cmd3 = plan["shards"][3]["command"]
+            self.assertEqual(cmd0[cmd0.index("--devnum") + 1], "1")
+            self.assertEqual(cmd3[cmd3.index("--devnum") + 1], "4")
+            self.assertEqual(plan["shards"][0]["devnum"], 1)
+            self.assertEqual(plan["shards"][3]["devnum"], 4)
 
 
 if __name__ == "__main__":

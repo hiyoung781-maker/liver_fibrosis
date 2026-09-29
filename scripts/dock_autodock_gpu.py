@@ -32,6 +32,30 @@ CLI flag or file five times already, that name is treated as intent, not a
 requirement to parse SMILES here -- AutoDock-GPU takes PDBQT ligands, not
 SMILES, so the index-of-paths convention is what the rest of this codebase
 already uses and is what this CLI implements.)
+
+AMENDMENT (real --help now known, v1.6-20-gbe06a13 built on the cluster).
+Two changes from the original one-process-per-ligand design:
+
+1. --filelist batching. AutoDock-GPU issues one invocation per SHARD now, not
+   per ligand, using --filelist instead of --lfile: a bare per-ligand process
+   reloads the grid maps every time, and with ~9,726 ligands that reload
+   overhead can exceed the docking itself. FILELIST FORMAT CAVEAT: the layout
+   written here (first line the .fld path, then one line of ligand PDBQT path
+   followed by one line of its --resnam output name, per ligand) is what
+   AutoDock-GPU's batch mode is documented to expect, but it could NOT be
+   verified against the real binary -- it is not installed on this
+   development machine. This is UNVERIFIED in the same sense as parse_dlg's
+   FORMAT CAVEAT above, and must be confirmed with a two-ligand test run
+   before the full 9,726-ligand batch -- see results/v2_EXECUTION_CHECKLIST.md.
+
+2. --devnum, not CUDA_VISIBLE_DEVICES. --devnum is AutoDock-GPU's own device
+   selector and avoids a layer of indirection, but it COUNTS FROM 1, not 0.
+   Shard index 0 (this module's internal, zero-based numbering, matching
+   dock_unidock.split_index) maps to --devnum 1, shard index 1 to --devnum 2,
+   and so on. An off-by-one here silently sends work to the wrong GPU, or
+   fails outright on a machine with fewer devices than the highest shard
+   implies -- it is made explicit here (`device + 1`) rather than left to an
+   implicit CUDA_VISIBLE_DEVICES-style zero base.
 """
 
 from __future__ import annotations
@@ -45,8 +69,8 @@ from pathlib import Path
 
 from dock_unidock import box_from_ligand, split_index  # noqa: F401  (재수출)
 
-__all__ = ["NRUN", "build_command", "parse_dlg", "box_from_ligand",
-           "find_fld", "run_batch"]
+__all__ = ["NRUN", "build_command", "build_filelist_command", "write_filelist",
+           "parse_dlg", "box_from_ligand", "find_fld", "run_batch"]
 
 NRUN = 20
 
@@ -54,8 +78,45 @@ _ENERGY = re.compile(r"Estimated Free Energy of Binding\s*=\s*(-?\d+\.\d+)")
 
 
 def build_command(fld: str, ligand: str, out_prefix: str, seed: int) -> list[str]:
+    """Single-ligand invocation. Kept for callers that dock one ligand at a
+    time (e.g. the two-ligand filelist-format verification run); the batch
+    path (run_batch) no longer uses this -- see build_filelist_command."""
     return ["autodock_gpu", "--ffile", fld, "--lfile", ligand,
             "--resnam", out_prefix, "--nrun", str(NRUN), "--seed", str(seed)]
+
+
+def write_filelist(fld: str, ligands: list[str], out_dir: str,
+                   filelist_path: str) -> str:
+    """Write one AutoDock-GPU --filelist batch file for a shard.
+
+    UNVERIFIED FORMAT: first line is the .fld map descriptor path, then for
+    each ligand a line with its PDBQT path followed by a line with its
+    --resnam output name (the ligand's stem). This is what AutoDock-GPU's
+    batch mode is documented to expect, but it has not been confirmed against
+    the real binary on this machine -- see the module docstring's AMENDMENT
+    note and results/v2_EXECUTION_CHECKLIST.md. Must be verified with a
+    two-ligand test before the full run.
+    """
+    lines = [fld]
+    for ligand in ligands:
+        resnam = str(Path(out_dir) / Path(ligand).stem)
+        lines.append(ligand)
+        lines.append(resnam)
+    path = Path(filelist_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n")
+    return str(path)
+
+
+def build_filelist_command(filelist: str, devnum: int, seed: int) -> list[str]:
+    """One autodock_gpu invocation per shard, batched via --filelist.
+
+    devnum is AutoDock-GPU's own --devnum, which COUNTS FROM 1 (not 0, unlike
+    CUDA_VISIBLE_DEVICES). Callers pass `device + 1` for a zero-based shard
+    index -- see the module docstring's AMENDMENT note.
+    """
+    return ["autodock_gpu", "--filelist", filelist, "--devnum", str(devnum),
+            "--nrun", str(NRUN), "--seed", str(seed)]
 
 
 def parse_dlg(text: str) -> list[dict]:
@@ -107,12 +168,14 @@ def find_fld(maps_dir: str) -> str:
 def run_batch(ligands_index: str, maps_dir: str, out_dir: str, gpus: int = 1,
              shard_dir: str = "docking/ligand_shards", seed: int = 42,
              dry_run: bool = False) -> dict:
-    """One `autodock_gpu` process per ligand, ligand list split round-robin over GPUs.
+    """One `autodock_gpu` process per SHARD, batched via --filelist.
 
-    Mirrors dock_unidock.run_multi_gpu: one GPU per process (AutoDock-GPU does not
-    itself batch across ligands), CUDA_VISIBLE_DEVICES pins each shard's device, and
-    the split reuses dock_unidock.split_index so the round-robin logic - and its
-    size-class reasoning - lives in exactly one place.
+    Ligands are split round-robin over `gpus` shards (dock_unidock.split_index,
+    so the round-robin logic and its size-class reasoning live in exactly one
+    place). Each shard gets one --filelist batch file (write_filelist -- see
+    its UNVERIFIED format note) and one autodock_gpu invocation pinned to its
+    device via --devnum, which counts from 1: shard index `device` (zero-based)
+    is pinned with `--devnum device + 1`.
     """
     fld = find_fld(maps_dir)
     shards = split_index(ligands_index, gpus, shard_dir)
@@ -123,21 +186,21 @@ def run_batch(ligands_index: str, maps_dir: str, out_dir: str, gpus: int = 1,
     for device, shard in enumerate(shards):
         ligands = [line.strip() for line in Path(shard).read_text().splitlines()
                    if line.strip()]
-        commands = [build_command(fld, lig, str(Path(out_dir) / Path(lig).stem),
-                                  seed)
-                    for lig in ligands]
+        devnum = device + 1
+        filelist_path = str(Path(shard_dir) / f"filelist_{device}.txt")
+        filelist = write_filelist(fld, ligands, out_dir, filelist_path)
+        command = build_filelist_command(filelist, devnum, seed)
         plan["shards"][device] = {"shard": shard, "n_ligands": len(ligands),
-                                  "commands": commands}
+                                  "filelist": filelist, "devnum": devnum,
+                                  "command": command}
         if dry_run:
             continue
-        env = dict(os.environ, CUDA_VISIBLE_DEVICES=str(device))
         log = os.path.join(out_dir, f"autodock_gpu{device}.log")
         handle = open(log, "w")
-        for cmd in commands:
-            handle.write("  ".join(cmd) + "\n")
-            processes.append((device, cmd, log, handle,
-                              subprocess.Popen(cmd, env=env, stdout=handle,
-                                               stderr=subprocess.STDOUT)))
+        handle.write("  ".join(command) + "\n")
+        processes.append((device, command, log, handle,
+                          subprocess.Popen(command, stdout=handle,
+                                           stderr=subprocess.STDOUT)))
 
     if dry_run:
         return plan

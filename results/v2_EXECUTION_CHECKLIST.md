@@ -236,6 +236,35 @@ the CLI exits 1 with a pointer to this checklist entry if it is not found. The f
 caveat above must be resolved (or `parse_dlg` corrected) before batch `.dlg` output is
 trusted for the geometry gate.
 
+**AMENDMENT (post-build, binary now on the cluster).** With the real `autodock_gpu
+--help` in hand (v1.6-20-gbe06a13), two changes were made to the batch path:
+
+1. **`--filelist` batching, not one process per ligand.** The original batch path
+   issued one `autodock_gpu` process per ligand; with ~9,726 ligands, reloading the
+   grid maps per-process can cost more than the docking itself. `run_batch` now
+   writes one `--filelist` batch file per shard (`write_filelist`) and launches one
+   `autodock_gpu --filelist ...` process per shard instead.
+
+   **FILELIST FORMAT UNVERIFIED**, in the same spirit as the `.dlg` FORMAT CAVEAT
+   above: `write_filelist`'s layout (first line the `.fld` path, then per ligand one
+   line of PDBQT path followed by one line of `--resnam` output name) is what
+   AutoDock-GPU's batch mode is documented to expect, but it has not been run
+   against the real binary — not installed on this development machine.
+   **Before the full ~9,726-ligand run, dock a two-ligand filelist test on K-BDS and
+   confirm both ligands' `.dlg`/output are produced under the expected names before
+   trusting the batch path at scale.**
+
+2. **`--devnum` replaces `CUDA_VISIBLE_DEVICES`**, and it counts from 1, not 0.
+   `run_batch` pins shard index 0 (its own zero-based numbering, matching
+   `dock_unidock.split_index`) to `--devnum 1`, shard 1 to `--devnum 2`, and so on
+   (`device + 1`). An off-by-one here would silently dock on the wrong GPU, or fail
+   outright on a machine with fewer devices — pinned explicitly in code and covered
+   by `tests/test_dock_autodock_gpu.py` (shard 0 → devnum 1, shard 3 → devnum 4).
+
+`NRUN = 20`, round-robin splitting via `dock_unidock.split_index`, `box_from_ligand`
+re-export, and the `--ligands` plain-text-index convention are all unchanged by this
+amendment.
+
 ## Task 10: Redock validation gate, protonation decision, engine reproducibility
 
 **Status as of this entry: not yet run.** `scripts/validate_redock.py` implements
