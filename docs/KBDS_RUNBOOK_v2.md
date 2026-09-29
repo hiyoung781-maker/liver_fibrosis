@@ -6,15 +6,41 @@
 
 ---
 
-## 0. 지금 적용하면 안 되는 것 — 먼저 읽을 것
+## 0. 먼저 읽을 것 — 해결된 결함과 실행 환경
 
-**상호작용 게이트(`scripts/interaction_gate.py`)를 이번 실행에서 적용하지 말 것.**
+### PLIP 금속 사이트 분리 결함 — **해결됨** (커밋 `aa1155a`)
 
-Task 13의 대조군이 결함을 찾았다. PLIP은 배포된 8W30에서 리간드와 MIDAS 칼슘을 `A1A-CA`라는 **하나의 복합 사이트**로 묶으므로 hetid 선택이 2.62 Å 금속 배위를 본다. 그런데 `scripts/poses_to_complex.py`가 만든 복합체에서는 `LIG` 사이트의 `metal_complexes`가 **0건**이고 칼슘이 자기 사이트로 분리된다.
+Task 13의 대조군이 찾았던 결함이다. PLIP은 배포된 8W30에서 리간드와 MIDAS 칼슘을 `A1A-CA`라는 하나의 복합 사이트로 묶지만, `poses_to_complex.py`가 만든 복합체에서는 `LIG` 사이트의 `metal_complexes`가 0건이고 칼슘이 자기 사이트로 분리됐다. 게이트 기준 (a) MIDAS 금속 배위가 변환기로 만든 **모든** 복합체에서 조용히 실패하는 상태였다.
 
-결과: 게이트 기준 (a) MIDAS 금속 배위가 **변환기로 만든 모든 복합체에서 조용히 실패**한다. 캠페인의 모든 포즈가 변환기를 거치므로 통과율 0%가 화학적으로 보이는 숫자로 보고된다.
+원인은 화학이 아니라 파일 형식이었다. PLIP은 입력 PDB에 두 잔기를 잇는 **`LINK` 레코드**가 있을 때만 리간드와 금속을 하나의 복합 리간드로 묶는다(`structure/preparation.py:129`에서 LINK을 파싱하고 `identify_kmers`가 그것만으로 클러스터링한다). 변환기가 ATOM/HETATM만 남겼기 때문에 LINK이 사라졌고, 다른 사이트에 속한 리간드 원자는 그 사이트 금속의 배위 후보가 될 수 없으므로 2.62 Å 접촉이 **두 사이트 어디에도** 보고되지 않았다.
 
-**따라서 이번 실행의 범위는 "포즈와 PLIP 레코드를 만들어 저장하는 것"까지다.** 게이트는 저장된 레코드에 나중에 적용하므로, 계산을 먼저 돌려도 아무것도 낭비되지 않는다. 자세한 내용은 `results/v2_plip_validation.md`.
+`poses_to_complex.py`가 이제 MIDAS LINK을 쓴다. 실측 대조:
+
+| | `LIG` 사이트 | Ca B501 사이트 |
+|---|---|---|
+| LINK 없음 | `metal_complexes` **0건** | coordination 3 (Ser132 2.45, Ser134 2.50, Glu229 2.39) — 리간드 접촉 없음 |
+| LINK 있음 | `LIG-CA`, coordination **4**, 리간드 접촉 **2.62 Å** | (병합됨) |
+
+2.62 Å와 coordination 4는 배포 구조 자체의 값이다. 트리거 창(`MIDAS_LINK_CUTOFF = 4.0 Å`)은 상호작용 기준이 아니다 — PLIP 자체 `METAL_DIST_MAX`가 3.0 Å이므로, LINK은 리간드 원자를 후보로 **보이게** 할 뿐 PLIP이 독립적으로 인정하지 않을 배위를 만들어낼 수 없다.
+
+**따라서 상호작용 게이트를 이번 실행에서 적용해도 된다.** §0의 이전 판에 있던 "게이트를 적용하지 말 것" 경고는 철회한다.
+
+### 환경 — 명령마다 두 conda 환경이 갈린다
+
+이 저장소의 도킹 후처리는 RDKit(같은 프로세스)과 Open Babel·PLIP(하위 프로세스)을 함께 쓰는데, 로컬에서는 둘이 서로 다른 환경에 있다. K-BDS에서도 같으면 아래 형태로 실행한다.
+
+```bash
+PATH=$HOME/miniconda3/envs/docking/bin:$PATH \
+~/miniconda3/envs/reinvent/bin/python scripts/<script>.py ...
+```
+
+`autodock_gpu`는 계산 노드가 제공하는 것보다 새 `libstdc++`에 링크되어 있어 GLIBCXX 오류로 죽는다. `conda activate` **뒤에** 다음을 내보낸다(`$CONDA_PREFIX`를 설정하는 것이 activate이므로 순서가 중요하다).
+
+```bash
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+```
+
+`slurm/v2_dock.sbatch`에는 이미 들어가 있다.
 
 ---
 
@@ -161,23 +187,44 @@ python scripts/prepare_maps.py \
 
 ## 3. 재도킹 검증 게이트 — 통과 못 하면 중단
 
+대조군 `CONTROL_crystal`은 **이미 일반 배치에 들어가 도킹됐다**(각 아암의 리간드 인덱스에 들어 있다). 게이트는 그 `.dlg`를 읽는다. 여기서 다시 도킹하면 캠페인이 실제로 쓴 실행이 아닌 다른 실행을 판정하게 되므로 그렇게 하지 않는다.
+
 ```bash
-python scripts/validate_redock.py --protonation neutral --out results/v2_redock_neutral.json
-python scripts/validate_redock.py --protonation anion   --out results/v2_redock_anion.json
+PATH=$HOME/miniconda3/envs/docking/bin:$PATH \
+~/miniconda3/envs/reinvent/bin/python scripts/validate_redock.py \
+    --dlg       docking/v2/poses/TL-A-prime/CONTROL_crystal.dlg \
+    --receptor  docking/v2/receptor_h.pdb \
+    --reference docking/ligand_ref.sdf \
+    --plip-bin  $HOME/miniconda3/envs/docking/bin/plip \
+    --workdir   docking/v2/redock_gate \
+    --out       results/v2_redock_gate.md
 ```
 
+마크다운 리포트와 같은 이름의 JSON이 함께 쓰인다. 통과하면 종료 코드 0, 미통과면 1이다.
+
 **사전등록된 판정 (결과를 보고 바꾸지 말 것)**
-- 통과 조건: 카복실레이트 O → Ca501 ≤ 3.2 Å, 도너 → β1-Asn224 backbone O ≤ 3.5 Å, **대칭보정** RMSD(`rdMolAlign.CalcRMS`) < 2.0 Å. 결정값은 2.62 / 2.63 Å.
+- 통과 조건 네 가지: 카복실레이트 O → Ca501 ≤ 3.2 Å, 도너 → β1-Asn224 backbone O ≤ 3.5 Å, **대칭보정** RMSD(`rdMolAlign.CalcRMS`) < 2.0 Å, 그리고 PLIP이 재도킹 포즈에서 Ca501 금속 배위와 Asn224 수소결합을 **둘 다** 보고할 것. 결정값은 2.62 / 2.63 Å.
+- 게이트는 **affinity 최저 포즈**에 적용된다. AutoDock-GPU는 DOCKED 블록을 에너지 순이 아니라 **run 순**으로 쓴다 — 대조군 `.dlg`는 −5.89, −6.23, −6.30, −6.30, −6.02로 시작하므로 첫 블록은 앞 다섯 중 최악이다. `best_pose()`가 명시적으로 정렬한다.
 - RMSD는 반드시 `CalcRMS`로. 인덱스 기반 좌표 뺄셈은 v1에서 0.63 Å 성공을 6.13 Å 실패로 보고했다(원자 순서가 보존되지 않고 분자에 대칭 페닐·다이클로로페닐 고리가 있다).
-- **양성자화 결정:** 결정 접촉을 재현하는 쪽을 채택. 둘 다 재현하면 **음이온**을 택한다(AutoDock4에는 정전기 항이 있어 v1의 중성 선택 근거가 소멸).
+- 거리와 PLIP이 **어긋나면** 리포트의 "Distance/PLIP disagreement" 절에 기록되고, spec §7.4대로 PLIP 판정을 따른다. 거리는 각도를 못 보고 PLIP은 보기 때문이다.
+- **양성자화 결정:** 결정 접촉을 재현하는 쪽을 채택. 둘 다 재현하면 **음이온**을 택한다(AutoDock4에는 정전기 항이 있어 v1의 중성 선택 근거가 소멸). `--protonation` 은 어느 상태를 도킹했는지 리포트에 **기록**만 한다 — 상태 자체는 리간드 준비 단계에서 결정된다.
 - **미통과 시 AutoDock-GPU로 아무것도 거르지 말고** Uni-Dock 체제로 복귀, 그 사실을 기록.
 
 ### 엔진 재현성 측정 (사전등록)
 
+시드를 바꿔 대조군을 다시 도킹한 뒤, 시드별 `.dlg`를 한꺼번에 넘긴다.
+
 ```bash
-python scripts/validate_redock.py --reproducibility \
-    --ligands A1AFA PLN-1474 --seeds 1..10 \
-    --out results/v2_engine_reproducibility.json
+for S in 1 2 3 4 5 6 7 8 9 10; do
+  python scripts/dock_autodock_gpu.py \
+      --ligands docking/v2/control_index.txt --maps docking/v2/maps \
+      --out docking/v2/repro/seed_$S --gpus 1 --seed $S
+done
+
+PATH=$HOME/miniconda3/envs/docking/bin:$PATH \
+~/miniconda3/envs/reinvent/bin/python scripts/validate_redock.py --reproducibility \
+    --dlg docking/v2/repro/seed_*/CONTROL_crystal.dlg \
+    --out results/v2_engine_reproducibility.md
 ```
 
 affinity가 tie-break가 아니라 **하드 필터**가 되었으므로 필요하다. v1에서는 리드 20개 중 5개가 컷오프로부터 0.05 kcal/mol 이내였고, 이는 프로젝트가 스스로 측정한 엔진 간 차이 0.16 kcal/mol보다 작았다. 리드 보고서는 나중에 "컷오프로부터 이 측정 잡음 이내에 몇 개가 있는가"를 반드시 밝혀야 한다.
@@ -204,7 +251,9 @@ done
 
 **포즈 파일을 반드시 보존할 것.** v1은 42,419개 포즈를 남기지 않아 어떤 기준도 소급 적용할 수 없었다.
 
-**출력 형식 미검증 경고:** `parse_dlg`는 AutoDock4 계열의 `DOCKED:` 접두사와 `Estimated Free Energy of Binding` 필드를 가정한다. 바이너리가 로컬에 없어 확인하지 못했다. **대규모 실행 전에 실제 `.dlg` 하나를 열어 형식을 대조할 것.** 어긋나면 포즈 0개나 affinity 전부 `None`이 나오는데 파이프라인은 오류 없이 완주한다.
+**이 단계는 완료됐다.** 실제 바이너리(v1.6-20-gbe06a13)에서 8샤드로 돌아 `TL-A-prime` 4,514개, `TL-C` 5,212개의 `.dlg`가 나왔고 모든 샤드 로그가 `All jobs (N) ran without errors.`로 끝났다. `parse_dlg`의 형식(`DOCKED:` 접두사와 `Estimated Free Energy of Binding`)도 실제 출력에서 확인됐다.
+
+`grep -i error` 로 로그를 검사하지 말 것 — 성공 메시지 안의 "without **errors**"에 걸린다. `grep "^Error:"` 를 쓴다.
 
 ---
 
@@ -241,7 +290,7 @@ done
 
 **아직 구현되지 않은 단계:** Task 14(거리 기록 전용화), 15(cpd 25 기반 게이트 확정), 16(게이트 적용), 17(ADMET·독성), 18(4단 필터·변경 대장), 19(아이소폼 역도킹·rank-sum), 20(리드 선정·성공 판정), 21(블루프린트 수정 21건).
 
-**게이트 적용 전에 반드시 해결할 것:** §0의 금속 사이트 병합 결함.
+**해결됨:** §0의 금속 사이트 병합 결함(커밋 `aa1155a`)과 재도킹 게이트 CLI 미구현(커밋 `6c03fea`). 게이트 적용을 막는 것은 이제 없다.
 
 ---
 
