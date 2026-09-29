@@ -1,0 +1,49 @@
+{
+  "poses_file": "docking/v2/unidock/control_neutral/CONTROL_crystal_out.pdbqt",
+  "engine": "Uni-Dock",
+  "n_poses": 2,
+  "protonation": "neutral",
+  "measurement": {
+    "rank": 1,
+    "affinity": -6.718,
+    "ca_dist": 2.608244237029959,
+    "ca_dist_far": 4.409375919560497,
+    "donor_dist": 2.904238798721621,
+    "rmsd": 0.6556501977565333,
+    "rmsd_note": null,
+    "plip_metal_ca501": true,
+    "plip_hbond_asn224": true,
+    "plip_missing": [
+      "tyr178_contact"
+    ],
+    "complex_pdb": "docking/v2/unidock_gate_neutral/pose_001.complex.pdb",
+    "plip_xml": "docking/v2/unidock_gate_neutral/pose_001_plip/pose_001.complex_report.xml"
+  },
+  "verdict": {
+    "passed": true,
+    "failed": [],
+    "disagreements": []
+  },
+  "all_poses": [
+    {
+      "rank": 1,
+      "affinity": -6.718,
+      "ca_dist": 2.608244237029959,
+      "donor_dist": 2.904238798721621,
+      "rmsd": 0.6556501977565333,
+      "plip_metal_ca501": true,
+      "plip_hbond_asn224": true,
+      "gated": true
+    },
+    {
+      "rank": 2,
+      "affinity": -6.718,
+      "ca_dist": 2.6389852216334955,
+      "donor_dist": 2.8961431249163114,
+      "rmsd": 0.6295763366235763,
+      "plip_metal_ca501": true,
+      "plip_hbond_asn224": true,
+      "gated": false
+    }
+  ]
+}

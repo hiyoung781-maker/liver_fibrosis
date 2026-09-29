@@ -1,0 +1,230 @@
+{
+  "dlg": "docking/v2/poses/TL-A-prime/CONTROL_crystal.dlg",
+  "n_poses": 20,
+  "protonation": "neutral",
+  "measurement": {
+    "rank": 5,
+    "affinity": -6.77,
+    "ca_dist": 2.5655426326607795,
+    "ca_dist_far": 4.502949366803934,
+    "donor_dist": 2.805844079773502,
+    "rmsd": 2.145837895258463,
+    "rmsd_note": null,
+    "plip_metal_ca501": true,
+    "plip_hbond_asn224": true,
+    "plip_missing": [
+      "tyr178_contact"
+    ],
+    "complex_pdb": "docking/v2/redock_gate/pose_005.complex.pdb",
+    "plip_xml": "docking/v2/redock_gate/pose_005_plip/pose_005.complex_report.xml"
+  },
+  "verdict": {
+    "passed": false,
+    "failed": [
+      "rmsd"
+    ],
+    "disagreements": []
+  },
+  "all_poses": [
+    {
+      "rank": 5,
+      "affinity": -6.77,
+      "ca_dist": 2.5655426326607795,
+      "donor_dist": 2.805844079773502,
+      "rmsd": 2.145837895258463,
+      "plip_metal_ca501": true,
+      "plip_hbond_asn224": true,
+      "gated": true
+    },
+    {
+      "rank": 18,
+      "affinity": -6.76,
+      "ca_dist": 2.5592338697352366,
+      "donor_dist": 2.7976340003653104,
+      "rmsd": 2.116630254995812,
+      "plip_metal_ca501": true,
+      "plip_hbond_asn224": true,
+      "gated": false
+    },
+    {
+      "rank": 12,
+      "affinity": -6.5,
+      "ca_dist": 2.553345256717156,
+      "donor_dist": 2.683828981138704,
+      "rmsd": 0.5254579388062796,
+      "plip_metal_ca501": true,
+      "plip_hbond_asn224": true,
+      "gated": false
+    },
+    {
+      "rank": 17,
+      "affinity": -6.5,
+      "ca_dist": 2.5593268646267124,
+      "donor_dist": 2.6687680678545322,
+      "rmsd": 0.5327599237589432,
+      "plip_metal_ca501": true,
+      "plip_hbond_asn224": true,
+      "gated": false
+    },
+    {
+      "rank": 6,
+      "affinity": -6.49,
+      "ca_dist": 2.5485809777207376,
+      "donor_dist": 2.6859659342590363,
+      "rmsd": 0.5187942314111188,
+      "plip_metal_ca501": true,
+      "plip_hbond_asn224": true,
+      "gated": false
+    },
+    {
+      "rank": 8,
+      "affinity": -6.49,
+      "ca_dist": 2.563633944228385,
+      "donor_dist": 2.6663146851037713,
+      "rmsd": 0.5252302958097167,
+      "plip_metal_ca501": true,
+      "plip_hbond_asn224": true,
+      "gated": false
+    },
+    {
+      "rank": 11,
+      "affinity": -6.49,
+      "ca_dist": 2.564122656972552,
+      "donor_dist": 2.673006172832383,
+      "rmsd": 0.5265115469682581,
+      "plip_metal_ca501": true,
+      "plip_hbond_asn224": true,
+      "gated": false
+    },
+    {
+      "rank": 13,
+      "affinity": -6.49,
+      "ca_dist": 2.53489743382252,
+      "donor_dist": 2.7049240285080116,
+      "rmsd": 0.5338972492224241,
+      "plip_metal_ca501": true,
+      "plip_hbond_asn224": true,
+      "gated": false
+    },
+    {
+      "rank": 2,
+      "affinity": -6.48,
+      "ca_dist": 2.5376565961532274,
+      "donor_dist": 2.7030362557686867,
+      "rmsd": 0.51794269602306,
+      "plip_metal_ca501": true,
+      "plip_hbond_asn224": true,
+      "gated": false
+    },
+    {
+      "rank": 4,
+      "affinity": -6.48,
+      "ca_dist": 2.5876665163811197,
+      "donor_dist": 2.6970250276925505,
+      "rmsd": 0.5142678378927739,
+      "plip_metal_ca501": true,
+      "plip_hbond_asn224": true,
+      "gated": false
+    },
+    {
+      "rank": 7,
+      "affinity": -6.48,
+      "ca_dist": 2.541798969234191,
+      "donor_dist": 2.6921428268203,
+      "rmsd": 0.5211559703721577,
+      "plip_metal_ca501": true,
+      "plip_hbond_asn224": true,
+      "gated": false
+    },
+    {
+      "rank": 15,
+      "affinity": -6.48,
+      "ca_dist": 2.5303507661982345,
+      "donor_dist": 2.697786685414546,
+      "rmsd": 0.5198221723907994,
+      "plip_metal_ca501": true,
+      "plip_hbond_asn224": true,
+      "gated": false
+    },
+    {
+      "rank": 16,
+      "affinity": -6.48,
+      "ca_dist": 2.54712897199965,
+      "donor_dist": 2.6906155429566683,
+      "rmsd": 0.5397600055917106,
+      "plip_metal_ca501": true,
+      "plip_hbond_asn224": true,
+      "gated": false
+    },
+    {
+      "rank": 19,
+      "affinity": -6.48,
+      "ca_dist": 2.5210924219472743,
+      "donor_dist": 2.7076883129341205,
+      "rmsd": 0.5248769985781081,
+      "plip_metal_ca501": true,
+      "plip_hbond_asn224": true,
+      "gated": false
+    },
+    {
+      "rank": 20,
+      "affinity": -6.48,
+      "ca_dist": 2.4887195502908703,
+      "donor_dist": 2.7025302958523914,
+      "rmsd": 0.5310053928847872,
+      "plip_metal_ca501": true,
+      "plip_hbond_asn224": true,
+      "gated": false
+    },
+    {
+      "rank": 9,
+      "affinity": -6.47,
+      "ca_dist": 2.5380246255700505,
+      "donor_dist": 2.705331772629749,
+      "rmsd": 0.5250842789495788,
+      "plip_metal_ca501": true,
+      "plip_hbond_asn224": true,
+      "gated": false
+    },
+    {
+      "rank": 10,
+      "affinity": -6.47,
+      "ca_dist": 2.531251864196843,
+      "donor_dist": 2.698159001986358,
+      "rmsd": 0.5260874020022268,
+      "plip_metal_ca501": true,
+      "plip_hbond_asn224": true,
+      "gated": false
+    },
+    {
+      "rank": 3,
+      "affinity": -6.46,
+      "ca_dist": 2.5589421642545958,
+      "donor_dist": 2.686268229347173,
+      "rmsd": 0.5196546493061076,
+      "plip_metal_ca501": true,
+      "plip_hbond_asn224": true,
+      "gated": false
+    },
+    {
+      "rank": 14,
+      "affinity": -6.38,
+      "ca_dist": 11.953983645630434,
+      "donor_dist": 2.6540177090592283,
+      "rmsd": 7.732508727914422,
+      "plip_metal_ca501": false,
+      "plip_hbond_asn224": true,
+      "gated": false
+    },
+    {
+      "rank": 1,
+      "affinity": -5.9,
+      "ca_dist": 3.6377040836219727,
+      "donor_dist": 2.826372586903578,
+      "rmsd": 2.725490806508735,
+      "plip_metal_ca501": false,
+      "plip_hbond_asn224": true,
+      "gated": false
+    }
+  ]
+}
