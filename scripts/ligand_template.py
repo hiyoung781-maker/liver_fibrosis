@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import urllib.request
+from pathlib import Path
 
 from rdkit import Chem, RDLogger
 from rdkit.Chem import AllChem
@@ -79,17 +80,44 @@ def canonical(smiles_or_mol) -> str:
     return Chem.MolToSmiles(mol)
 
 
+# Templates already fetched, committed so a compute node without internet can
+# run the pipeline. The cluster's nodes have none: `--ligand-ccd JUY` failed
+# there with "Name or service not known".
+CACHE_PATH = Path(__file__).resolve().parent.parent / "data" / "ccd_smiles.json"
+
+
+def _cached(comp_id: str):
+    try:
+        return json.loads(CACHE_PATH.read_text()).get(comp_id)
+    except (OSError, ValueError):
+        return None
+
+
 def ccd_smiles(comp_id: str, timeout: int = 60) -> str:
     """The deposited SMILES for a PDB chemical component.
+
+    The repository's cache is consulted first, so a node without internet can
+    still run: data/ccd_smiles.json holds the templates already fetched. A
+    miss falls through to the RCSB API.
 
     NOTE ON COMPONENT IDS. Five-character CCD codes do not fit the PDB
     format's three-character residue field, so a structure converted to PDB
     carries a truncated id -- 9CZD's A1A6H appears as A1A. Pass the full id;
     a truncated one fetches a different compound or nothing.
     """
+    cached = _cached(comp_id)
+    if cached:
+        return cached
+
     url = f"https://data.rcsb.org/rest/v1/core/chemcomp/{comp_id}"
-    with urllib.request.urlopen(url, timeout=timeout) as response:
-        data = json.load(response)
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            data = json.load(response)
+    except OSError as exc:
+        raise TemplateMismatchError(
+            f"{comp_id} is not in {CACHE_PATH.name} and the RCSB API is "
+            f"unreachable ({exc}). Add it to the cache from a machine with "
+            "internet, or pass --ligand-smiles.")
     for preferred in ("OpenEye OEToolkits", None):
         for entry in data.get("pdbx_chem_comp_descriptor", []):
             if entry.get("type") != "SMILES_CANONICAL":
