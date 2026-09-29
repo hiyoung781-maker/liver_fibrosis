@@ -192,12 +192,10 @@ def main(argv: list[str] | None = None) -> int:
               f"{len(passing):8d} "
               f"{overall if overall is None else f'{overall:10.3f}'} {shown}")
 
-    print("\n  A compound with no passing pose is not a failure of the compound. The")
-    print("  panel spans two binding modes - four of its six carry Arg-mimic heads and")
-    print("  bind in the RGD zwitterionic mode - while section 8.5b's filter asks for a")
-    print("  carboxylate on Ca501 AND a donor on beta1-Asn224. The filter selects on")
-    print("  binding mode, not on score, which is why the panel's two best affinities")
-    print("  can be the ones that do not pass.")
+    print("\n  A compound with no passing pose is not a failure of the compound.")
+    print("  Section 8.5b's filter asks for a carboxylate on Ca501 AND a donor on")
+    print("  beta1-Asn224, so it selects on BINDING MODE, not on score - which is")
+    print("  why the panel's best affinity can be a compound that does not pass.")
 
     reference = summary.get(f"{PANEL_PREFIX}PLN-1474")
     if reference is None:
