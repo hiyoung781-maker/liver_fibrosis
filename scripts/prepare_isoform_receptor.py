@@ -39,8 +39,63 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-__all__ = ["binding_site_from_manifest", "metal_present", "prepare",
-           "prepare_crystal_ligand"]
+__all__ = ["StaleInputError", "binding_site_from_manifest", "metal_present",
+           "prepare", "prepare_crystal_ligand", "verify_ligand_provenance"]
+
+
+class StaleInputError(RuntimeError):
+    """The prepared ligand was not made the way this pipeline makes ligands.
+
+    On the cluster, prepare_isoform.py failed -- the old revision was checked
+    out and did not know --ligand-ccd -- and this script and the docking then
+    ran on the Open Babel ligand.sdf left over from before, reproducing the
+    invalid result to three decimal places. Nothing looked wrong because
+    nothing said anything.
+    """
+
+
+def verify_ligand_provenance(isoform_dir) -> bool:
+    """Was ligand.sdf built from the manifest's template? Raises if not.
+
+    Checked by chemistry, not by timestamps: the SDF's canonical SMILES must
+    equal the template's, ignoring stereochemistry and formal charge (the
+    campaign deprotonates its ligands on purpose, spec 7.4).
+    """
+    from rdkit import Chem
+
+    from ligand_template import TemplateMismatchError, canonical
+
+    base = Path(isoform_dir)
+    manifest_path = base / "manifest.json"
+    if not manifest_path.exists():
+        raise StaleInputError(f"{manifest_path} is missing; run prepare_isoform.py")
+    manifest = json.loads(manifest_path.read_text())
+
+    template = manifest.get("ligand_template")
+    if not template:
+        raise StaleInputError(
+            f"{manifest_path} records no ligand_template. It was written by the "
+            "Open Babel path, which inferred bond orders from coordinates and "
+            "got both isoform ligands wrong in the alphaV-binding head. Re-run "
+            "prepare_isoform.py with --ligand-ccd or --ligand-smiles.")
+
+    sdf = base / "ligand.sdf"
+    if not sdf.exists():
+        raise StaleInputError(f"{sdf} is missing; run prepare_isoform.py")
+    mol = next(iter(Chem.SDMolSupplier(str(sdf), removeHs=False)), None)
+    if mol is None:
+        raise StaleInputError(f"{sdf}: RDKit could not read a molecule")
+
+    try:
+        got, want = canonical(Chem.MolToSmiles(mol)), canonical(template)
+    except TemplateMismatchError as exc:
+        raise StaleInputError(f"{sdf}: {exc}")
+    if got != want:
+        raise StaleInputError(
+            f"{sdf} does not match the manifest's template -- it is left over "
+            f"from an earlier preparation:\n    ligand.sdf {got}\n"
+            f"    template   {want}\nRe-run prepare_isoform.py.")
+    return True
 
 
 def binding_site_from_manifest(manifest: dict) -> set:
@@ -106,6 +161,8 @@ def prepare(isoform_dir: str, box_radius: float = 8.0) -> dict:
     from prepare_receptor_pdbqt import (build_meeko_command, run_meeko,
                                         truncate_incomplete_residues)
 
+    verify_ligand_provenance(isoform_dir)
+
     base = Path(isoform_dir)
     manifest = json.loads((base / "manifest.json").read_text())
     receptor_pdb = base / "receptor.pdb"
@@ -151,7 +208,11 @@ def main(argv=None) -> int:
                     help="Meeko --delete_bad_res_from_box_radius.")
     args = p.parse_args(argv)
 
-    report = prepare(args.isoform_dir, args.box_radius)
+    try:
+        report = prepare(args.isoform_dir, args.box_radius)
+    except StaleInputError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 2
     print(f"{report['isoform_dir']}")
     print(f"  box center  ({report['box']['center_x']:.3f}, "
           f"{report['box']['center_y']:.3f}, {report['box']['center_z']:.3f})")
