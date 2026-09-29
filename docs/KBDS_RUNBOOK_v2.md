@@ -53,6 +53,83 @@ for t in unidock autodock_gpu autogrid4 smina obabel plip; do printf '%-14s ' "$
   점수함수에 보이지 않는다"는 것이었다. 그건 Uni-Dock으로 얻을 수 없다.
 - 따라서 `unidock`이 있어도 `autogrid4`와 `autodock_gpu`는 **따로 설치해야 한다.**
 
+### AutoDock4 계열 설치 — 걸릴 함정 세 가지를 먼저 읽을 것
+
+`unidock`·`unidocktools`·Meeko(`mk_prepare_ligand.py`)·Open Babel은 K-BDS에 이미 있다.
+없는 것은 `autogrid4`, `autodock_gpu`, `plip`이다.
+
+```bash
+# PLIP — 쉽다
+pip install plip
+
+# autogrid4 — AutoDock4 배포판의 정적 바이너리. 컴파일 불필요.
+#   https://autodock.scripps.edu/download-autodock4/  (Linux x86_64 tarball)
+#   tarball 안에 autogrid4, autodock4, AD4_parameters.dat, AD4.1_bound.dat 가 있다.
+#   conda 채널에 있으면 그쪽이 더 편하다: conda search -c bioconda autodock
+
+# AutoDock-GPU — CUDA 컴파일
+#   https://github.com/ccsb-scripps/AutoDock-GPU
+#   export GPU_INCLUDE_PATH=$CUDA_HOME/include
+#   export GPU_LIBRARY_PATH=$CUDA_HOME/lib64
+#   make DEVICE=CUDA NUMWI=64
+```
+
+**함정 1 — 바이너리 이름이 `autodock_gpu`가 아니다.** AutoDock-GPU의 Makefile은 work-item
+수를 이름에 붙여 `bin/autodock_gpu_64wi` 같은 파일을 만든다. `scripts/dock_autodock_gpu.py`의
+`build_command`는 `autodock_gpu`를 호출하므로, 빌드 후 심볼릭 링크를 걸거나 PATH에 그 이름으로
+노출해야 한다. 안 하면 `shutil.which("autodock_gpu")` 검사에서 "설치 안 됨"으로 걸린다.
+
+```bash
+ln -s "$(pwd)/bin/autodock_gpu_64wi" ~/bin/autodock_gpu   # 또는 동등한 위치
+command -v autodock_gpu   # 나와야 한다
+```
+
+**함정 2 — autogrid4가 칼슘 원자 타입을 모를 수 있다.** `scripts/prepare_maps.py`는
+`receptor_types`에 `CA`를 넣는다(MIDAS 칼슘은 이 결합 자리에서 가장 중요한 접촉이고, AD4로
+옮기는 이유의 절반이 AD4에 금속 파라미터가 있다는 것이다). AD4 파라미터 파일에 `Ca`가 없으면
+autogrid4가 unknown atom type으로 죽는다. **맵 생성 직후 반드시 확인할 것:**
+
+```bash
+(cd docking/v2/maps && autogrid4 -p receptor.gpf -l receptor.glg)
+grep -i "error\|unknown\|WARNING" docking/v2/maps/receptor.glg | head
+ls docking/v2/maps/*.CA.map      # 칼슘 맵이 실제로 생겼는지
+```
+
+칼슘 맵이 없으면 GPF에 `parameter_file AD4_parameters.dat` 를 추가하고 그 파일을 맵 디렉터리에
+두거나, 파라미터 파일에 Ca 항목을 확인한다. **칼슘 맵 없이 진행하면 금속 상호작용이 아예
+계산되지 않으므로, AD4로 바꾼 이유가 사라진다.**
+
+**함정 3 — `.dlg` 출력 형식이 미검증이다.** `parse_dlg`는 `DOCKED:` 접두사와
+`Estimated Free Energy of Binding` 필드를 가정한다. 로컬에 바이너리가 없어 확인하지 못했다.
+**리간드 하나를 도킹해 실물을 열어보고 대조할 것. 이것을 건너뛰지 말 것.**
+
+```bash
+# 리간드 하나만 시험 도킹
+autodock_gpu --ffile docking/v2/maps/receptor.maps.fld \
+             --lfile <ligand>.pdbqt --resnam /tmp/probe --nrun 20 --seed 42
+head -60 /tmp/probe.dlg                     # DOCKED: 접두사가 있는가
+grep -c "Estimated Free Energy of Binding" /tmp/probe.dlg   # 20이어야 한다
+
+# 파서가 실제로 그 파일을 읽는지
+python - <<'EOF'
+import sys; sys.path.insert(0, "scripts")
+from dock_autodock_gpu import parse_dlg
+poses = parse_dlg(open("/tmp/probe.dlg").read())
+print(f"parsed {len(poses)} poses; affinities: {[p['affinity'] for p in poses[:3]]}")
+assert len(poses) > 0, "파서가 형식을 못 읽는다 — 진행 전에 고칠 것"
+assert poses[0]["affinity"] is not None, "에너지 필드를 못 찾는다"
+EOF
+```
+
+형식이 다르면 `--xmloutput 1` 경로를 쓰거나 파서를 실제 형식에 맞춰야 한다. **형식이 어긋난
+채로 대규모 실행하면 포즈 0개나 affinity 전부 `None`이 나오는데 파이프라인은 오류 없이
+완주한다** — 이 프로젝트에서 세 번 일어난 실패 양식이다(5자 CCD 잔기명이 PDB 열을 넘겨 affinity를
+전부 0으로 만든 것, 나이브 RMSD가 0.63 A 성공을 6.13 A 실패로 보고한 것, Open Babel 질소
+타이핑이 4위 포즈를 1위로 올린 것). 공통점은 전부 그럴듯한 숫자를 냈다는 것이다.
+
+**Uni-Dock은 지우지 말 것.** §3의 사전등록 중단 조항이 AutoDock-GPU 재도킹 검증 실패 시
+Uni-Dock 복귀이고, `scripts/dock_unidock.py`가 그대로 있다.
+
 **검증:** `python -m unittest tests.test_prepare_maps tests.test_dock_autodock_gpu tests.test_run_plip -v`
 (`pytest`는 설치하지 않는다. 이 저장소의 테스트는 전부 `unittest`다.)
 
