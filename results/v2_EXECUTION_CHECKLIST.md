@@ -160,8 +160,12 @@ sampled and post-processed; comparing them is a later task's job.
 development machine (not on PATH, not in any conda env, including the
 `docking` env that has `obabel`/`smina`). `scripts/prepare_maps.py` writes
 and structurally validates the GPF (directive order, even `npts` that cover
-the search box, `gridcenter`, `spacing`, `receptor_types` including `CA` for
-the MIDAS calcium, and the `map`/`elecmap`/`dsolvmap` lines) and gates on
+the search box, `gridcenter`, `spacing`, `receptor_types` derived from the
+receptor PDBQT itself (including `Ca` for the MIDAS calcium -- verified by
+`Ca` appearing in `receptor_types` and autogrid4 completing without an
+unknown-type error, not by a `*.CA.map`/`*.Ca.map` file, since autogrid4
+writes one map per ligand type, not per receptor type), and the
+`map`/`elecmap`/`dsolvmap` lines) and gates on
 `maps_cover_box`, but it does not and cannot invoke `autogrid4`. Left
 runnable via:
 

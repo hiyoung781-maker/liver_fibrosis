@@ -27,15 +27,37 @@ import math
 import sys
 from pathlib import Path
 
-__all__ = ["SPACING", "LIGAND_TYPES", "RECEPTOR_TYPES", "write_gpf", "maps_cover_box"]
+__all__ = ["SPACING", "LIGAND_TYPES", "receptor_types", "write_gpf", "maps_cover_box"]
 
 SPACING = 0.375
 # Elements the generated ligand library uses, plus AD4's polar-hydrogen and
-# H-bond donor/acceptor subtypes.
+# H-bond donor/acceptor subtypes. This is NOT derived from the receptor -- it is
+# the deliberate, closed vocabulary of the generated-molecule campaign (33 tokens,
+# no phosphorus, no iodine's cousin... actually includes I; the point is it is
+# fixed by what the generated ligands can contain, not by what the receptor is).
 LIGAND_TYPES = ["C", "A", "N", "NA", "OA", "S", "SA", "HD", "F", "Cl", "Br", "I"]
-# The receptor's own element set, plus CA for the MIDAS calcium. Without CA here,
-# AutoGrid never writes a calcium map and no metal interaction is scored.
-RECEPTOR_TYPES = ["C", "A", "N", "NA", "OA", "SA", "HD", "CA"]
+
+
+def receptor_types(receptor_path) -> list[str]:
+    """Distinct AutoDock atom types present in a receptor PDBQT.
+
+    The AD4 type is the last whitespace-separated field of each ATOM/HETATM
+    line (conventionally columns 78-79). `obabel -xr -h` (see
+    prepare_receptor_pdbqt.py) adds ALL hydrogens, including non-polar ones,
+    so the receptor can contain types a hand-picked list omits or gets wrong
+    -- e.g. non-polar "H" alongside donor "HD", non-acceptor "S" alongside
+    "SA", and the calcium type is actually "Ca", not "CA". autogrid4 rejects
+    a GPF whose receptor_types count doesn't match the types actually present
+    in the receptor PDBQT, so this must be read from the file itself rather
+    than hardcoded. Order is sorted for determinism.
+    """
+    types = set()
+    for line in Path(receptor_path).read_text().splitlines():
+        if line.startswith(("ATOM", "HETATM")):
+            fields = line.split()
+            if fields:
+                types.add(fields[-1])
+    return sorted(types)
 
 
 def _npts(extent: float) -> int:
@@ -58,7 +80,7 @@ def write_gpf(box: dict, receptor: str, out: Path) -> str:
         f"npts {npts[0]} {npts[1]} {npts[2]}",
         f"gridfld {stem}.maps.fld",
         f"spacing {SPACING}",
-        f"receptor_types {' '.join(RECEPTOR_TYPES)}",
+        f"receptor_types {' '.join(receptor_types(receptor))}",
         f"ligand_types {' '.join(LIGAND_TYPES)}",
         f"receptor {Path(receptor).resolve()}",
         f"gridcenter {cx:.3f} {cy:.3f} {cz:.3f}",

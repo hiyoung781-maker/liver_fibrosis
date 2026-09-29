@@ -85,18 +85,23 @@ command -v autodock_gpu   # 나와야 한다
 ```
 
 **함정 2 — autogrid4가 칼슘 원자 타입을 모를 수 있다.** `scripts/prepare_maps.py`는
-`receptor_types`에 `CA`를 넣는다(MIDAS 칼슘은 이 결합 자리에서 가장 중요한 접촉이고, AD4로
-옮기는 이유의 절반이 AD4에 금속 파라미터가 있다는 것이다). AD4 파라미터 파일에 `Ca`가 없으면
-autogrid4가 unknown atom type으로 죽는다. **맵 생성 직후 반드시 확인할 것:**
+`receptor_types`를 receptor PDBQT 파일에서 실제로 등장하는 타입을 직접 읽어 채운다
+(`receptor_types()` 함수, `prepare_maps.py`). MIDAS 칼슘은 이 결합 자리에서 가장 중요한
+접촉이고, AD4로 옮기는 이유의 절반이 AD4에 금속 파라미터가 있다는 것이다. 주의: PDBQT 상의
+칼슘 타입은 `CA`가 아니라 `Ca`이고, autogrid4는 맵을 리간드 타입(`ligand_types`)마다 하나씩
+만들지 receptor 타입마다 만들지 않으므로 `*.Ca.map` 같은 파일은 애초에 생기지 않는다 -- 칼슘의
+기여는 각 리간드 타입 맵에 이미 녹아 있다. AD4 파라미터 파일에 `Ca`가 없으면 autogrid4가 unknown
+atom type으로 죽는다. **맵 생성 직후 반드시 확인할 것:**
 
 ```bash
 (cd docking/v2/maps && autogrid4 -p receptor.gpf -l receptor.glg)
 grep -i "error\|unknown\|WARNING" docking/v2/maps/receptor.glg | head
-ls docking/v2/maps/*.CA.map      # 칼슘 맵이 실제로 생겼는지
+grep receptor_types docking/v2/maps/receptor.gpf   # Ca가 포함되어 있는지 확인
 ```
 
-칼슘 맵이 없으면 GPF에 `parameter_file AD4_parameters.dat` 를 추가하고 그 파일을 맵 디렉터리에
-두거나, 파라미터 파일에 Ca 항목을 확인한다. **칼슘 맵 없이 진행하면 금속 상호작용이 아예
+`receptor_types`에 `Ca`가 없거나 autogrid4가 unknown atom type 에러로 죽으면, GPF에
+`parameter_file AD4_parameters.dat` 를 추가하고 그 파일을 맵 디렉터리에 두거나, 파라미터
+파일에 Ca 항목을 확인한다. **`receptor_types`에 `Ca`가 없는 채로 진행하면 금속 상호작용이 아예
 계산되지 않으므로, AD4로 바꾼 이유가 사라진다.**
 
 **함정 3 — `.dlg` 출력 형식이 미검증이다.** `parse_dlg`는 `DOCKED:` 접두사와
