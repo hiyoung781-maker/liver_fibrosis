@@ -43,14 +43,30 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-__all__ = ["LIGAND_RESNAME", "MIDAS", "MIDAS_LINK_CUTOFF", "build_complex",
-           "build_many", "midas_link_record"]
+__all__ = ["LIGAND_CHAIN", "LIGAND_RESNAME", "LIGAND_RESSEQ_BASE", "MIDAS",
+           "MIDAS_LINK_CUTOFF", "build_complex", "build_many",
+           "midas_link_record"]
 
 # Three characters is a hard PDB column limit. The deposited 8W30 ligand
 # has a five-character CCD code (A1AFA); PLIP truncates that itself to a
 # three-character hetid, and a residue name that overflows the PDB field
 # has already zeroed every affinity once in this project. "LIG" survives.
 LIGAND_RESNAME = "LIG"
+
+# A docked pose arrives with NO chain id and a placeholder residue number.
+# Open Babel relabels a chain-less HETATM residue as chain Z, while a LINK
+# written from the pose's own columns says chain "" -- and PLIP's
+# identify_kmers looks a residue up as (name, chain, num), does not match
+# ('LIG', '', 1) against ('LIG', 'Z', 1), and DROPS the link silently.
+# Observed on the cluster: the LINK was present in the complex, the sites
+# still came back as separate LIG (chain Z) and CA (chain B), and the section
+# 7.4 gate's metal criterion failed on a 2.57 A contact -- inside PLIP's own
+# 3.0 A METAL_DIST_MAX. The chain is therefore assigned here rather than
+# inherited. B is the MIDAS calcium's own chain, matching how the deposited
+# structure places its ligand; the residue number is the first free one at or
+# above LIGAND_RESSEQ_BASE, so it cannot collide with a receptor residue.
+LIGAND_CHAIN = "B"
+LIGAND_RESSEQ_BASE = 900
 
 # The MIDAS calcium: chain B, residue 501. Ca B502 is 6.44 A from the crystal
 # ligand and does not participate; chain A's four calciums are 35-50 A away.
@@ -68,6 +84,18 @@ MIDAS_LINK_CUTOFF = 4.0
 
 # O, N and S are the metal-complex target elements PLIP recognises.
 _METAL_TARGET_ELEMENTS = {"O", "N", "S"}
+
+
+def _free_resseq(receptor_lines: list, chain: str, base: int) -> int:
+    """First residue number at or above `base` that `chain` does not use."""
+    used = {
+        line[22:26].strip() for line in receptor_lines
+        if line.startswith(("ATOM", "HETATM")) and line[21] == chain
+    }
+    number = base
+    while str(number) in used:
+        number += 1
+    return number
 
 
 def _xyz(line: str) -> tuple[float, float, float]:
@@ -170,6 +198,12 @@ def build_complex(pose_pdbqt: str, receptor_pdb: str, out) -> Optional[str]:
         ]
         if not receptor:
             return None
+        # Stamp an explicit chain and a collision-free residue number onto
+        # every ligand atom BEFORE the LINK is written, so the LINK names the
+        # residue PLIP will actually look up -- see LIGAND_CHAIN above.
+        resseq = _free_resseq(receptor, LIGAND_CHAIN, LIGAND_RESSEQ_BASE)
+        lig_lines = [l[:21] + LIGAND_CHAIN + f"{resseq:>4}" + l[26:]
+                     for l in lig_lines]
         # The LINK must precede the coordinate records: PLIP reads the whole
         # file either way, but a LINK after the ATOM block is not valid PDB
         # and other tools in this pipeline do read the complex.

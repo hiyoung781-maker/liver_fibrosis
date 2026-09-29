@@ -5,8 +5,8 @@ from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from poses_to_complex import (MIDAS, MIDAS_LINK_CUTOFF, build_complex,
-                              build_many, midas_link_record)
+from poses_to_complex import (LIGAND_CHAIN, MIDAS, MIDAS_LINK_CUTOFF,
+                              build_complex, build_many, midas_link_record)
 
 RECEPTOR = "docking/v2/receptor_h.pdb"
 GOOD_POSE = "tests/fixtures/pose_ok.pdbqt"
@@ -14,6 +14,10 @@ BROKEN_POSE = "tests/fixtures/pose_broken.pdbqt"
 # The deposited 8W30 ligand, in the receptor's own frame: its OXT sits
 # 2.62 A from Ca B501, the distance the crystal gate is written against.
 MIDAS_POSE = "tests/fixtures/pose_midas.pdbqt"
+# The same pose with the chain column blanked and resSeq 1 -- how a pose
+# actually arrives from an AutoDock-GPU .dlg. The chain-bearing fixture above
+# hid a real defect for exactly this reason, so both are exercised.
+MIDAS_POSE_NOCHAIN = "tests/fixtures/pose_midas_nochain.pdbqt"
 
 
 class TestComplexBuilding(unittest.TestCase):
@@ -85,8 +89,11 @@ class TestMidasLinkRecord(unittest.TestCase):
             link = next(l for l in Path(out).read_text().splitlines()
                         if l.startswith("LINK"))
             self.assertEqual(link[17:20].strip(), "LIG")
-            self.assertEqual(link[21], MIDAS[0])
-            self.assertEqual(int(link[22:26]), 505)
+            self.assertEqual(link[21], LIGAND_CHAIN)
+            # The residue number is assigned by build_complex, not inherited
+            # from the pose file; TestLigandChainIsExplicit pins that it
+            # matches the ligand's own atoms and collides with nothing.
+            self.assertTrue(link[22:26].strip().isdigit())
             self.assertEqual(link[47:50].strip(), "CA")
             self.assertEqual(link[51], MIDAS[0])
             self.assertEqual(int(link[52:56]), MIDAS[1])
@@ -122,6 +129,59 @@ class TestMidasLinkRecord(unittest.TestCase):
         lig = ["HETATM    1  O   LIG B 505       6.057 118.151  44.471"
                "  1.00  0.00           O  "]
         self.assertIsNone(midas_link_record(lig, []))
+
+
+class TestLigandChainIsExplicit(unittest.TestCase):
+    """A docked pose arrives with no chain id. Open Babel then relabels the
+    chain-less HETATM residue as chain Z, while a LINK written from the
+    original columns says chain "" -- and PLIP's identify_kmers looks the
+    residue up as (name, chain, num), does not find ('LIG', '', 1) against
+    ('LIG', 'Z', 1), and DROPS the link without a word. Observed on the
+    cluster: the LINK was present in the complex, the sites still came back
+    as separate LIG (chain Z) and CA (chain B), and criterion (a) of the
+    section 7.4 gate failed at a 2.57 A contact -- inside PLIP's own 3.0 A
+    METAL_DIST_MAX. build_complex therefore assigns the chain and residue
+    number itself instead of inheriting whatever the pose file carried."""
+
+    def test_ligand_lines_carry_an_explicit_chain(self):
+        with TemporaryDirectory() as tmp:
+            out = build_complex(MIDAS_POSE_NOCHAIN, RECEPTOR, Path(tmp) / "c.pdb")
+            lig = [l for l in Path(out).read_text().splitlines()
+                   if l.startswith("HETATM") and l[17:20] == "LIG"]
+            self.assertTrue(lig)
+            self.assertEqual({l[21] for l in lig}, {LIGAND_CHAIN})
+
+    def test_ligand_residue_number_does_not_collide_with_the_receptor(self):
+        with TemporaryDirectory() as tmp:
+            out = build_complex(MIDAS_POSE_NOCHAIN, RECEPTOR, Path(tmp) / "c.pdb")
+            lines = Path(out).read_text().splitlines()
+            lig_res = {(l[21], l[22:26].strip()) for l in lines
+                       if l.startswith("HETATM") and l[17:20] == "LIG"}
+            self.assertEqual(len(lig_res), 1)
+            receptor_res = {(l[21], l[22:26].strip()) for l in lines
+                            if l.startswith(("ATOM", "HETATM"))
+                            and l[17:20] != "LIG"}
+            self.assertFalse(lig_res & receptor_res)
+
+    def test_link_names_the_same_chain_and_residue_as_the_ligand_atoms(self):
+        # This is the equality PLIP's identify_kmers tests. If it does not
+        # hold, the link is discarded silently and the metal contact vanishes.
+        with TemporaryDirectory() as tmp:
+            out = build_complex(MIDAS_POSE_NOCHAIN, RECEPTOR, Path(tmp) / "c.pdb")
+            lines = Path(out).read_text().splitlines()
+            link = next(l for l in lines if l.startswith("LINK"))
+            lig = next(l for l in lines
+                       if l.startswith("HETATM") and l[17:20] == "LIG")
+            self.assertEqual(link[17:20], lig[17:20])
+            self.assertEqual(link[21], lig[21])
+            self.assertEqual(link[22:26], lig[22:26])
+
+    def test_chainless_pose_still_gets_its_link(self):
+        with TemporaryDirectory() as tmp:
+            out = build_complex(MIDAS_POSE_NOCHAIN, RECEPTOR, Path(tmp) / "c.pdb")
+            self.assertEqual(
+                len([l for l in Path(out).read_text().splitlines()
+                     if l.startswith("LINK")]), 1)
 
 
 if __name__ == "__main__":
