@@ -1,75 +1,53 @@
-"""Convert the docking receptor to PDBQT and prove the MIDAS calcium survived.
+"""Convert the docking receptor to PDBQT with Meeko, and prove the MIDAS calcium
+survived with non-zero charge and correct typing.
 
-Uni-Dock, like every Vina-family engine, wants a PDBQT receptor. That conversion is
-the riskiest step in the whole section 8.5 pipeline, and the risk is plumbing rather
-than science: section 8.5b's filter measures carboxylate-O to Ca501 of chain B, so a
-converter that drops the metal or gives it a nonsensical atom type makes EVERY pose
-fail a distance test - and the failure reads as chemistry, not as a bug.
+WHY MEEKO REPLACED OPEN BABEL, in the order these failures actually happened on the
+cluster:
 
-Two errors of exactly this shape have already happened in this project: a 5-character
-CCD residue name overflowing the PDB resName columns and zeroing every affinity, and
-a naive index-wise RMSD reporting 6.13 A where the true value was 0.63 A. Hence this
-module's real output is not the PDBQT but the verification table.
+1. `obabel -xr -h` produced a PDBQT with ALL partial charges zero. autogrid4 refused
+   it: "No partial atomic charges were found in the receptor PDBQT file". This never
+   mattered in the previous campaign, which used Uni-Dock/Vina - a scoring function
+   with no electrostatic term. AutoDock4 has one, so charges are mandatory. The old
+   script even printed "charge +0.000" for all six calciums and nobody noticed,
+   because nothing downstream checked it.
+2. `obabel ... --partialcharge gasteiger` then failed outright: "0 molecules
+   converted".
+3. Meeko's `mk_prepare_receptor.py` is the purpose-built AutoDock4/Vina receptor
+   preparer and is installed on the cluster. It rejected the structure outright
+   because 25 residues have truncated side chains - unremarkable for a 2.45 A X-ray
+   structure where surface Lys/Arg/Glu/Tyr side chains are unresolved and simply
+   absent from the deposit.
 
-What is checked:
-  1. Ca 501 of chain B is present at all.
-  2. Its coordinates match the source PDB to within a tight tolerance.
-  3. Its assigned AutoDock atom type is reported (not asserted - we record what the
-     converter chose rather than pretending to know what it should be).
-  4. Every receptor atom the filter's second anchor needs - Asn224 backbone O of
-     chain B - is likewise present and unmoved.
-  5. Nothing silently vanished: atom counts before and after, by record type.
-  6. The nitrogen donor/acceptor split, because checks 1-5 all PASSED on a receptor
-     that was energetically wrong.
+THE FIX: truncate to alanine, not delete.
 
-MEASURED FAILURE AND ITS FIX, kept here because checks 1-5 did not catch it.
+Every one of the 25 residues retains exactly backbone + CB. Compare heavy-atom
+counts: LYS has 9 heavy atoms, ARG 11, GLU 9, TYR 12; the observed "heavy_miss" from
+Meeko for each matches losing everything past CB. In every case the 5 atoms that
+remain are exactly N, CA, C, O, CB - and that set IS alanine's complete heavy-atom
+content. So renaming the residue to ALA with those five atoms unmoved makes it match
+Meeko's template with zero coordinate change and no atom deleted. Truncating an
+unresolved side chain to alanine is standard crystallographic/modeling practice; the
+point of this module is to make it loud and auditable rather than silent.
 
-`obabel -xr` on the hydrogen-free receptor.pdb typed 1,170 of its 1,212 nitrogens as
-`NA`, AutoDock's H-bond ACCEPTOR. In a protein without hydrogens Open Babel cannot
-tell a backbone amide NH (a donor) from an acceptor, so it defaulted nearly all of
-them to acceptor, rewriting the H-bond landscape of the whole protein. Cost: the same
-smina, ligand, box and settings scored -6.9 against receptor.pdb and -6.4 against that
-receptor.pdbqt.
+BINDING-SITE RESIDUES ARE NEVER TRUNCATED. The pose gate measures contacts to Ca
+B/501, Asn B/224, Leu B/225, Tyr A/178 and Asp A/218. Silently alanine-ing one of
+those would turn a measured contact into a missing one and the pipeline would report
+a plausible-looking pass rate instead of an error. `truncate_incomplete_residues`
+raises instead.
 
-The fix is `-h`: add hydrogens before writing the PDBQT, so donor and acceptor become
-decidable. Typing flips from 1,170 NA / 42 N to 101 NA / 1,111 N, with 1,592 HD polar
-hydrogens, and smina scores -6.9 again - identical to the PDB.
+CALCIUM CHARGE. Gasteiger charges handle metals poorly and may leave calcium at
+0.000, same failure mode as obabel, just quieter (autogrid4 does not refuse a file
+with SOME nonzero charges). Ca2+ carries formal charge +2 and AutoDockTools assigns
+the same; a zero charge would mean the MIDAS calcium contributes nothing to the
+electrostatic map, which is the entire reason this campaign switched from Vina to
+AutoDock4. `fix_calcium_charges` corrects and reports this.
 
-What that mis-typing did to the section 8.5(a) control is worth stating exactly,
-because it is subtle. On the corrected receptor smina's pose ranking is
-  pose 1  -6.909  Ca 2.740  Asn224 2.895  PASSES
-  pose 4  -6.670  Ca 2.357  Asn224 4.832  fails
-and pose 4 is precisely what Uni-Dock had been returning as its best. The engine was
-not finding a wrong pose; the mis-typed receptor was promoting the fourth-best pose to
-first. smina and Uni-Dock agree to within 0.1 kcal/mol on the same receptor file.
-
-Feeding Uni-Dock the raw PDB is NOT the fix - it scored -5.787 with the carboxylate
-4.59 A off the calcium, worse than either PDBQT. The hydrogenated PDBQT is the input
-to use.
-
-PROTONATION STATE, stated because the blueprint repeatedly describes this project as
-building an ANION and the docking does not model one.
-
-`-h` takes no pH argument, but the receptor it produces is already correct where it
-matters: Asp and Glu carry ZERO polar hydrogens on their carboxyl oxygens, and
-Glu229 - the residue coordinating the MIDAS calcium - comes out with OE1 and OE2 both
-typed `OA`. That is the deprotonated pH 7.4 form.
-
-`obabel -p 7.4` must NOT be used. It drops all six calcium ions and both section 8.5b
-anchors. Measured, and worth keeping in mind: smina still scored -6.9 against that
-calcium-free receptor, so the score alone looks healthy. The anchor check is what
-caught it.
-
-The LIGAND is docked as the neutral acid, and that is a choice rather than an
-oversight. Measured on the control, neutral COOH against deprotonated COO-:
-  neutral  -6.896  Ca 2.719  Asn224 2.900  6 of 20 poses pass
-  anion    -6.738  Ca 2.811  Asn224 2.903  4 of 20 poses pass
-Both reproduce the crystal contacts; the neutral form scores slightly better. Vina's
-function has no electrostatic term, so an anion gains nothing from its charge and
-loses one HD donor. The neutral form is also what section 8.5(a)'s -6.9 validation was
-measured on, what section 8.0's Uncharger produces, and what the RL objective's
-carboxylate SMARTS expects. Docking anions would mean revalidating all of it for no
-measurable gain.
+NITROGEN TYPING is still checked for the same reason as before: the previous
+Open-Babel-without-hydrogens conversion typed 1,170 of 1,212 nitrogens as acceptors
+(should be mostly donors), promoting a fourth-best pose to first. The healthy split
+measured with hydrogens present was 101 NA / 1,111 N. Meeko adds hydrogens itself, so
+this should hold, but it is exactly the kind of check that "should hold" and then
+silently doesn't.
 """
 
 from __future__ import annotations
@@ -78,15 +56,25 @@ import argparse
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 __all__ = [
     "ANCHORS",
+    "TOLERANCE",
+    "STANDARD_HEAVY_ATOMS",
+    "BINDING_SITE_RESIDUES",
+    "BindingSiteTruncationError",
     "compare_anchors",
-    "convert_with_obabel",
     "read_pdb_atoms",
     "read_pdbqt_atoms",
+    "truncate_incomplete_residues",
+    "build_meeko_command",
+    "fix_calcium_charges",
+    "verify_receptor",
 ]
 
 # (chain, resSeq, resName, atomName) -> label. The two atoms section 8.5b measures.
@@ -96,6 +84,33 @@ ANCHORS = {
 }
 
 TOLERANCE = 0.01  # A. A rigid conversion must not move anything at all.
+
+# Standard heavy-atom (non-hydrogen) counts for the 20 amino acids, including OXT
+# is NOT counted here (OXT is a terminal-residue extra, not part of the standard
+# residue template).
+STANDARD_HEAVY_ATOMS = {
+    "ALA": 5, "ARG": 11, "ASN": 8, "ASP": 8, "CYS": 6, "GLN": 9, "GLU": 9,
+    "GLY": 4, "HIS": 10, "ILE": 8, "LEU": 8, "LYS": 9, "MET": 8, "PHE": 11,
+    "PRO": 7, "SER": 6, "THR": 7, "TRP": 14, "TYR": 12, "VAL": 7,
+}
+
+# Atoms kept when a residue is truncated to ALA: full backbone, CB, and OXT if the
+# residue happens to be a C-terminus (rare here but cheap to preserve).
+ALANINE_ATOMS = {"N", "CA", "C", "O", "CB", "OXT"}
+
+# The pose gate's binding-site residues. Hard-coded and never truncated: chain B
+# 130/132/133/134/186/187/224/225/226/229/259 (contacts to Ca B/501, Asn224, Leu225)
+# and chain A 121/178/218 (Tyr178, Asp218). If one of these is incomplete the run
+# must stop, not quietly lose a measured contact.
+BINDING_SITE_RESIDUES = {
+    ("B", 130), ("B", 132), ("B", 133), ("B", 134), ("B", 186), ("B", 187),
+    ("B", 224), ("B", 225), ("B", 226), ("B", 229), ("B", 259),
+    ("A", 121), ("A", 178), ("A", 218),
+}
+
+
+class BindingSiteTruncationError(RuntimeError):
+    """Raised when an incomplete binding-site residue is found. Never truncate it."""
 
 
 def _parse(path: str, pdbqt: bool) -> list[dict]:
@@ -113,6 +128,7 @@ def _parse(path: str, pdbqt: bool) -> list[dict]:
                 "resseq": line[22:26].strip(),
                 "xyz": np.array([float(line[30:38]), float(line[38:46]),
                                  float(line[46:54])]),
+                "line": line,
             }
             if pdbqt:
                 atom["adtype"] = line[77:79].strip() if len(line) > 77 else ""
@@ -158,108 +174,291 @@ def compare_anchors(source: list[dict], converted: list[dict]) -> list[dict]:
     return rows
 
 
-def convert_with_obabel(pdb_path: str, out_path: str,
-                        add_hydrogens: bool = True) -> None:
-    """obabel -xr -h: rigid receptor, hydrogens added. Raises on a nonzero exit.
+# ---------------------------------------------------------------------------
+# Step 1-4: detect and truncate incomplete residues, refusing binding-site ones.
+# ---------------------------------------------------------------------------
 
-    `-xr` matters: without it Open Babel looks for rotatable bonds in the protein and
-    emits a flexible-residue PDBQT that Vina-family engines reject.
+def _residue_groups(pdb_lines: list[str]) -> "dict[tuple, list[tuple[int, str]]]":
+    """Group (index, line) pairs by (chain, resseq, resname), preserving order."""
+    groups: dict[tuple, list[tuple[int, str]]] = {}
+    for i, line in enumerate(pdb_lines):
+        if not line.startswith(("ATOM", "HETATM")):
+            continue
+        resname = line[17:20].strip()
+        chain = line[21].strip()
+        resseq = line[22:26].strip()
+        groups.setdefault((chain, resseq, resname), []).append((i, line))
+    return groups
 
-    `-h` matters more, and is the whole subject of this module's docstring: without
-    hydrogens the donor/acceptor typing is undecidable and Open Babel calls 97% of the
-    nitrogens acceptors, which costs 0.5 kcal/mol and reorders the poses. It is a
-    parameter rather than a constant only so a test can reproduce the broken receptor.
+
+def truncate_incomplete_residues(
+    pdb_lines: list[str],
+    standard_heavy_atoms: dict[str, int] | None = None,
+    binding_site: set[tuple[str, int]] | None = None,
+) -> tuple[list[str], list[dict]]:
+    """Rename incomplete standard-amino-acid residues to ALA, keeping only their
+    backbone + CB (+ OXT) atoms, coordinates untouched.
+
+    Returns (new_lines, truncations) where truncations is a list of
+    {"chain", "resseq", "resname", "heavy_before"} for each residue that was
+    renamed, in encounter order.
+
+    Raises BindingSiteTruncationError if an incomplete residue is one of the
+    hard-coded pose-gate binding-site residues - those must never be silently
+    alanine'd, because the pose gate measures a contact to that exact side chain.
     """
-    if shutil.which("obabel") is None:
-        raise RuntimeError("obabel not on PATH - activate the docking/unidock env")
-    cmd = ["obabel", pdb_path, "-opdbqt", "-O", out_path, "-xr"]
-    if add_hydrogens:
-        cmd.append("-h")
+    standard_heavy_atoms = standard_heavy_atoms or STANDARD_HEAVY_ATOMS
+    binding_site = binding_site if binding_site is not None else BINDING_SITE_RESIDUES
+
+    groups = _residue_groups(pdb_lines)
+    drop_indices: set[int] = set()
+    rename_indices: dict[int, str] = {}
+    truncations: list[dict] = []
+
+    for (chain, resseq, resname), entries in groups.items():
+        if resname not in standard_heavy_atoms:
+            continue
+        heavy_names = {line[12:16].strip() for _, line in entries
+                       if not line[12:16].strip().startswith("H")}
+        n_heavy = len(heavy_names)
+        if n_heavy >= standard_heavy_atoms[resname]:
+            continue  # complete
+
+        try:
+            resseq_int = int(resseq)
+        except ValueError:
+            resseq_int = None
+
+        if resseq_int is not None and (chain, resseq_int) in binding_site:
+            raise BindingSiteTruncationError(
+                f"{chain}:{resseq} {resname} is a binding-site residue "
+                f"(heavy atoms {n_heavy}/{standard_heavy_atoms[resname]}) but is "
+                "incomplete. Refusing to truncate it to ALA: the pose gate measures "
+                "a contact to this side chain, and silently truncating it would turn "
+                "a measured contact into a missing one without any error."
+            )
+
+        truncations.append({
+            "chain": chain, "resseq": resseq, "resname": resname,
+            "heavy_before": n_heavy,
+        })
+        for i, line in entries:
+            atom_name = line[12:16].strip()
+            if atom_name in ALANINE_ATOMS:
+                rename_indices[i] = "ALA"
+            else:
+                drop_indices.add(i)
+
+    new_lines = []
+    for i, line in enumerate(pdb_lines):
+        if i in drop_indices:
+            continue
+        if i in rename_indices:
+            # resName occupies columns 18-20 (0-indexed 17:20).
+            line = line[:17] + f"{rename_indices[i]:>3s}" + line[20:]
+        new_lines.append(line)
+
+    return new_lines, truncations
+
+
+# ---------------------------------------------------------------------------
+# Step 5: Meeko invocation (command construction is separated from execution so
+# it is unit-testable without Meeko installed).
+# ---------------------------------------------------------------------------
+
+def build_meeko_command(
+    truncated_pdb: str,
+    output_basename: str,
+    box: dict,
+    box_radius: float = 8.0,
+) -> list[str]:
+    """Construct the mk_prepare_receptor.py argv. Does not execute it.
+
+    `--box_center`/`--box_size` come from dock_unidock.box_from_ligand against
+    docking/ligand_ref.sdf, imported rather than recomputed: scripts/prepare_maps.py
+    builds the AutoGrid box from that same function, and a divergent box here would
+    make every downstream geometric verdict silently answer a different question.
+    """
+    cx, cy, cz = box["center_x"], box["center_y"], box["center_z"]
+    sx, sy, sz = box["size_x"], box["size_y"], box["size_z"]
+    return [
+        "mk_prepare_receptor.py",
+        "--read_pdb", truncated_pdb,
+        "--compute_charges", "--charge_model", "gasteiger",
+        "-p",
+        "--output_basename", output_basename,
+        "--box_center", str(cx), str(cy), str(cz),
+        "--box_size", str(sx), str(sy), str(sz),
+        "--delete_bad_res_from_box_radius", str(box_radius),
+    ]
+
+
+def run_meeko(cmd: list[str]) -> None:
+    if shutil.which(cmd[0]) is None:
+        raise RuntimeError(
+            f"{cmd[0]} not on PATH - activate the meeko/docking env"
+        )
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        raise RuntimeError(f"obabel failed: {result.stderr.strip()[:400]}")
+        raise RuntimeError(f"mk_prepare_receptor.py failed: "
+                           f"{result.stderr.strip()[:2000]}")
 
 
-def _report(pdb_path: str, pdbqt_path: str) -> int:
-    source = read_pdb_atoms(pdb_path)
-    converted = read_pdbqt_atoms(pdbqt_path)
+# ---------------------------------------------------------------------------
+# Step 6: post-Meeko verification and reporting.
+# ---------------------------------------------------------------------------
 
-    print(f"\nsource    {pdb_path}: {len(source)} atoms")
-    print(f"converted {pdbqt_path}: {len(converted)} atoms  "
-          f"({len(converted) - len(source):+d})")
+def fix_calcium_charges(pdbqt_atoms: list[dict]) -> list[dict]:
+    """Set any zero-charge calcium (adtype 'Ca') to +2.000 in place, returning
+    the list of atoms that were fixed.
 
-    for record in ("ATOM", "HETATM"):
-        a = sum(1 for x in source if x["record"] == record)
-        b = sum(1 for x in converted if x["record"] == record)
-        print(f"  {record:7s} {a:6d} -> {b:6d}  ({b - a:+d})")
+    Gasteiger handles metals poorly and may leave calcium at 0.000. Ca2+ carries
+    formal charge +2 and AutoDockTools assigns the same; a zero charge here means
+    the MIDAS calcium contributes nothing to the electrostatic map, removing the
+    entire reason this campaign switched from Vina to AutoDock4.
+    """
+    fixed = []
+    for atom in pdbqt_atoms:
+        if atom.get("adtype") != "Ca":
+            continue
+        try:
+            charge = float(atom.get("charge") or 0.0)
+        except ValueError:
+            charge = 0.0
+        if charge == 0.0:
+            atom["charge"] = "+2.000"
+            fixed.append(atom)
+    return fixed
 
-    src_ca = [a for a in source if a["resname"] == "CA"]
-    dst_ca = [a for a in converted if a["resname"] == "CA" or a.get("adtype") == "CA"]
-    print(f"\ncalcium ions: {len(src_ca)} in source, {len(dst_ca)} in PDBQT")
-    for a in sorted(dst_ca, key=lambda x: (x["chain"], x["resseq"])):
+
+def verify_receptor(source: list[dict], converted: list[dict]) -> dict:
+    """Run every check step 6 requires and return a report dict. Does not print
+    or raise; callers decide how loud to be. Structured separately from I/O so
+    it is unit-testable without Meeko or a real PDBQT file.
+    """
+    calciums = [a for a in converted if a.get("adtype") == "Ca"]
+    wrong_case_ca = [a for a in converted
+                     if a["resname"] == "CA" and a.get("adtype") not in ("Ca",)]
+
+    fixed = fix_calcium_charges(calciums)
+
+    acceptors = sum(1 for a in converted if a.get("adtype") == "NA")
+    donors = sum(1 for a in converted if a.get("adtype") == "N")
+    total_n = acceptors + donors
+    acceptor_fraction = (acceptors / total_n) if total_n else 0.0
+
+    anchor_rows = compare_anchors(source, converted)
+    anchors_ok = all(
+        row["in_source"] and row["in_converted"]
+        and row["displacement"] is not None and row["displacement"] <= TOLERANCE
+        for row in anchor_rows
+    )
+
+    ok = (
+        len(calciums) == 6
+        and not wrong_case_ca
+        and anchors_ok
+        and total_n > 0
+        and acceptor_fraction <= 0.5
+    )
+
+    return {
+        "calciums": calciums,
+        "calcium_count": len(calciums),
+        "calciums_fixed": fixed,
+        "wrong_case_calciums": wrong_case_ca,
+        "acceptors": acceptors,
+        "donors": donors,
+        "total_n": total_n,
+        "acceptor_fraction": acceptor_fraction,
+        "anchor_rows": anchor_rows,
+        "anchors_ok": anchors_ok,
+        "ok": ok,
+    }
+
+
+def _print_report(report: dict) -> None:
+    print(f"\ncalcium ions: {report['calcium_count']} found (need 6)")
+    for a in sorted(report["calciums"], key=lambda x: (x["chain"], x["resseq"])):
         print(f"  {a['chain']}/{a['resseq']:>5s}  AD type {a.get('adtype','?'):>3s}"
               f"  charge {a.get('charge','?'):>7s}")
+    if report["wrong_case_calciums"]:
+        print("  *** calcium(s) not typed 'Ca' (case matters, autogrid4 is case "
+              "sensitive) ***")
+    if report["calciums_fixed"]:
+        print(f"  *** {len(report['calciums_fixed'])} calcium charge(s) were 0.000, "
+              "set to +2.000: Ca2+ is formal charge +2, AutoDockTools assigns the "
+              "same, and a zero charge means the MIDAS calcium contributes nothing "
+              "to the electrostatic map. ***")
 
-    src_n = [a for a in source if a["name"].startswith("N") or a["name"] == "N"]
-    acceptors = [a for a in converted if a.get("adtype") == "NA"]
-    donors = [a for a in converted if a.get("adtype") == "N"]
-    total_n = len(acceptors) + len(donors)
-    print(f"\nnitrogen typing: {total_n} nitrogens -> "
-          f"{len(acceptors)} NA (acceptor), {len(donors)} N (non-acceptor)")
-    if total_n and len(acceptors) / total_n > 0.5:
-        print(f"  *** {len(acceptors)}/{total_n} = {len(acceptors)/total_n:.0%} typed as")
-        print("      H-bond ACCEPTORS. In a protein, most nitrogens are backbone amide")
-        print("      NH - DONORS. Open Babel cannot tell them apart without hydrogens,")
-        print("      so a hydrogen-free input gets this wrong, and it is worth")
-        print("      0.5 kcal/mol (smina scored -6.9 on the PDB, -6.4 on the PDBQT).")
-        print("      Either add hydrogens before converting, or skip the conversion:")
-        print("      Uni-Dock takes --receptor as PDB.")
+    print(f"\nnitrogen typing: {report['total_n']} nitrogens -> "
+          f"{report['acceptors']} NA (acceptor), {report['donors']} N (donor)")
+    if report["total_n"] and report["acceptor_fraction"] > 0.5:
+        print(f"  *** {report['acceptors']}/{report['total_n']} = "
+              f"{report['acceptor_fraction']:.0%} typed as ACCEPTORS - "
+              "the broken split. Healthy is ~101 NA / ~1111 N.")
 
     print("\nanchors the section 8.5b filter measures:")
-    ok = True
-    for row in compare_anchors(source, converted):
+    for row in report["anchor_rows"]:
         chain, seq, resname, name = row["key"]
         status = "OK"
         if not row["in_source"]:
-            status, ok = "ABSENT IN SOURCE", False
+            status = "ABSENT IN SOURCE"
         elif not row["in_converted"]:
-            status, ok = "*** LOST IN CONVERSION ***", False
+            status = "*** LOST IN CONVERSION ***"
         elif row["displacement"] > TOLERANCE:
-            status, ok = f"*** MOVED {row['displacement']:.3f} A ***", False
+            status = f"*** MOVED {row['displacement']:.3f} A ***"
         print(f"  {row['label']:22s} {chain}/{seq:>4s} {resname:>4s} {name:<4s}"
               f"  AD type {str(row['adtype']):>3s}  {status}")
 
     print()
-    if total_n and len(acceptors) / total_n > 0.5:
-        print("VERDICT: anchors are fine but the nitrogen typing above is not. This")
-        print("         receptor scores 0.5 kcal/mol worse than the PDB it came from.")
-        print("         Prefer --receptor <the PDB> over this file.")
-    elif ok:
-        print("VERDICT: both anchors survived unmoved. The geometry filter can run")
-        print("         against this receptor.")
+    if report["ok"]:
+        print("VERDICT: receptor PDBQT passes all checks.")
     else:
-        print("VERDICT: FAILED. Do not dock against this receptor - every pose would")
-        print("         fail the geometry filter for a reason that looks chemical.")
-    return 0 if ok else 1
+        print("VERDICT: FAILED. Do not dock against this receptor.")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--pdb", default="docking/receptor.pdb")
     parser.add_argument("--out", default="docking/receptor.pdbqt")
+    parser.add_argument("--truncated-pdb", default="docking/receptor_truncated.pdb",
+                        help="intermediate PDB with unresolved side chains "
+                             "renamed to ALA")
+    parser.add_argument("--ligand-sdf", default="docking/ligand_ref.sdf")
+    parser.add_argument("--box-radius", type=float, default=8.0,
+                        help="--delete_bad_res_from_box_radius")
     parser.add_argument("--verify-only", action="store_true",
                         help="skip conversion; just check an existing PDBQT")
-    parser.add_argument("--no-hydrogens", action="store_true",
-                        help="omit obabel -h. Reproduces the broken receptor that "
-                             "mistyped 97%% of nitrogens as acceptors; for tests only")
     args = parser.parse_args(argv)
 
     if not args.verify_only:
-        convert_with_obabel(args.pdb, args.out,
-                            add_hydrogens=not args.no_hydrogens)
-        print(f"obabel: {args.pdb} -> {args.out}"
-              f"{'' if args.no_hydrogens else ' (hydrogens added)'}")
-    return _report(args.pdb, args.out)
+        with open(args.pdb) as handle:
+            pdb_lines = handle.readlines()
+
+        new_lines, truncations = truncate_incomplete_residues(pdb_lines)
+        print(f"truncation: {len(truncations)} incomplete residue(s) renamed to ALA")
+        for t in truncations:
+            print(f"  {t['chain']}:{t['resseq']} {t['resname']} -> ALA")
+
+        with open(args.truncated_pdb, "w") as handle:
+            handle.writelines(new_lines)
+
+        from dock_unidock import box_from_ligand
+        box = box_from_ligand(args.ligand_sdf)
+
+        out_basename = str(Path(args.out).with_suffix(""))
+        cmd = build_meeko_command(args.truncated_pdb, out_basename, box,
+                                  box_radius=args.box_radius)
+        print("\n" + " ".join(cmd))
+        run_meeko(cmd)
+        print(f"meeko: {args.truncated_pdb} -> {args.out}")
+
+    source = read_pdb_atoms(args.pdb)
+    converted = read_pdbqt_atoms(args.out)
+    report = verify_receptor(source, converted)
+    _print_report(report)
+    return 0 if report["ok"] else 1
 
 
 if __name__ == "__main__":

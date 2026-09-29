@@ -383,3 +383,58 @@ pose rather than raising, and that it did not exhibit the ligand-fragmented-
 across-two-sites artifact noted in Task 11 (that artifact was seen on an
 SDF-to-PDBQT-to-PDB conversion path; the pipeline's real inputs are prepared
 PDBQT files and did not show it here).
+
+## Receptor prep: Meeko replaces Open Babel (avb1-rerun-v2)
+
+`scripts/prepare_receptor_pdbqt.py` was rewritten to use Meeko's
+`mk_prepare_receptor.py` instead of `obabel -xr -h`. The switch was forced,
+not stylistic: `obabel -xr -h` produced a PDBQT with all partial charges
+zero, and autogrid4 refused it (`No partial atomic charges were found`).
+That never mattered for Uni-Dock/Vina, which has no electrostatic term, but
+this campaign uses AutoDock4, which does. `obabel --partialcharge gasteiger`
+then failed outright (`0 molecules converted`). Meeko is the purpose-built
+AutoDock receptor preparer and is installed on the cluster.
+
+Meeko's own preparer rejected the structure because 25 residues have
+truncated side chains -- normal for a 2.45 Å X-ray deposit where surface
+Lys/Arg/Glu/Tyr side chains are unresolved. Each of the 25 residues retains
+exactly N, CA, C, O, CB -- alanine's complete heavy-atom set -- so each is
+renamed to ALA with zero coordinate change and no atom deleted, rather than
+deleted outright. This is standard crystallographic practice; the script
+makes it loud (prints every rename) rather than silent, and hard-refuses to
+truncate any of the pose gate's binding-site residues (chain B
+130/132/133/134/186/187/224/225/226/229/259, chain A 121/178/218) --
+raising `BindingSiteTruncationError` instead, since silently alanine-ing one
+of those would turn a measured contact into a missing one with no error.
+
+Residues truncated on `docking/receptor.pdb` (25, none in the binding site):
+A:82 LYS, A:211 ARG, A:367 GLU, A:489 ARG, A:490 LYS, A:501 LYS, A:509 ARG,
+A:529 ARG, A:549 ARG, A:551 LYS, A:562 ARG, B:73 LYS, B:85 LYS, B:102 ARG,
+B:104 ARG, B:114 LYS, B:143 LYS, B:155 ARG, B:190 GLU, B:208 LYS, B:368 LYS,
+B:380 TYR, B:394 LYS, B:417 LYS, B:424 LYS.
+
+Post-Meeko verification (`verify_receptor`) checks: all six calciums
+present; AD type is `Ca` (case-sensitive; the old hardcoded receptor-types
+list in `prepare_maps.py` wrote `CA`, already fixed there); calcium partial
+charges non-zero -- Gasteiger handles metals poorly and may leave them at
+0.000, in which case the script sets +2.000 (Ca2+ formal charge, matches
+AutoDockTools) and reports the fix, because a zero charge would mean the
+MIDAS calcium contributes nothing to the electrostatic map, defeating the
+reason this campaign moved from Vina to AutoDock4; both pose-gate anchors
+(Ca B/501, Asn B/224 backbone O) present and unmoved; and the nitrogen
+donor/acceptor split, which must stay majority-donor (healthy reference:
+101 NA / 1111 N) after the earlier campaign's hydrogen-free conversion
+mistyped 1,170/1,212 nitrogens as acceptors and promoted a fourth-best pose
+to first.
+
+The box passed to `mk_prepare_receptor.py` (`--box_center`/`--box_size`) is
+obtained by importing `dock_unidock.box_from_ligand` against
+`docking/ligand_ref.sdf`, not recomputed, so it matches the grid
+`scripts/prepare_maps.py` builds.
+
+Meeko is not installed on this development machine; the subprocess
+invocation itself was not run here. Command construction and post-run
+verification are structured as separate, independently unit-tested
+functions (`build_meeko_command`, `verify_receptor`) so this was testable
+without Meeko. Must be re-verified for real on the cluster where Meeko is
+available.
