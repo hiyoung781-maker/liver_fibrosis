@@ -62,6 +62,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -69,7 +70,7 @@ from pathlib import Path
 from dock_unidock import box_from_ligand, split_index  # noqa: F401  (재수출)
 
 __all__ = ["NRUN", "build_command", "build_filelist_command", "write_filelist",
-           "parse_dlg", "box_from_ligand", "find_fld", "run_batch"]
+           "parse_dlg", "box_from_ligand", "find_fld", "preflight", "run_batch"]
 
 NRUN = 20
 
@@ -159,6 +160,38 @@ def parse_dlg(text: str) -> list[dict]:
             poses.append({"rank": rank, "affinity": affinity,
                           "pdbqt_block": "\n".join(block)})
     return poses
+
+
+def preflight() -> str | None:
+    """Reason autodock_gpu cannot run here, or None when it can.
+
+    shutil.which only says the file exists. The binary is linked against a
+    newer libstdc++ than the compute nodes ship, so on an interactive shell
+    without LD_LIBRARY_PATH it is found, executed, and dies immediately with
+    "GLIBCXX_3.4.26 not found" -- which reached the user as a shard failure
+    after the batch had been planned and the filelists written. Running it
+    once up front turns that into one line before any work starts.
+    """
+    binary = shutil.which("autodock_gpu")
+    if binary is None:
+        return ("autodock_gpu not on PATH. It is usually a symlink at "
+                "$HOME/bin/autodock_gpu -> bin/autodock_gpu_64wi; add "
+                "$HOME/bin to PATH. See docs/KBDS_RUNBOOK_v2.md section 1.")
+    try:
+        probe = subprocess.run([binary, "--help"], capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"{binary} could not be executed: {exc}"
+    if probe.returncode == 0:
+        return None
+    message = (probe.stderr or b"").decode("utf-8", "replace").strip()
+    hint = ""
+    if "GLIBCXX" in message or "CXXABI" in message or "libstdc++" in message:
+        hint = ("\n  autodock_gpu is linked against a newer libstdc++ than this "
+                "node ships, and your conda env already carries one. Run:\n"
+                "      export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH\n"
+                "  slurm/v2_dock.sbatch does this after `conda activate`; an "
+                "interactive shell needs it too.")
+    return f"{binary} exited {probe.returncode} on --help:\n  {message}{hint}"
 
 
 def find_fld(maps_dir: str) -> str:
@@ -281,11 +314,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="print the planned commands and the fld path, run nothing")
     args = parser.parse_args(argv)
 
-    import shutil
-    if not args.dry_run and shutil.which("autodock_gpu") is None:
-        print("autodock_gpu not on PATH - see results/v2_EXECUTION_CHECKLIST.md",
-              file=sys.stderr)
-        return 1
+    if not args.dry_run:
+        problem = preflight()
+        if problem is not None:
+            print(problem, file=sys.stderr)
+            return 1
 
     plan = run_batch(args.ligands, args.maps, args.out, gpus=args.gpus,
                      shard_dir=args.shard_dir, seed=args.seed,

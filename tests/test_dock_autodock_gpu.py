@@ -1,13 +1,17 @@
+import os
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from dock_autodock_gpu import (NRUN, build_command, build_filelist_command,
-                               find_fld, parse_dlg, run_batch, write_filelist)
+                               find_fld, parse_dlg, preflight, run_batch,
+                               write_filelist)
 
 DLG = """\
 DOCKED: MODEL        1
@@ -339,6 +343,57 @@ class TestRunBatchFailureDetection(unittest.TestCase):
                 plan = run_batch(index, str(tmp_path / "maps"), str(out_dir),
                                  gpus=1, shard_dir=str(tmp_path / "shards"))
             self.assertEqual(plan["results"][0][0]["status"], 0)
+
+
+class TestPreflight(unittest.TestCase):
+    """shutil.which only says the file exists. The binary is linked against a
+    newer libstdc++ than the compute nodes ship, so on an interactive shell
+    without LD_LIBRARY_PATH it is found, executed, and dies with
+    "GLIBCXX_3.4.26 not found" -- which reached the user as a shard failure
+    after the batch had been planned and the filelists written."""
+
+    def _fake_binary(self, tmp, body):
+        path = Path(tmp) / "autodock_gpu"
+        path.write_text("#!/bin/sh\n" + body)
+        path.chmod(0o755)
+        return str(tmp)
+
+    def _with_path(self, directory):
+        return unittest.mock.patch.dict(
+            os.environ, {"PATH": directory + os.pathsep + os.environ["PATH"]})
+
+    def test_missing_binary_is_reported_with_where_to_look(self):
+        with unittest.mock.patch.dict(os.environ, {"PATH": "/nonexistent"}):
+            problem = preflight()
+        self.assertIsNotNone(problem)
+        self.assertIn("not on PATH", problem)
+
+    def test_a_working_binary_returns_none(self):
+        with TemporaryDirectory() as tmp:
+            directory = self._fake_binary(tmp, "exit 0\n")
+            with self._with_path(directory):
+                self.assertIsNone(preflight())
+
+    def test_glibcxx_failure_names_the_ld_library_path_fix(self):
+        with TemporaryDirectory() as tmp:
+            directory = self._fake_binary(
+                tmp,
+                "echo \"autodock_gpu: /lib64/libstdc++.so.6: version "
+                "\\`GLIBCXX_3.4.26' not found\" >&2\nexit 1\n")
+            with self._with_path(directory):
+                problem = preflight()
+        self.assertIsNotNone(problem)
+        self.assertIn("LD_LIBRARY_PATH", problem)
+        self.assertIn("CONDA_PREFIX", problem)
+
+    def test_a_non_glibcxx_failure_does_not_claim_a_library_problem(self):
+        with TemporaryDirectory() as tmp:
+            directory = self._fake_binary(tmp, "echo 'no CUDA device' >&2\nexit 2\n")
+            with self._with_path(directory):
+                problem = preflight()
+        self.assertIn("no CUDA device", problem)
+        self.assertNotIn("LD_LIBRARY_PATH", problem)
+
 
 
 if __name__ == "__main__":

@@ -40,7 +40,7 @@ PATH=$HOME/miniconda3/envs/docking/bin:$PATH \
 export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
 ```
 
-`slurm/v2_dock.sbatch`에는 이미 들어가 있다.
+`slurm/v2_dock.sbatch`에는 들어가 있지만 **대화형 셸에는 안 걸린다.** 로그인/계산 노드에서 `dock_autodock_gpu.py`를 직접 돌릴 때는 매번 내보내야 한다. 빠뜨리면 `preflight()`가 배치를 계획하기 전에 잡아서 이 줄을 그대로 알려준다.
 
 ---
 
