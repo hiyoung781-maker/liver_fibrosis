@@ -472,16 +472,12 @@ done
 포즈마다 복합체를 만들고 PLIP을 돌려 한 줄씩 쓴다. 약 53,000 포즈.
 
 ```bash
-for ARM in TL-A-prime TL-C; do
-  python scripts/plip_batch.py \
-      --pose-dir docking/v2/unidock/${ARM} \
-      --receptor docking/v2/receptor_h.pdb \
-      --out-csv  results/v2_${ARM}/plip.csv \
-      --jobs 64
-done
+mkdir -p logs && sbatch slurm/v2_plip.sbatch
 ```
 
-**`cpu64`에서 돌릴 것.** PLIP에는 GPU 구현이 없고, `8gpu`는 GPU 사용 여부와 무관하게 시간당 8 node-hour를 과금한다.
+**반드시 배치로 제출할 것. 로그인 노드에서 돌리지 말 것.** `bdata-login01`에서 `--jobs 64`로 직접 돌렸더니 모든 워커의 `plip`이 SIGINT로 죽었다(`exited -2`, numpy import 중 `KeyboardInterrupt`). 스케줄러 정책이지 도킹이나 화학의 실패가 아니다.
+
+**`cpu64`에서 돌릴 것.** PLIP에는 GPU 구현이 없고, `8gpu`는 GPU 사용 여부와 무관하게 시간당 8 node-hour를 과금한다. sbatch 스크립트가 `LD_LIBRARY_PATH`를 `unset`하고 `plip`·`obabel`을 실제로 실행해본 뒤 시작한다.
 
 `plip`과 `obabel`이 기본 PATH에 없으면 `--plip-bin`에 절대경로를 준다. **`LD_LIBRARY_PATH`가 설정된 셸에서 돌리지 말 것** — §0의 Open Babel ABI 충돌.
 
