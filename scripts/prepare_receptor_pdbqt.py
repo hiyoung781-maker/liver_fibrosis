@@ -74,6 +74,10 @@ __all__ = [
     "truncate_incomplete_residues",
     "build_meeko_command",
     "fix_calcium_charges",
+    "parse_pdbqt_lines",
+    "rewrite_charge_lines",
+    "write_pdbqt",
+    "persist_calcium_charge_fixes",
     "verify_receptor",
 ]
 
@@ -113,28 +117,37 @@ class BindingSiteTruncationError(RuntimeError):
     """Raised when an incomplete binding-site residue is found. Never truncate it."""
 
 
-def _parse(path: str, pdbqt: bool) -> list[dict]:
-    """Columns 1-54 are identical in PDB and PDBQT; PDBQT adds charge and type."""
+def _parse_lines(lines: list[str], pdbqt: bool) -> list[dict]:
+    """Columns 1-54 are identical in PDB and PDBQT; PDBQT adds charge and type.
+
+    Pure function over already-read lines, so both parsing and (later)
+    re-parsing a just-rewritten file are the same code path with no risk of
+    the on-disk check silently reusing stale in-memory state.
+    """
     atoms = []
-    with open(path) as handle:
-        for line in handle:
-            if not line.startswith(("ATOM", "HETATM")):
-                continue
-            atom = {
-                "record": line[:6].strip(),
-                "name": line[12:16].strip(),
-                "resname": line[17:20].strip(),
-                "chain": line[21].strip(),
-                "resseq": line[22:26].strip(),
-                "xyz": np.array([float(line[30:38]), float(line[38:46]),
-                                 float(line[46:54])]),
-                "line": line,
-            }
-            if pdbqt:
-                atom["adtype"] = line[77:79].strip() if len(line) > 77 else ""
-                atom["charge"] = line[70:76].strip() if len(line) > 76 else ""
-            atoms.append(atom)
+    for line in lines:
+        if not line.startswith(("ATOM", "HETATM")):
+            continue
+        atom = {
+            "record": line[:6].strip(),
+            "name": line[12:16].strip(),
+            "resname": line[17:20].strip(),
+            "chain": line[21].strip(),
+            "resseq": line[22:26].strip(),
+            "xyz": np.array([float(line[30:38]), float(line[38:46]),
+                             float(line[46:54])]),
+            "line": line,
+        }
+        if pdbqt:
+            atom["adtype"] = line[77:79].strip() if len(line) > 77 else ""
+            atom["charge"] = line[70:76].strip() if len(line) > 76 else ""
+        atoms.append(atom)
     return atoms
+
+
+def _parse(path: str, pdbqt: bool) -> list[dict]:
+    with open(path) as handle:
+        return _parse_lines(handle.readlines(), pdbqt=pdbqt)
 
 
 def read_pdb_atoms(path: str) -> list[dict]:
@@ -143,6 +156,12 @@ def read_pdb_atoms(path: str) -> list[dict]:
 
 def read_pdbqt_atoms(path: str) -> list[dict]:
     return _parse(path, pdbqt=True)
+
+
+def parse_pdbqt_lines(lines: list[str]) -> list[dict]:
+    """Parse already-in-memory PDBQT lines (e.g. from a just-opened file handle)
+    without a second disk read. Used by the charge-fix/rewrite/reread cycle."""
+    return _parse_lines(lines, pdbqt=True)
 
 
 def _key(atom: dict) -> tuple:
@@ -308,39 +327,107 @@ def run_meeko(cmd: list[str]) -> None:
 # Step 6: post-Meeko verification and reporting.
 # ---------------------------------------------------------------------------
 
+def _charge_is_zero(atom: dict) -> bool:
+    try:
+        return float(atom.get("charge") or 0.0) == 0.0
+    except ValueError:
+        return True  # unparseable charge is treated as "not a valid nonzero charge"
+
+
 def fix_calcium_charges(pdbqt_atoms: list[dict]) -> list[dict]:
-    """Set any zero-charge calcium (adtype 'Ca') to +2.000 in place, returning
-    the list of atoms that were fixed.
+    """Set any zero-charge calcium (adtype 'Ca') to +2.000 in the given in-memory
+    atom dicts, returning the list of atoms that were fixed.
 
     Gasteiger handles metals poorly and may leave calcium at 0.000. Ca2+ carries
     formal charge +2 and AutoDockTools assigns the same; a zero charge here means
     the MIDAS calcium contributes nothing to the electrostatic map, removing the
     entire reason this campaign switched from Vina to AutoDock4.
+
+    IMPORTANT: this only mutates the in-memory dicts. It does not touch any file
+    on disk. Fixing the receptor autogrid4 actually reads requires calling
+    `rewrite_charge_lines` + `write_pdbqt` on the fixed atoms' original lines and
+    then re-reading the file - see `persist_calcium_charge_fixes` and `main()`.
+    A prior version of this module fixed the charge only in memory, printed that
+    it had, and returned exit 0 while the file on disk still read 0.000 - this
+    split exists specifically so that mistake cannot happen silently again.
     """
     fixed = []
     for atom in pdbqt_atoms:
         if atom.get("adtype") != "Ca":
             continue
-        try:
-            charge = float(atom.get("charge") or 0.0)
-        except ValueError:
-            charge = 0.0
-        if charge == 0.0:
+        if _charge_is_zero(atom):
             atom["charge"] = "+2.000"
             fixed.append(atom)
     return fixed
 
 
+def rewrite_charge_lines(lines: list[str], fixes: dict[tuple, str]) -> list[str]:
+    """Pure function: given the original PDBQT file lines and a map of
+    (chain, resseq, resname, name) -> new charge string, return new lines with
+    only the charge column (PDBQT columns 71-76, i.e. line[70:76]) replaced on
+    matching ATOM/HETATM lines. Every other column, including coordinates, is
+    passed through byte-identical.
+    """
+    new_lines = []
+    for line in lines:
+        if not line.startswith(("ATOM", "HETATM")):
+            new_lines.append(line)
+            continue
+        key = (line[21].strip(), line[22:26].strip(), line[17:20].strip(),
+               line[12:16].strip())
+        if key in fixes:
+            charge_field = f"{fixes[key]:>6s}"
+            line = line[:70] + charge_field + line[76:]
+        new_lines.append(line)
+    return new_lines
+
+
+def write_pdbqt(path: str, lines: list[str]) -> None:
+    """The only place this module writes a PDBQT file. Kept as a one-line, fully
+    testable function so 'the fix was written to disk' can be asserted directly
+    rather than inferred from in-memory state."""
+    with open(path, "w") as handle:
+        handle.writelines(lines)
+
+
+def persist_calcium_charge_fixes(path: str) -> tuple[list[dict], list[dict]]:
+    """Read `path`, fix any zero-charge calcium, rewrite the file if any fix was
+    needed, and RE-READ FROM DISK to confirm. Returns (fixed, disk_atoms) where
+    disk_atoms reflects what is actually on disk after this call - never the
+    in-memory-only state - so the final verdict is never based on a fix that
+    silently failed to land in the file autogrid4 will read.
+    """
+    with open(path) as handle:
+        lines = handle.readlines()
+    atoms = parse_pdbqt_lines(lines)
+    fixed = fix_calcium_charges(atoms)
+
+    if fixed:
+        fixes = {_key(a): a["charge"] for a in fixed}
+        new_lines = rewrite_charge_lines(lines, fixes)
+        write_pdbqt(path, new_lines)
+
+    with open(path) as handle:
+        disk_atoms = parse_pdbqt_lines(handle.readlines())
+    return fixed, disk_atoms
+
+
 def verify_receptor(source: list[dict], converted: list[dict]) -> dict:
-    """Run every check step 6 requires and return a report dict. Does not print
-    or raise; callers decide how loud to be. Structured separately from I/O so
-    it is unit-testable without Meeko or a real PDBQT file.
+    """Run every check step 6 requires and return a report dict. Does not print,
+    raise, or fix anything - it only reports on the atoms it is given. Structured
+    separately from I/O so it is unit-testable without Meeko or a real PDBQT
+    file.
+
+    Critically, this does NOT call fix_calcium_charges: a verdict that silently
+    corrects a defect in memory and then reports success is exactly the bug this
+    function must not reproduce. Callers that want fixes applied must persist
+    them to disk first (persist_calcium_charge_fixes) and pass in atoms re-read
+    from that disk state. Any calcium still at zero charge here fails verdict.
     """
     calciums = [a for a in converted if a.get("adtype") == "Ca"]
     wrong_case_ca = [a for a in converted
                      if a["resname"] == "CA" and a.get("adtype") not in ("Ca",)]
-
-    fixed = fix_calcium_charges(calciums)
+    zero_charge_ca = [a for a in calciums if _charge_is_zero(a)]
 
     acceptors = sum(1 for a in converted if a.get("adtype") == "NA")
     donors = sum(1 for a in converted if a.get("adtype") == "N")
@@ -357,6 +444,7 @@ def verify_receptor(source: list[dict], converted: list[dict]) -> dict:
     ok = (
         len(calciums) == 6
         and not wrong_case_ca
+        and not zero_charge_ca
         and anchors_ok
         and total_n > 0
         and acceptor_fraction <= 0.5
@@ -365,7 +453,7 @@ def verify_receptor(source: list[dict], converted: list[dict]) -> dict:
     return {
         "calciums": calciums,
         "calcium_count": len(calciums),
-        "calciums_fixed": fixed,
+        "zero_charge_calciums": zero_charge_ca,
         "wrong_case_calciums": wrong_case_ca,
         "acceptors": acceptors,
         "donors": donors,
@@ -385,11 +473,12 @@ def _print_report(report: dict) -> None:
     if report["wrong_case_calciums"]:
         print("  *** calcium(s) not typed 'Ca' (case matters, autogrid4 is case "
               "sensitive) ***")
-    if report["calciums_fixed"]:
-        print(f"  *** {len(report['calciums_fixed'])} calcium charge(s) were 0.000, "
-              "set to +2.000: Ca2+ is formal charge +2, AutoDockTools assigns the "
-              "same, and a zero charge means the MIDAS calcium contributes nothing "
-              "to the electrostatic map. ***")
+    if report["zero_charge_calciums"]:
+        print(f"  *** {len(report['zero_charge_calciums'])} calcium charge(s) are "
+              "STILL 0.000 ON DISK. Ca2+ is formal charge +2, AutoDockTools assigns "
+              "the same, and a zero charge means the MIDAS calcium contributes "
+              "nothing to the electrostatic map - this receptor must not be used "
+              "for AutoDock4 as-is. ***")
 
     print(f"\nnitrogen typing: {report['total_n']} nitrogens -> "
           f"{report['acceptors']} NA (acceptor), {report['donors']} N (donor)")
@@ -454,8 +543,13 @@ def main(argv: list[str] | None = None) -> int:
         run_meeko(cmd)
         print(f"meeko: {args.truncated_pdb} -> {args.out}")
 
+    fixed, converted = persist_calcium_charge_fixes(args.out)
+    if fixed:
+        print(f"\ncalcium charge fix: {len(fixed)} zero-charge calcium(s) found, "
+              f"corrected to +2.000, and rewritten to {args.out} "
+              "(re-read from disk to confirm).")
+
     source = read_pdb_atoms(args.pdb)
-    converted = read_pdbqt_atoms(args.out)
     report = verify_receptor(source, converted)
     _print_report(report)
     return 0 if report["ok"] else 1

@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
@@ -12,9 +13,13 @@ from prepare_receptor_pdbqt import (
     build_meeko_command,
     compare_anchors,
     fix_calcium_charges,
+    parse_pdbqt_lines,
+    persist_calcium_charge_fixes,
     read_pdb_atoms,
+    rewrite_charge_lines,
     truncate_incomplete_residues,
     verify_receptor,
+    write_pdbqt,
 )
 
 PDB = "docking/receptor.pdb"
@@ -59,6 +64,25 @@ def _complete_lys(chain="A", resseq=998):
               ("CD", 1.0, 3.0, 0.0), ("CE", 1.0, 4.0, 0.0), ("NZ", 1.0, 5.0, 0.0)]
     return [_pdb_line("ATOM", i + 1, name, "LYS", chain, resseq, x, y, z)
             for i, (name, x, y, z) in enumerate(atoms)]
+
+
+def _pdbqt_line(record, serial, name, resname, chain, resseq, x, y, z, charge,
+                adtype):
+    line = [" "] * 80
+    line[0:6] = list(f"{record:<6s}")
+    line[6:11] = list(f"{serial:5d}")
+    line[12:16] = list(f"{name:<4s}")
+    line[17:20] = list(f"{resname:>3s}")
+    line[21] = chain
+    line[22:26] = list(f"{resseq:4d}")
+    line[30:38] = list(f"{x:8.3f}")
+    line[38:46] = list(f"{y:8.3f}")
+    line[46:54] = list(f"{z:8.3f}")
+    line[54:60] = list(f"{1.00:6.2f}")
+    line[60:66] = list(f"{0.00:6.2f}")
+    line[70:76] = list(f"{charge:>6s}")
+    line[77:79] = list(f"{adtype:>2s}")
+    return "".join(line) + "\n"
 
 
 class TestAnchorDefinition(unittest.TestCase):
@@ -279,14 +303,22 @@ class TestVerifyReceptor(unittest.TestCase):
         self.assertLess(report["acceptor_fraction"], 0.2)
         self.assertTrue(report["ok"])
 
-    def test_fixes_zero_calcium_charge_and_still_reports_ok(self):
+    def test_zero_calcium_charge_fails_verdict_without_autocorrecting(self):
+        """verify_receptor must NOT silently fix a zero calcium charge and then
+        report success - that was the critical bug: fix_calcium_charges mutated
+        only the in-memory dict, main() never wrote the correction to the PDBQT
+        file autogrid4 reads, and the report still said 'ok'. Fixing now happens
+        only via persist_calcium_charge_fixes, which rewrites the file and
+        re-reads it from disk before this function ever sees the atoms. Given
+        atoms that are still at zero (e.g. because a rewrite never happened, or
+        silently failed), the verdict must fail, not "helpfully" correct it."""
         source, converted = self._synthetic_source_and_converted(
             acceptors=101, donors=1111, ca_charge="0.000")
         report = verify_receptor(source, converted)
-        self.assertEqual(len(report["calciums_fixed"]), 6)
+        self.assertEqual(len(report["zero_charge_calciums"]), 6)
         for ca in report["calciums"]:
-            self.assertEqual(ca["charge"], "+2.000")
-        self.assertTrue(report["ok"])
+            self.assertEqual(ca["charge"], "0.000")  # untouched by verify_receptor
+        self.assertFalse(report["ok"])
 
     def test_fails_when_a_calcium_is_missing(self):
         source, converted = self._synthetic_source_and_converted(
@@ -303,6 +335,116 @@ class TestVerifyReceptor(unittest.TestCase):
         report = verify_receptor(source, converted)
         self.assertTrue(report["wrong_case_calciums"])
         self.assertFalse(report["ok"])
+
+
+class TestRewriteChargeLines(unittest.TestCase):
+    """Pure function: replaces only the charge column of matching lines."""
+
+    def test_matching_line_gets_new_charge_other_columns_unchanged(self):
+        line = _pdbqt_line("HETATM", 1, "CA", "CA", "B", 501, 1.111, 2.222, 3.333,
+                           "0.000", "Ca")
+        key = ("B", "501", "CA", "CA")
+        new_lines = rewrite_charge_lines([line], {key: "+2.000"})
+        self.assertEqual(len(new_lines), 1)
+        new_line = new_lines[0]
+        self.assertEqual(new_line[70:76], "+2.000")
+        # Everything else, including coordinates, byte-identical.
+        self.assertEqual(new_line[:70], line[:70])
+        self.assertEqual(new_line[76:], line[76:])
+
+    def test_non_matching_line_is_passed_through_untouched(self):
+        line = _pdbqt_line("HETATM", 1, "CA", "CA", "B", 502, 0, 0, 0,
+                           "+1.800", "Ca")
+        new_lines = rewrite_charge_lines([line], {("B", "501", "CA", "CA"):
+                                                   "+2.000"})
+        self.assertEqual(new_lines[0], line)
+
+
+class TestWriteBackToDisk(unittest.TestCase):
+    """The regression this whole change addresses: fix_calcium_charges alone only
+    mutates in-memory dicts. autogrid4 reads the file on disk, so a fix that
+    never reaches that file is not a fix - the report would print 'corrected'
+    while the actual receptor.pdbqt still has calcium at 0.000."""
+
+    def _write_synthetic_pdbqt(self, path, ca_charges):
+        lines = []
+        for i, charge in enumerate(ca_charges):
+            lines.append(_pdbqt_line("HETATM", i + 1, "CA", "CA", "B",
+                                     501 + i, float(i), float(i), float(i),
+                                     charge, "Ca"))
+        with open(path, "w") as handle:
+            handle.writelines(lines)
+
+    def test_zero_charge_calcium_is_written_back_as_plus_two_on_disk(self):
+        """Given a PDBQT with calcium at 0.000, after persist_calcium_charge_fixes
+        the FILE on disk (re-read fresh, not the in-memory list) must show
+        +2.000, with coordinates and every other column byte-identical."""
+        with TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "receptor.pdbqt")
+            self._write_synthetic_pdbqt(path, ["0.000"])
+
+            fixed, disk_atoms = persist_calcium_charge_fixes(path)
+            self.assertEqual(len(fixed), 1)
+
+            # Re-read independently of persist_calcium_charge_fixes's own return
+            # value, so the test verifies the FILE, not just the function's
+            # internal bookkeeping.
+            with open(path) as handle:
+                reread = parse_pdbqt_lines(handle.readlines())
+            self.assertEqual(len(reread), 1)
+            self.assertEqual(reread[0]["charge"], "+2.000")
+            self.assertEqual(reread[0]["xyz"].tolist(), [0.0, 0.0, 0.0])
+            self.assertEqual(reread[0]["adtype"], "Ca")
+
+            self.assertEqual(disk_atoms[0]["charge"], "+2.000")
+
+    def test_nonzero_charge_calcium_file_is_unchanged(self):
+        """A calcium that already has a valid charge (Meeko's actual cluster
+        behavior - it assigns +2.000 itself) must not have its file touched."""
+        with TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "receptor.pdbqt")
+            self._write_synthetic_pdbqt(path, ["+2.000"])
+            with open(path) as handle:
+                before = handle.read()
+
+            fixed, disk_atoms = persist_calcium_charge_fixes(path)
+            self.assertEqual(fixed, [])
+
+            with open(path) as handle:
+                after = handle.read()
+            self.assertEqual(before, after)
+            self.assertEqual(disk_atoms[0]["charge"], "+2.000")
+
+    def test_final_verdict_fails_if_disk_still_shows_zero(self):
+        """If a rewrite were to fail or be skipped, the atoms handed to
+        verify_receptor must come from disk, and any residual zero charge there
+        must fail the verdict - the exact scenario the reviewer flagged: a
+        report of 'corrected' with exit 0 while the file still reads 0.000."""
+        with TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "receptor.pdbqt")
+            # Two calciums, one genuinely un-fixable (simulate by writing 0.000
+            # directly to disk with an adtype persist_calcium_charge_fixes would
+            # normally fix - here we bypass the fix step entirely to model "the
+            # rewrite never happened").
+            self._write_synthetic_pdbqt(path, ["0.000"])
+            with open(path) as handle:
+                disk_atoms = parse_pdbqt_lines(handle.readlines())
+            # Build a minimal source with no anchors relevant, just checking the
+            # zero-charge gate independent of other ok= conditions.
+            source = []
+            report = verify_receptor(source, disk_atoms)
+            self.assertEqual(len(report["zero_charge_calciums"]), 1)
+            self.assertFalse(report["ok"])
+
+
+class TestWritePdbqt(unittest.TestCase):
+    def test_writes_exact_lines_given(self):
+        with TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "out.pdbqt")
+            lines = ["HETATM line one\n", "HETATM line two\n"]
+            write_pdbqt(path, lines)
+            with open(path) as handle:
+                self.assertEqual(handle.readlines(), lines)
 
 
 if __name__ == "__main__":
