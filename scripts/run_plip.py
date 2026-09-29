@@ -16,6 +16,7 @@ hetid(A1A)로 자르고, 인접한 칼슘과 리간드를 합쳐 사이트를 �
 from __future__ import annotations
 
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Optional
@@ -111,6 +112,12 @@ def run_plip(complex_pdb: str, out_dir: str, plip_bin: str = "plip",
     bad pose instead of dying on it. `plip_bin` should be the absolute path
     to the PLIP executable in the docking conda env, since PLIP is not on
     the default PATH on this system.
+
+    The reason is written to stderr, never swallowed. A wrong --plip-bin path
+    and a PLIP that crashed on one pose both returned a bare None before, and
+    the caller reported "PLIP failed to run" for both -- on the cluster that
+    cost a round trip to discover the path simply did not exist. Returning
+    None keeps the batch contract; printing why keeps it diagnosable.
     """
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -119,7 +126,17 @@ def run_plip(complex_pdb: str, out_dir: str, plip_bin: str = "plip",
             [plip_bin, "-f", str(complex_pdb), "-o", str(out), "-x", "-q"],
             check=True, capture_output=True, timeout=timeout,
         )
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+    except OSError as exc:
+        print(f"run_plip: cannot execute {plip_bin!r}: {exc}", file=sys.stderr)
+        return None
+    except subprocess.TimeoutExpired:
+        print(f"run_plip: {plip_bin} timed out after {timeout}s on {complex_pdb}",
+              file=sys.stderr)
+        return None
+    except subprocess.CalledProcessError as exc:
+        tail = (exc.stderr or b"").decode("utf-8", "replace").strip().splitlines()[-5:]
+        print(f"run_plip: {plip_bin} exited {exc.returncode} on {complex_pdb}"
+              + ("\n  " + "\n  ".join(tail) if tail else ""), file=sys.stderr)
         return None
     # PLIP names its XML report "<input-stem>_report.xml", not "report.xml"
     # -- verified against real output on 8W30.pdb (8W30_report.xml).

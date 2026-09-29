@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import statistics
 import subprocess
 import sys
@@ -432,6 +433,18 @@ def main(argv=None) -> int:
                + list(args.dlg) if not Path(f).exists()]
     if missing:
         sys.stderr.write("missing input file(s): " + ", ".join(missing) + "\n")
+        return 2
+
+    # Pre-flight the PLIP binary. run_plip returns None for a missing
+    # executable and for a PLIP that crashed alike, so without this check a
+    # mistyped --plip-bin surfaces as "PLIP failed to run" eleven poses in.
+    if not args.reproducibility and shutil.which(args.plip_bin) is None:
+        sys.stderr.write(
+            f"--plip-bin {args.plip_bin!r} is not an executable on this "
+            "machine. Find it with:\n"
+            "    conda env list\n"
+            "    ls $CONDA_PREFIX/bin/plip\n"
+            "    find $HOME -name plip -type f -perm -u+x 2>/dev/null\n")
         return 2
 
     if args.workdir is not None:
