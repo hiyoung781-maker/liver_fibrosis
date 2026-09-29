@@ -177,8 +177,24 @@ _PLIP_HETID = "LIG"  # poses_to_complex.LIGAND_RESNAME, as PLIP reports it
 
 
 def _pose_to_sdf(pdbqt_path: Path, sdf_path: Path) -> None:
-    subprocess.run(["obabel", str(pdbqt_path), "-osdf", "-O", str(sdf_path)],
-                   check=True, capture_output=True, timeout=120)
+    """Convert one docked pose to SDF, saying what Open Babel said on failure.
+
+    capture_output hides stderr inside the exception, so a CalledProcessError
+    reached the user naming only the command -- the same swallowed-reason
+    defect fixed in run_plip. Open Babel's own message is raised instead.
+    """
+    probe = subprocess.run(["obabel", str(pdbqt_path), "-osdf", "-O",
+                            str(sdf_path)], capture_output=True, timeout=120)
+    message = (probe.stderr or b"").decode("utf-8", "replace").strip()
+    if probe.returncode != 0:
+        raise ValueError(
+            f"obabel exited {probe.returncode} converting {pdbqt_path}:\n"
+            + "\n".join(message.splitlines()[-10:]))
+    if not sdf_path.exists() or sdf_path.stat().st_size == 0:
+        # Open Babel can exit 0 having written nothing; that is a failure here.
+        raise ValueError(
+            f"obabel exited 0 but wrote no molecule to {sdf_path}"
+            + (f":\n{message}" if message else ""))
 
 
 def _load_reference(reference_sdf: str):
