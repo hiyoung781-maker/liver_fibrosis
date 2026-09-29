@@ -33,6 +33,26 @@ pip install plip                # plip 3.0.1 + openbabel + lxml
 which autogrid4 autodock_gpu plip obabel   # 넷 다 나와야 진행 가능
 ```
 
+### 먼저 확인할 것 — 기존 환경에 무엇이 있는지
+
+로컬 머신에는 `docking` 환경의 `smina` 2020.12.10 과 `obabel` 3.2.1 만 있고, `unidock`·
+`autodock_gpu`·`autogrid4` 는 **어느 conda 환경에도, 파일시스템 어디에도 없다**(확인함).
+v1의 도킹은 K-BDS에서 돌았으므로(§8.5.1, §11) **K-BDS에는 `unidock` 환경이 있을 수 있다.**
+
+```bash
+conda env list
+for t in unidock autodock_gpu autogrid4 smina obabel plip; do printf '%-14s ' "$t"; command -v $t || echo ABSENT; done
+```
+
+- **`unidock`이 있으면 폴백 경로가 즉시 확보된다.** §3의 사전등록 중단 조항 — AutoDock-GPU
+  재도킹 검증 실패 시 Uni-Dock 체제로 복귀 — 을 바로 실행할 수 있다. `scripts/dock_unidock.py`가
+  그대로 남아 있다.
+- **그러나 Uni-Dock은 `autogrid4`/`autodock_gpu`를 대체하지 못한다.** Uni-Dock은 Vina 점수함수를
+  쓰고 그리드 맵이 없다. v2가 AutoDock4로 옮기는 이유가 **AD4에는 금속 파라미터와 정전기 항이
+  있다**는 것이고, v1의 최대 결함이 "Vina에는 금속 배위 항이 전혀 없어 MIDAS 카복실레이트가
+  점수함수에 보이지 않는다"는 것이었다. 그건 Uni-Dock으로 얻을 수 없다.
+- 따라서 `unidock`이 있어도 `autogrid4`와 `autodock_gpu`는 **따로 설치해야 한다.**
+
 **검증:** `python -m unittest tests.test_prepare_maps tests.test_dock_autodock_gpu tests.test_run_plip -v`
 (`pytest`는 설치하지 않는다. 이 저장소의 테스트는 전부 `unittest`다.)
 
