@@ -462,13 +462,13 @@ def _gate_report(label: str, dlg: str, measurement: dict, decision: dict,
     lines += ["", "---", ""]
     if ok:
         lines.append(
-            "AutoDock-GPU reproduces the deposited pose. It is adopted as this "
+            f"{engine} reproduces the deposited pose. It is adopted as this "
             "campaign's docking engine.")
     else:
         lines.append(
-            "Failed: " + ", ".join(decision["failed"]) + ". Per spec 7.4, "
-            "**AutoDock-GPU ranks and filters nothing**; the campaign reverts "
-            "to the Uni-Dock regime and this file is the record of why.")
+            "Failed: " + ", ".join(decision["failed"]) + f". Per spec 7.4, "
+            f"**{engine} ranks and filters nothing**; the campaign falls back "
+            "to the other engine and this file is the record of why.")
     return "\n".join(lines) + "\n"
 
 

@@ -151,5 +151,31 @@ class TestRmsdRefusesMismatchedGraphs(unittest.TestCase):
         self.assertAlmostEqual(rmsd, 0.0, places=6)
 
 
+class TestGateReportNamesTheEngineItJudged(unittest.TestCase):
+    """The verdict sentence hardcoded "AutoDock-GPU", so the Uni-Dock gate's
+    own PASS report read "AutoDock-GPU reproduces the deposited pose" under a
+    header saying Engine: Uni-Dock. A record that names the wrong engine is
+    worse than no record."""
+
+    def test_pass_sentence_names_the_engine(self):
+        from validate_redock import _gate_report
+        measurement = {"rank": 1, "affinity": -6.91, "ca_dist": 2.71,
+                       "donor_dist": 2.89, "rmsd": 0.63,
+                       "plip_metal_ca501": True, "plip_hbond_asn224": True}
+        report = _gate_report("anion", "x.pdbqt", measurement,
+                              verdict(measurement), 4, None, "Uni-Dock")
+        self.assertIn("Uni-Dock reproduces", report)
+        self.assertNotIn("AutoDock-GPU", report)
+
+    def test_fail_sentence_names_the_engine(self):
+        from validate_redock import _gate_report
+        measurement = {"rank": 1, "affinity": -7.81, "ca_dist": 2.51,
+                       "donor_dist": 2.81, "rmsd": 2.15,
+                       "plip_metal_ca501": True, "plip_hbond_asn224": True}
+        report = _gate_report("anion", "x.dlg", measurement,
+                              verdict(measurement), 20, None, "AutoDock-GPU")
+        self.assertIn("**AutoDock-GPU ranks and filters nothing**", report)
+
+
 if __name__ == "__main__":
     unittest.main()
