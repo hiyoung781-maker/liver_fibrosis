@@ -291,6 +291,92 @@ affinity가 tie-break가 아니라 **하드 필터**가 되었으므로 필요�
 
 ---
 
+## 3b. 게이트 미통과 — Uni-Dock 복귀 (2026-09-29 결정)
+
+AutoDock-GPU는 두 양성자화 상태 모두 기준 (c)에서 실패했다(RMSD 2.15 Å, 문턱 2.0 Å). (a)(b)(d)는 통과. 근거와 검증 경로는 `results/v2_redock_gate_decision.md`에 있다. spec §7.4의 사전등록대로 **AutoDock-GPU로 아무것도 순위 매기거나 거르지 않고** Uni-Dock 체제로 복귀한다.
+
+이미 만든 AD4 포즈(TL-A′ 4,514, TL-C 5,212)와 PLIP 레코드는 **지우지 않는다.** 리드 선정에 쓰지 않을 뿐, 두 엔진의 기하 게이트 통과율 비교는 보고 가치가 있다.
+
+### 3b.1 Uni-Dock에도 같은 게이트를 적용한다 — 건너뛰지 말 것
+
+v1의 0.63 Å은 **smina**로 측정한 값이다. Uni-Dock v1.1.3은 `--scoring` 기본값이 `vina`로 점수함수는 같지만 구현과 탐색(GPU 병렬 Monte Carlo)이 다르다. smina 숫자를 근거로 Uni-Dock을 채택하는 것은, 이번에 AD4에서 저지를 뻔한 비약을 반대 방향으로 반복하는 것이다.
+
+```bash
+# 대조군 두 양성자화 상태를 Uni-Dock으로 재도킹
+for STATE in neutral anion; do
+  case $STATE in
+    neutral) IDX=docking/v2/control_index.txt ;;
+    anion)   IDX=docking/v2/control_anion_index.txt ;;
+  esac
+  python scripts/dock_unidock.py \
+      --receptor        docking/v2/meeko_receptor.pdbqt \
+      --ligand-index    $IDX \
+      --out-dir         docking/v2/unidock/control_$STATE \
+      --autobox-ligand  docking/ligand_ref.sdf \
+      --gpus 1
+done
+
+# 같은 기준, 같은 문턱. --dlg 대신 --poses 로 Uni-Dock 출력을 읽는다.
+for STATE in neutral anion; do
+  case $STATE in
+    neutral) REF=docking/v2/ligands_pdbqt/TL-A-prime/CONTROL_crystal.pdbqt ;;
+    anion)   REF=docking/v2/ligands_pdbqt_anion/CONTROL_crystal.pdbqt ;;
+  esac
+  env -u LD_LIBRARY_PATH python scripts/validate_redock.py --protonation $STATE \
+      --poses     docking/v2/unidock/control_$STATE/CONTROL_crystal_out.pdbqt \
+      --receptor  docking/v2/receptor_h.pdb \
+      --reference $REF \
+      --workdir   docking/v2/unidock_gate_$STATE \
+      --all-poses \
+      --out       results/v2_redock_gate_unidock_$STATE.md
+done
+```
+
+수용체·인덱스 경로는 실제 위치에 맞춘다. 대조군 인덱스가 없으면 아암 인덱스에서 뽑는다:
+
+```bash
+grep CONTROL_crystal docking/v2/ligand_index_TL-A-prime.txt > docking/v2/control_index.txt
+```
+
+**판정 분기 — 결과를 보기 전에 정해 둔다.**
+
+- **통과** → 그 양성자화 상태로 3b.2를 진행한다. 둘 다 통과하면 **중성**을 택한다. §7.4가 음이온을 선호한 근거는 *"AutoDock4에는 정전기 항이 있어"*였고, Vina에는 없으므로 그 근거는 Uni-Dock에 적용되지 않는다. v1의 중성 선택 근거가 그대로 살아난다.
+- **미통과** → **두 엔진 모두 사전등록 게이트에 실패했다는 뜻이다.** 그 자체가 이 캠페인의 주요 결과이며, 리드를 선정하지 않고 그 사실을 보고한다. 문턱을 옮기지 않는다.
+
+### 3b.2 두 아암 재도킹 + affinity 기준값 재산출
+
+리간드 PDBQT는 그대로 쓴다(Uni-Dock과 AutoDock-GPU 모두 PDBQT를 받는다).
+
+```bash
+for ARM in TL-A-prime TL-C; do
+  python scripts/dock_unidock.py \
+      --receptor       docking/v2/meeko_receptor.pdbqt \
+      --ligand-index   docking/v2/ligand_index_${ARM}.txt \
+      --out-dir        docking/v2/unidock/${ARM} \
+      --autobox-ligand docking/ligand_ref.sdf \
+      --gpus 8
+done
+```
+
+**패널도 같은 실행에 포함해야 한다.** §9.1의 affinity 하드 필터는 PLN-1474 상대값이고, 그 기준값은 **같은 엔진·같은 박스**에서 나와야 한다. AD4로 얻은 어떤 값도 Vina 점수에 쓸 수 없다.
+
+```bash
+python scripts/dock_unidock.py \
+    --receptor       docking/v2/meeko_receptor.pdbqt \
+    --ligand-index   docking/v2/panel_index.txt \
+    --out-dir        docking/v2/unidock/panel \
+    --autobox-ligand docking/ligand_ref.sdf \
+    --gpus 1
+```
+
+이후 §5(복합체 변환 → PLIP)와 하류 단계는 입력 디렉터리만 `docking/v2/unidock/...`로 바꿔 그대로 진행한다.
+
+### 3b.3 기록에 반드시 남길 것
+
+기하 기준(§8.5b)이 **결정 포즈와 2.15 Å 대체 포즈를 구별하지 못했다.** 2.15 Å 포즈도 Ca501 2.51 Å, Asn224 2.81 Å로 기준 안에 있었고 PLIP도 두 상호작용을 모두 보고했다. 이 한계는 엔진을 바꿔도 사라지지 않으며, 기하 게이트 통과가 결정 결합 양식의 재현을 보장하지 않는다는 뜻이다. 리드 보고서에 명시한다.
+
+---
+
 ## 4. 리간드 준비 → 도킹
 
 **AutoDock-GPU는 SMILES가 아니라 PDBQT를 받는다.** `--ligands`는 준비된 PDBQT 경로 목록(한 줄에 하나)이다.
