@@ -210,6 +210,44 @@ PATH=$HOME/miniconda3/envs/docking/bin:$PATH \
 - **양성자화 결정:** 결정 접촉을 재현하는 쪽을 채택. 둘 다 재현하면 **음이온**을 택한다(AutoDock4에는 정전기 항이 있어 v1의 중성 선택 근거가 소멸). `--protonation` 은 어느 상태를 도킹했는지 리포트에 **기록**만 한다 — 상태 자체는 리간드 준비 단계에서 결정된다.
 - **미통과 시 AutoDock-GPU로 아무것도 거르지 말고** Uni-Dock 체제로 복귀, 그 사실을 기록.
 
+### 양성자화 두 상태 — 게이트는 두 번 돈다 (사전등록)
+
+spec §7.4는 재도킹을 **중성과 음이온 두 상태로** 등록했고, 어느 쪽을 채택할지도 미리 정해뒀다: 결정 접촉을 재현하는 쪽, 둘 다 재현하면 **음이온**. 근거는 엔진 교체 자체다 — v1이 중성을 고른 건 Vina에 정전기 항이 없어 전하가 점수에 영향을 못 줬기 때문인데, AutoDock4에는 정전기 항이 있고 MIDAS 이온은 **Ca²⁺**다. 카복실레이트의 음전하가 이 결합 양식의 지배적 정전기 동인이므로, 중성 COOH로 도킹하면 그게 통째로 빠진다.
+
+v2 배치는 **중성**으로 돌았다(`docking/ligand_ref.sdf`에 `M  CHG` 레코드가 없고, `prepare_ligands.py --control`의 기본값이 그 파일이다). 음이온 쪽은 아래로 만든다.
+
+```bash
+# 결정 좌표를 그대로 두고 형식전하만 바꾼다 (원자 변위 0.000000000 Å)
+python scripts/deprotonate_control.py
+
+python scripts/prepare_ligands.py --control-only \
+    --control docking/ligand_ref_anion.sdf \
+    --out-dir docking/v2/ligands_anion
+
+python scripts/ligands_to_pdbqt.py \
+    --sdf-dir docking/v2/ligands_anion \
+    --out-dir docking/v2/ligands_pdbqt_anion
+
+ls docking/v2/ligands_pdbqt_anion/*.pdbqt > docking/v2/control_anion_index.txt
+
+python scripts/dock_autodock_gpu.py \
+    --ligands docking/v2/control_anion_index.txt \
+    --maps docking/v2/maps --out docking/v2/poses/control_anion \
+    --gpus 1 --seed 42
+
+python scripts/validate_redock.py --protonation anion \
+    --dlg       docking/v2/poses/control_anion/CONTROL_crystal.dlg \
+    --receptor  docking/v2/receptor_h.pdb \
+    --reference docking/ligand_ref_anion.sdf \
+    --workdir   docking/v2/redock_gate_anion \
+    --all-poses \
+    --out       results/v2_redock_gate_anion.md
+```
+
+`--reference`가 음이온 SDF인 이유는 **좌표가 아니라 그래프** 때문이다. `CalcRMS`는 두 분자가 같은 그래프여야 동작하는데 중성 COOH와 카복실레이트는 결합차수·전하가 다르다. `ligand_ref_anion.sdf`의 좌표는 결정 좌표와 **원자 변위 0.000000000 Å로 동일**하므로 비교 대상은 바뀌지 않는다.
+
+**이건 사후에 기준을 바꾸는 게 아니라 등록된 절차를 마저 실행하는 것이다.** 문턱 2.0 Å은 그대로다.
+
 ### 엔진 재현성 측정 (사전등록)
 
 시드를 바꿔 대조군을 다시 도킹한 뒤, 시드별 `.dlg`를 한꺼번에 넘긴다.
