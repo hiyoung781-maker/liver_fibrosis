@@ -42,6 +42,21 @@ export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
 
 `slurm/v2_dock.sbatch`에는 들어가 있지만 **대화형 셸에는 안 걸린다.** 로그인/계산 노드에서 `dock_autodock_gpu.py`를 직접 돌릴 때는 매번 내보내야 한다. 빠뜨리면 `preflight()`가 배치를 계획하기 전에 잡아서 이 줄을 그대로 알려준다.
 
+**그리고 도킹 셸에서 후처리를 돌리면 안 된다.** 이 변수는 `autodock_gpu`에만 필요한데, 같은 셸의 **Open Babel을 깨뜨린다**. `_openbabel.so`는 구 C++ ABI로 빌드되어 있고, conda의 lib 디렉터리를 앞에 붙이면 로더가 신 ABI로 빌드된 `libopenbabel.so`를 먼저 찾아 구 ABI의 `std::string` 심볼이 사라진다:
+
+```
+ImportError: .../openbabel/_openbabel.so: undefined symbol:
+  _ZN9OpenBabel8OBPlugin7DisplayERSsPKcS3_
+```
+
+(망글링의 `RSs`가 구 ABI `std::string`이다.) 실제로 이 상태에서 `validate_redock.py`가 두 번 죽었다. 후처리는 그 변수 없이 돌린다:
+
+```bash
+env -u LD_LIBRARY_PATH python scripts/validate_redock.py ...
+```
+
+`validate_redock.py`는 이제 시작할 때 `obabel -V`와 `plip -h`를 실제로 실행해보고, 실패했는데 `LD_LIBRARY_PATH`가 설정돼 있으면 이 사실을 알려준다. 도킹(GPU)과 후처리(CPU)는 애초에 다른 파티션에서 도는 작업이므로 셸을 나누는 것이 맞다.
+
 ---
 
 ## 1. 도구 설치 (최초 1회)

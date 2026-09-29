@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import statistics
 import subprocess
@@ -174,6 +175,39 @@ def reproducibility(affinities: list[float]) -> dict:
 # --------------------------------------------------------------------------
 
 _PLIP_HETID = "LIG"  # poses_to_complex.LIGAND_RESNAME, as PLIP reports it
+
+# Set for autodock_gpu, which needs a newer libstdc++ than the compute nodes
+# ship. It breaks Open Babel in the same shell: _openbabel.so is built against
+# the OLD C++ ABI, and prepending the conda lib directory makes the loader find
+# a libopenbabel.so built against the new one, so the old-ABI std::string
+# symbol (the RSs in _ZN9OpenBabel8OBPlugin7DisplayERSsPKcS3_) is missing.
+# Nothing in this module runs autodock_gpu, so the variable has no business
+# being set here.
+_DOCKING_ONLY_VAR = "LD_LIBRARY_PATH"
+
+
+def _probe(command: list, label: str) -> Optional[str]:
+    """Reason `command` cannot run here, or None. Never raises."""
+    try:
+        probe = subprocess.run(command, capture_output=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"{label}: could not execute {command[0]!r}: {exc}"
+    if probe.returncode == 0:
+        return None
+    message = "\n".join(
+        (probe.stderr or b"").decode("utf-8", "replace").strip().splitlines()[-8:])
+    hint = ""
+    if os.environ.get(_DOCKING_ONLY_VAR):
+        hint = (f"\n  {_DOCKING_ONLY_VAR} is set in this shell"
+                f" ({os.environ[_DOCKING_ONLY_VAR]}).\n"
+                "  It is needed by autodock_gpu and by nothing here, and it "
+                "breaks Open Babel by\n"
+                "  making the loader pick a libopenbabel.so built against a "
+                "different C++ ABI.\n"
+                "  Re-run with:  env -u LD_LIBRARY_PATH python "
+                "scripts/validate_redock.py ...\n"
+                "  Docking and post-processing should not share a shell.")
+    return f"{label}: {command[0]} exited {probe.returncode}\n  {message}{hint}"
 
 
 def _pose_to_sdf(pdbqt_path: Path, sdf_path: Path) -> None:
@@ -514,17 +548,26 @@ def main(argv=None) -> int:
         sys.stderr.write("missing input file(s): " + ", ".join(missing) + "\n")
         return 2
 
-    # Pre-flight the PLIP binary. run_plip returns None for a missing
-    # executable and for a PLIP that crashed alike, so without this check a
-    # mistyped --plip-bin surfaces as "PLIP failed to run" eleven poses in.
-    if not args.reproducibility and shutil.which(args.plip_bin) is None:
-        sys.stderr.write(
-            f"--plip-bin {args.plip_bin!r} is not an executable on this "
-            "machine. Find it with:\n"
-            "    conda env list\n"
-            "    ls $CONDA_PREFIX/bin/plip\n"
-            "    find $HOME -name plip -type f -perm -u+x 2>/dev/null\n")
-        return 2
+    # Pre-flight the two external tools by RUNNING them. shutil.which only
+    # says a file exists: on the cluster both obabel and plip were present and
+    # both died on import, and without this the first failure surfaced from
+    # inside the measurement loop with the tool's own traceback buried in a
+    # CalledProcessError.
+    if not args.reproducibility:
+        if shutil.which(args.plip_bin) is None:
+            sys.stderr.write(
+                f"--plip-bin {args.plip_bin!r} is not an executable on this "
+                "machine. Find it with:\n"
+                "    conda env list\n"
+                "    ls $CONDA_PREFIX/bin/plip\n"
+                "    find $HOME -name plip -type f -perm -u+x 2>/dev/null\n")
+            return 2
+        for command, label in (([args.plip_bin, "-h"], "PLIP"),
+                               (["obabel", "-V"], "Open Babel")):
+            problem = _probe(command, label)
+            if problem is not None:
+                sys.stderr.write(problem + "\n")
+                return 2
 
     if args.workdir is not None:
         args.workdir.mkdir(parents=True, exist_ok=True)
