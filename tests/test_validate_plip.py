@@ -26,6 +26,9 @@ def record(metal=True, hbond=True, tyr178=True, hydrophobic=True):
         rec["hbonds"].append({
             "resnr": 224, "restype": "ASN", "reschain": "B",
             "dist_d-a": 2.63, "don_angle": 156.61, "protisdon": "False",
+            # 8W30's ligand donates to the BACKBONE O (measured: backbone O
+            # 2.63 A, side-chain OD1 5.35 A). PLIP always emits this field.
+            "sidechain": "False",
         })
     if tyr178:
         rec["hydrophobic_contacts"].append({
@@ -82,6 +85,34 @@ class TestCrystalValidation(unittest.TestCase):
         v = crystal_verdict(rec)
         self.assertFalse(v["passed"])
         self.assertIn("hbond_asn224", v["missing"])
+
+    def test_a_sidechain_hbond_to_asn224_does_not_satisfy_the_criterion(self):
+        """§8.0 ⓑ names Asn224's BACKBONE O. Asn224 also carries a side-chain
+        amide whose OD1 accepts, and a ligand donating to OD1 reports
+        protisdon False exactly as a backbone contact does. In 8W30 the two
+        are never confusable (2.63 A against 5.35 A), which is why the looser
+        rule passed the crystal validation and stayed invisible there."""
+        rec = record(hbond=False)
+        rec["hbonds"].append({
+            "resnr": 224, "restype": "ASN", "reschain": "B",
+            "dist_d-a": 2.90, "don_angle": 160.0, "protisdon": "False",
+            "sidechain": "True",
+        })
+        v = crystal_verdict(rec)
+        self.assertFalse(v["passed"])
+        self.assertIn("hbond_asn224", v["missing"])
+
+    def test_the_sidechain_contact_is_still_reported_separately(self):
+        # Tightening a criterion must not delete the observation.
+        from validate_plip import has_asn224_sidechain_hbond
+        rec = record(hbond=False)
+        rec["hbonds"].append({
+            "resnr": 224, "restype": "ASN", "reschain": "B",
+            "dist_d-a": 2.90, "don_angle": 160.0, "protisdon": "False",
+            "sidechain": "True",
+        })
+        self.assertTrue(has_asn224_sidechain_hbond(rec["hbonds"]))
+        self.assertFalse(has_asn224_sidechain_hbond(record()["hbonds"]))
 
     def test_tyr178_contact_reported_as_hydrophobic_satisfies_the_criterion(self):
         """Corrected criterion (c). The brief originally required a T-shaped

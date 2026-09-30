@@ -62,8 +62,11 @@ import sys
 from pathlib import Path
 
 __all__ = [
-    "MIDAS_CA", "ASN224", "TYR178", "HYDROPHOBIC_POCKET",
+    "MIDAS_CA", "ASN224", "TYR178", "HYDROPHOBIC_POCKET", "LEU225",
+    "BETA1_ANCHOR_CHAIN", "BETA1_ANCHOR_WINDOW",
     "OTHER_INTERACTION_KINDS", "crystal_verdict",
+    "backbone_o_hbond_residues", "has_anchor_window_hbond",
+    "has_leu225_backbone_hbond", "has_asn224_sidechain_hbond",
 ]
 
 MIDAS_CA = ("B", 501)
@@ -74,6 +77,15 @@ TYR178 = ("A", 178)
 # deliberately excluded here -- it is criterion (c), checked across all
 # interaction types, not only hydrophobic_contacts.
 HYDROPHOBIC_POCKET = {("B", 133), ("B", 186), ("B", 187), ("B", 225)}
+
+# §8.2 case 2's relaxed anchor: any beta1 backbone O in this window. Sabat
+# p.10307 names the MIDAS and beta1-Leu225 as the shared anchor pair, and
+# 223-226 is the backbone stretch Leu225 sits in -- a rule naming only 225
+# would reject a pose that hydrogen bonds to the residue one along, which is
+# the same secondary anchor reached by a neighbouring backbone O.
+BETA1_ANCHOR_CHAIN = "B"
+BETA1_ANCHOR_WINDOW = (223, 226)
+LEU225 = ("B", 225)
 
 # Every interaction kind other than hydrophobic_contacts that criterion (c)
 # must also search, since a Tyr178 contact can be reported as any kind.
@@ -103,10 +115,69 @@ def _has_midas_ligand_contact(metal_complexes: list) -> bool:
 
 
 def _has_asn224_ligand_donor_hbond(hbonds: list) -> bool:
+    """§8.0 ⓑ: the ligand donates to Asn224's BACKBONE O.
+
+    The backbone test is not decoration. Asn224 carries a side-chain amide
+    whose OD1 also accepts, and a ligand donating to OD1 gives protisdon
+    False exactly as a backbone contact does -- so a rule that omitted
+    `sidechain` counted a different contact and reported it as the registered
+    one. In 8W30 itself the distinction does not arise (backbone O at 2.63 A,
+    OD1 at 5.35 A), which is why the crystal validation was sound and the
+    looseness stayed invisible there.
+    """
+    return ASN224[1] in backbone_o_hbond_residues(hbonds, ASN224[0])
+
+
+def has_asn224_sidechain_hbond(hbonds: list) -> bool:
+    """Recorded beside the registered criterion, never instead of it.
+
+    This is what the earlier, looser rule would additionally have counted.
+    Keeping it as its own column is what makes the tightening auditable
+    rather than a silent change of numbers.
+    """
     for e in hbonds:
-        if (e.get("reschain"), e.get("resnr")) == ASN224 and _is_false(e.get("protisdon")):
-            return True
+        if (e.get("reschain") != ASN224[0]
+                or not _is_false(e.get("protisdon"))
+                or not _is_true(e.get("sidechain"))):
+            continue
+        try:
+            if int(e.get("resnr")) == ASN224[1]:
+                return True
+        except (TypeError, ValueError):
+            continue
     return False
+
+
+def backbone_o_hbond_residues(hbonds: list, chain: str = BETA1_ANCHOR_CHAIN) -> set:
+    """Residues of `chain` whose BACKBONE O accepts an H-bond from the ligand.
+
+    §8.2 decides the gate's secondary anchor from exactly this set on
+    compound 25. Both conditions matter and neither is a default:
+    `protisdon` False means the LIGAND donates, and `sidechain` False means
+    the acceptor is the backbone O and not a side-chain oxygen. Asn224 carries
+    both, so a rule that ignored `sidechain` would count the side-chain
+    contact and report it as the registered backbone one.
+    """
+    found = set()
+    for e in hbonds:
+        if e.get("reschain") != chain or not _is_false(e.get("protisdon")):
+            continue
+        if _is_false(e.get("sidechain")):
+            try:
+                found.add(int(e.get("resnr")))
+            except (TypeError, ValueError):
+                continue
+    return found
+
+
+def has_anchor_window_hbond(hbonds: list) -> bool:
+    """§8.2 case 2's test: any beta1 backbone O in the 223-226 window."""
+    low, high = BETA1_ANCHOR_WINDOW
+    return any(low <= r <= high for r in backbone_o_hbond_residues(hbonds))
+
+
+def has_leu225_backbone_hbond(hbonds: list) -> bool:
+    return LEU225[1] in backbone_o_hbond_residues(hbonds)
 
 
 def _has_tyr178_contact(record: dict) -> bool:

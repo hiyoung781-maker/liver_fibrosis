@@ -68,7 +68,8 @@ class TestRowFromRecord(unittest.TestCase):
         record = self._record(
             metal_complexes=[{"reschain_lig": "B", "resnr_lig": "501",
                               "metal_type": "Ca", "location": "ligand"}],
-            hbonds=[{"reschain": "B", "resnr": 224, "protisdon": "False"}],
+            hbonds=[{"reschain": "B", "resnr": 224, "protisdon": "False",
+                     "sidechain": "False"}],
             hydrophobic_contacts=[{"reschain": "A", "resnr": 178},
                                   {"reschain": "B", "resnr": 225}])
         row = row_from_record({"label": "a", "pose": 1, "affinity": -6.9}, record)
@@ -76,6 +77,30 @@ class TestRowFromRecord(unittest.TestCase):
         self.assertEqual(row["hbond_asn224"], 1)
         self.assertEqual(row["tyr178_contact"], 1)
         self.assertEqual(row["hydrophobic_pocket"], 1)
+
+    def test_the_anchor_window_columns_travel_with_every_row(self):
+        """§8.2 case 2 relaxes the gate to any beta1 backbone O in 223-226.
+        The decision is made from compound 25, but it is APPLIED to rows
+        written long before it -- so the column has to be there already."""
+        record = self._record(hbonds=[
+            {"reschain": "B", "resnr": 225, "protisdon": "False",
+             "sidechain": "False"},
+            {"reschain": "B", "resnr": 224, "protisdon": "False",
+             "sidechain": "True"},
+        ])
+        row = row_from_record({"label": "a", "pose": 1, "affinity": -6.9}, record)
+        self.assertEqual(row["hbond_asn224"], 0)          # side-chain only
+        self.assertEqual(row["hbond_asn224_sidechain"], 1)
+        self.assertEqual(row["hbond_anchor_window"], 1)   # Leu225 backbone
+        self.assertEqual(row["hbond_bb_residues"], "225")
+
+    def test_a_backbone_hbond_outside_the_window_is_recorded_but_does_not_count(self):
+        record = self._record(hbonds=[
+            {"reschain": "B", "resnr": 180, "protisdon": "False",
+             "sidechain": "False"}])
+        row = row_from_record({"label": "a", "pose": 1, "affinity": -6.9}, record)
+        self.assertEqual(row["hbond_anchor_window"], 0)
+        self.assertEqual(row["hbond_bb_residues"], "180")
 
     def test_raw_counts_are_recorded_for_criteria_not_yet_decided(self):
         record = self._record(

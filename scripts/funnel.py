@@ -75,8 +75,17 @@ def _read(path: str) -> list:
 
 
 def ligand_rows(geometry_csv: str, plip_csv: str,
-                cutoff: float = PLN1474_CUTOFF) -> list:
-    """One row per ligand, joining the per-pose geometry and PLIP records."""
+                cutoff: float = PLN1474_CUTOFF,
+                gate_columns: list | None = None) -> list:
+    """One row per ligand, joining the per-pose geometry and PLIP records.
+
+    `gate_columns` is §8.2's decided interaction gate, as cpd25_gate.py names
+    it. When given, `plip_gate_pass` says whether ANY pose that already passed
+    the geometry filter satisfies every one of those columns. Aggregating it
+    here rather than in lead_filter keeps the gate on the same pose set the
+    other PLIP columns use -- a gate satisfied by a pose the geometry filter
+    rejected would be a different claim.
+    """
     plip_by_pose = {}
     for row in _read(plip_csv):
         pose = _int(row.get("pose"))
@@ -104,13 +113,15 @@ def ligand_rows(geometry_csv: str, plip_csv: str,
                               if e["affinity"] is not None]
         best_passing = min(passing_affinities) if passing_affinities else None
 
-        metal = hbond = False
+        metal = hbond = gate = False
         for entry in passing:
             record = plip_by_pose.get((label, entry["pose"]))
             if record is None or record.get("status") != "ok":
                 continue
             metal = metal or record.get("metal_ca501") == "1"
             hbond = hbond or record.get("hbond_asn224") == "1"
+            if gate_columns:
+                gate = gate or all(record.get(c) == "1" for c in gate_columns)
 
         rows.append({
             "label": label,
@@ -122,6 +133,7 @@ def ligand_rows(geometry_csv: str, plip_csv: str,
             "affinity_pass": best_passing is not None and best_passing < cutoff,
             "plip_metal_any_passing": metal,
             "plip_hbond_any_passing": hbond,
+            "plip_gate_pass": gate if gate_columns else "",
             "min_ca_dist": min((e["ca_dist"] for e in entries
                                 if e["ca_dist"] is not None), default=None),
             "min_donor_dist": min((e["donor_dist"] for e in entries
@@ -182,6 +194,10 @@ def main(argv=None) -> int:
                     help="Section 8.7's affinity filter: keep the best PASSING "
                          "pose strictly below this. Default is PLN-1474's own "
                          "best passing pose in the adopted engine and box.")
+    p.add_argument("--interaction-gate", type=Path,
+                    help="cpd25_gate.py --out-json. Adds plip_gate_pass, "
+                         "true when any geometry-passing pose satisfies "
+                         "§8.2's decided gate.")
     p.add_argument("--label", default="", help="Arm name, for the printed header.")
     p.add_argument("--out-csv", type=Path, help="Per-ligand rows.")
     p.add_argument("--out-json", type=Path, help="Funnel summary + strata.")
@@ -192,7 +208,30 @@ def main(argv=None) -> int:
             sys.stderr.write(f"missing input: {path}\n")
             return 2
 
-    rows = ligand_rows(args.geometry, args.plip, args.cutoff)
+    gate_columns = None
+    if args.interaction_gate:
+        verdict = json.loads(args.interaction_gate.read_text())
+        gate_columns = verdict["gate"]["columns"]
+        # A gate column the PLIP run never wrote reads as absent on every
+        # pose, so every ligand fails a gate that was never actually applied
+        # -- a silent empty result that looks like a finding.
+        with open(args.plip, newline="") as handle:
+            header = next(csv.reader(handle), [])
+        missing = [c for c in gate_columns if c not in header]
+        if missing:
+            sys.stderr.write(
+                f"{args.plip} has no column {', '.join(missing)}, which "
+                f"§8.2 case {verdict['case']} needs. That run predates the "
+                "anchor-window columns; re-run plip_batch.py before applying "
+                "this gate.\n")
+            return 2
+        print(f"§8.2 게이트 (경우 {verdict['case']}): {verdict['gate']['name']}")
+    rows = ligand_rows(args.geometry, args.plip, args.cutoff, gate_columns)
+    if gate_columns:
+        eligible = [r for r in rows if r["geometry_pass"]]
+        passed = [r for r in eligible if r["plip_gate_pass"]]
+        print(f"  geometry 통과 {len(eligible)}개 중 게이트 통과 "
+              f"{len(passed)}개")
     summary = summarize(rows, args.cutoff)
     strata = stratify(rows)
 

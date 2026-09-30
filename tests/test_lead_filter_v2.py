@@ -52,8 +52,16 @@ class TestStageOrder(unittest.TestCase):
     adjudicate are near 0.05 log."""
 
     def test_selectivity_sits_between_affinity_and_toxicity(self):
-        self.assertEqual(STAGES, ("geometry", "affinity", "selectivity",
-                                  "toxicity"))
+        self.assertEqual(STAGES, ("geometry", "affinity", "interaction",
+                                  "selectivity", "toxicity"))
+
+    def test_the_interaction_gate_sits_beside_the_affinity_filter(self):
+        """§8.2's gate and the affinity filter are the pair the campaign
+        asked for: PLN-1474-or-better AND the compound-25 key interaction.
+        Neither alone is a claim about binding -- a score without the anchor
+        is a number, the anchor without the score is a pose."""
+        self.assertEqual(STAGES.index("interaction"),
+                         STAGES.index("affinity") + 1)
 
     def test_caco2_is_not_a_stage(self):
         self.assertNotIn("caco2", STAGES)
@@ -239,23 +247,70 @@ class TestSelectivityIsReferenceRelative(unittest.TestCase):
         self.assertEqual(plain, ["a"])
 
 
+class TestInteractionStage(unittest.TestCase):
+    """§8.2's gate, decided from compound 25 and applied through funnel.py's
+    plip_gate_pass column. An absent column means the gate was never decided,
+    and the stage passes -- so the other four still report rather than the
+    whole funnel collapsing to zero behind a gate nobody ran."""
+
+    def _rows(self, tmp, gate):
+        f, a = Path(tmp) / "f.csv", Path(tmp) / "a.csv"
+        fields = FUNNEL_FIELDS + ["plip_gate_pass"]
+        row = {**funnel("a"), "plip_gate_pass": gate}
+        write(f, fields, [row])
+        write(a, ADMET_FIELDS, [REF_ADMET, admet("a")])
+        selectivity = {"values": {"a": 0.5, REFERENCE: 0.0},
+                       "reference": 0.0, "calibration_passed": True}
+        return {r["label"]: r for r in lead_rows(str(f), str(a), -6.807,
+                                                 selectivity=selectivity)}
+
+    def test_a_ligand_failing_the_gate_is_not_a_lead(self):
+        with TemporaryDirectory() as tmp:
+            row = self._rows(tmp, "False")["a"]
+            self.assertFalse(row["interaction_pass"])
+            self.assertFalse(row["all_stages"])
+            self.assertEqual(row["interaction_status"], "ok")
+
+    def test_a_ligand_passing_the_gate_survives_it(self):
+        with TemporaryDirectory() as tmp:
+            row = self._rows(tmp, "True")["a"]
+            self.assertTrue(row["interaction_pass"])
+            self.assertTrue(row["all_stages"])
+
+    def test_an_undecided_gate_passes_and_says_so(self):
+        with TemporaryDirectory() as tmp:
+            row = self._rows(tmp, "")["a"]
+            self.assertTrue(row["interaction_pass"])
+            self.assertEqual(row["interaction_status"], "not_applied")
+
+    def test_the_summary_reports_whether_the_gate_ran(self):
+        with TemporaryDirectory() as tmp:
+            applied = summarize(list(self._rows(tmp, "True").values()))
+            undecided = summarize(list(self._rows(tmp, "").values()))
+        self.assertTrue(applied["interaction_applied"])
+        self.assertFalse(undecided["interaction_applied"])
+
+
 class TestSummaryOrder(unittest.TestCase):
     def test_the_funnel_narrows_in_stage_order(self):
         rows = [{"label": "a", "geometry_pass": True, "affinity_pass": True,
-                 "selectivity_pass": True, "toxicity_pass": True,
-                 "all_stages": True, "caco2_preregistered_pass": True,
+                 "interaction_pass": True, "selectivity_pass": True,
+                 "toxicity_pass": True, "all_stages": True,
+                 "caco2_preregistered_pass": True,
                  "caco2_better_than_reference": True},
                 {"label": "b", "geometry_pass": True, "affinity_pass": True,
-                 "selectivity_pass": True, "toxicity_pass": True,
-                 "all_stages": True, "caco2_preregistered_pass": False,
+                 "interaction_pass": True, "selectivity_pass": True,
+                 "toxicity_pass": True, "all_stages": True,
+                 "caco2_preregistered_pass": False,
                  "caco2_better_than_reference": False},
                 {"label": "c", "geometry_pass": True, "affinity_pass": True,
-                 "selectivity_pass": False, "toxicity_pass": True,
-                 "all_stages": False, "caco2_preregistered_pass": True,
+                 "interaction_pass": True, "selectivity_pass": False,
+                 "toxicity_pass": True, "all_stages": False,
+                 "caco2_preregistered_pass": True,
                  "caco2_better_than_reference": True}]
         s = summarize(rows)
         counts = [s[f"stage_{i}_{name}"] for i, name in enumerate(STAGES, 1)]
-        self.assertEqual(counts, [3, 3, 2, 2])
+        self.assertEqual(counts, [3, 3, 3, 2, 2])
         self.assertEqual(s["leads"], ["a", "b"])
 
     def test_the_summary_still_reports_what_the_caco2_gate_would_have_cut(self):
@@ -263,12 +318,14 @@ class TestSummaryOrder(unittest.TestCase):
         # the report carries its cost rather than absorbing it: "b" is a lead
         # now and would not have been under the pre-registered rule.
         rows = [{"label": "a", "geometry_pass": True, "affinity_pass": True,
-                 "selectivity_pass": True, "toxicity_pass": True,
-                 "all_stages": True, "all_stages_preregistered": True,
+                 "interaction_pass": True, "selectivity_pass": True,
+                 "toxicity_pass": True, "all_stages": True,
+                 "all_stages_preregistered": True,
                  "caco2_better_than_reference": True},
                 {"label": "b", "geometry_pass": True, "affinity_pass": True,
-                 "selectivity_pass": True, "toxicity_pass": True,
-                 "all_stages": True, "all_stages_preregistered": False,
+                 "interaction_pass": True, "selectivity_pass": True,
+                 "toxicity_pass": True, "all_stages": True,
+                 "all_stages_preregistered": False,
                  "caco2_better_than_reference": False}]
         s = summarize(rows)
         self.assertEqual(s["leads"], ["a", "b"])

@@ -23,8 +23,14 @@ all relative to PLN-1474:
 
   1. geometry gate (§8.5b) + PLIP
   2. affinity below PLN-1474's best PASSING pose
-  3. SELECTIVITY above PLN-1474's, by within-receptor rank
-  4. toxicity: EVERY §9.2 endpoint below PLN-1474's, not their mean
+  3. INTERACTION: §8.2's gate, as compound 25 decided it
+  4. SELECTIVITY above PLN-1474's
+  5. toxicity: EVERY §9.2 endpoint below PLN-1474's, not their mean
+
+Stages 2 and 3 are the pair the campaign asked for: PLN-1474-or-better
+affinity AND the compound-25-derived key interaction. They sit together
+because neither alone is a claim about binding -- a score without the anchor
+is a number, and the anchor without the score is a pose.
 
 Caco-2 is computed and reported on every row. It does not gate. Four
 amendments to §9.1's four stages, each with its reason:
@@ -96,7 +102,7 @@ __all__ = ["CACO2_ENDPOINT", "CACO2_MARGIN", "CONTEXT_ENDPOINTS", "REFERENCE",
            "toxicity_composite"]
 
 # Reported in this order; see the module docstring for why.
-STAGES = ("geometry", "affinity", "selectivity", "toxicity")
+STAGES = ("geometry", "affinity", "interaction", "selectivity", "toxicity")
 
 # §9.2: the three endpoints ADMET-AI predicts best, equally weighted.
 TOXICITY_ENDPOINTS = ("SR-MMP", "NR-AhR", "DILI")
@@ -194,7 +200,17 @@ def lead_rows(funnel_csv: str, admet_csv: str, affinity_cutoff: float,
         else:
             worse = list(TOXICITY_ENDPOINTS)
 
-        # Stage 3: selectivity, applied unconditionally (2026-09-30 amendment).
+        # Stage 3: §8.2's interaction gate. funnel.py aggregates it over the
+        # geometry-passing poses; an absent column means the gate was never
+        # decided, and the stage passes so the other four still report.
+        raw_gate = entry.get("plip_gate_pass")
+        if raw_gate in (None, ""):
+            interaction_pass, interaction_status = True, "not_applied"
+        else:
+            interaction_pass = str(raw_gate) == "True"
+            interaction_status = "ok"
+
+        # Stage 4: selectivity, applied unconditionally (2026-09-30 amendment).
         sel_value = sel_values.get(label)
         if sel_reference is None or sel_value is None:
             sel_status, sel_pass = "missing", False
@@ -206,6 +222,8 @@ def lead_rows(funnel_csv: str, admet_csv: str, affinity_cutoff: float,
             "geometry_pass": True,
             "best_passing_affinity": affinity,
             "affinity_pass": affinity is not None and affinity < affinity_cutoff,
+            "interaction_pass": interaction_pass,
+            "interaction_status": interaction_status,
             "selectivity": sel_value,
             "selectivity_pass": sel_pass,
             "selectivity_status": sel_status,
@@ -258,6 +276,8 @@ def summarize(rows: list) -> dict:
                             if r.get("admet_status") == "missing"]
     out["selectivity_missing"] = [r["label"] for r in rows
                                   if r.get("selectivity_status") == "missing"]
+    out["interaction_applied"] = any(
+        r.get("interaction_status") == "ok" for r in rows)
     out["selectivity_calibrated"] = bool(rows) and all(
         r.get("selectivity_calibrated") for r in rows)
     out["selectivity_calibration_ran"] = not rows or all(
@@ -360,6 +380,10 @@ def main(argv=None) -> int:
     if summary["selectivity_missing"]:
         print(f"  선택성 값 없음: {len(summary['selectivity_missing'])} "
               "(3단계 실패로 기록)")
+    if not summary["interaction_applied"]:
+        print("  경고: §8.2 상호작용 게이트가 적용되지 않았다 — funnel에 "
+              "plip_gate_pass 컬럼이 없다. cpd25_gate.py로 게이트를 정하고 "
+              "funnel.py --interaction-gate로 다시 만들어야 한다.")
     if not summary["selectivity_calibration_ran"]:
         print("  경고: §10.4 보정 게이트가 실행되지 않았다 — 대조군이 "
               "아이소폼에 도킹되지 않았다. 아무것도 검증하지 않은 축으로 "

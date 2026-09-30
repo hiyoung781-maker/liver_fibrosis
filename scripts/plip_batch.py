@@ -60,8 +60,14 @@ class StaleResumeError(RuntimeError):
 # poses_to_complex.LIGAND_RESNAME, as PLIP reports it in <identifiers><hetid>.
 PLIP_HETID = "LIG"
 
+# hbond_asn224 is §8.0 ⓑ, now backbone-only. The three columns after it are
+# what makes that tightening auditable and what §8.2 case 2 needs: the
+# side-chain contact the looser rule would have counted, whether any beta1
+# backbone O in the 223-226 anchor window accepts, and which residues those
+# are. A gate decided from a column that does not exist cannot be applied.
 FIELDS = (["label", "pose", "affinity", "status",
-           "metal_ca501", "hbond_asn224", "tyr178_contact", "hydrophobic_pocket"]
+           "metal_ca501", "hbond_asn224", "tyr178_contact", "hydrophobic_pocket",
+           "hbond_asn224_sidechain", "hbond_anchor_window", "hbond_bb_residues"]
           + [f"n_{kind}" for kind in INTERACTION_KINDS])
 
 
@@ -140,9 +146,12 @@ def row_from_record(entry: dict, record: dict, status: str = "ok") -> dict:
     The criteria are computed by validate_plip.crystal_verdict, not
     reimplemented here, so a change to the gate reaches the batch.
     """
-    from validate_plip import crystal_verdict
+    from validate_plip import (backbone_o_hbond_residues, crystal_verdict,
+                               has_anchor_window_hbond,
+                               has_asn224_sidechain_hbond)
 
     missing = crystal_verdict(record)["missing"] if status == "ok" else None
+    hbonds = record.get("hbonds", []) if status == "ok" else []
     row = {
         "label": entry["label"],
         "pose": entry["pose"],
@@ -153,6 +162,13 @@ def row_from_record(entry: dict, record: dict, status: str = "ok") -> dict:
         "tyr178_contact": "" if missing is None else int("tyr178_contact" not in missing),
         "hydrophobic_pocket": "" if missing is None else int(
             "hydrophobic_pocket" not in missing),
+        "hbond_asn224_sidechain": "" if missing is None else int(
+            has_asn224_sidechain_hbond(hbonds)),
+        "hbond_anchor_window": "" if missing is None else int(
+            has_anchor_window_hbond(hbonds)),
+        "hbond_bb_residues": ("" if missing is None else
+                              " ".join(str(r) for r in
+                                       sorted(backbone_o_hbond_residues(hbonds)))),
     }
     for kind in INTERACTION_KINDS:
         row[f"n_{kind}"] = len(record.get(kind, [])) if status == "ok" else ""
