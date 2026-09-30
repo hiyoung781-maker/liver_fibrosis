@@ -6,8 +6,11 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
+import csv
+from tempfile import TemporaryDirectory
+
 from export_poses_v2 import (METAL_COLOURS, chimerax_script, contact_residues,
-                             metal_atom)
+                             leads_from_csv, metal_atom)
 
 REPO = Path(__file__).resolve().parent.parent
 AVB1 = str(REPO / "docking" / "receptor.pdb")
@@ -60,6 +63,42 @@ class TestMetalsAreNotStickResidues(unittest.TestCase):
                                             radius=6.0)
         self.assertTrue(residues)
         self.assertFalse(set(residues) & set(metals))
+
+
+class TestLeadsComeFromTheFilterOutput(unittest.TestCase):
+    """The labels are already in the file lead_filter.py wrote. Retyping them
+    into the export command makes a second place for them to be wrong, and a
+    mistyped label exports nothing -- the view is simply missing a molecule,
+    with no error."""
+
+    def _csv(self, tmp, rows, fields=("label", "all_stages")):
+        path = Path(tmp) / "leads.csv"
+        with open(path, "w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(fields))
+            writer.writeheader()
+            writer.writerows(rows)
+        return str(path)
+
+    def test_only_rows_passing_every_stage_are_returned(self):
+        with TemporaryDirectory() as tmp:
+            path = self._csv(tmp, [{"label": "a", "all_stages": "True"},
+                                   {"label": "b", "all_stages": "False"},
+                                   {"label": "c", "all_stages": "True"}])
+            self.assertEqual(leads_from_csv(path), ["a", "c"])
+
+    def test_no_leads_is_an_empty_list_not_an_error(self):
+        # TL-A-prime really did select nothing; that is the ablation result.
+        with TemporaryDirectory() as tmp:
+            path = self._csv(tmp, [{"label": "a", "all_stages": "False"}])
+            self.assertEqual(leads_from_csv(path), [])
+
+    def test_the_wrong_csv_is_refused_rather_than_read_as_empty(self):
+        # A funnel.csv has labels too, and would quietly yield nothing.
+        with TemporaryDirectory() as tmp:
+            path = self._csv(tmp, [{"label": "a", "geometry_pass": "True"}],
+                             fields=("label", "geometry_pass"))
+            with self.assertRaises(ValueError):
+                leads_from_csv(path)
 
 
 class TestScript(unittest.TestCase):

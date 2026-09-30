@@ -31,6 +31,7 @@ machine that has ChimeraX but not this repository.
 from __future__ import annotations
 
 import argparse
+import csv
 import os
 import shutil
 import string
@@ -45,7 +46,8 @@ from export_poses import LIGAND_RESNAME, _safe, write_ligand_pdb
 from poses_to_sdf import poses_from_pdbqt
 
 __all__ = ["METAL_COLOURS", "LEAD_COLOURS", "REFERENCE_COLOURS",
-           "metal_atom", "contact_residues", "export", "chimerax_script"]
+           "metal_atom", "contact_residues", "export", "chimerax_script",
+           "leads_from_csv"]
 
 RDLogger.DisableLog("rdApp.*")
 
@@ -376,6 +378,25 @@ def chimerax_script(entries, metal, midas, contact, context, title="",
     return "\n".join(lines) + "\n"
 
 
+def leads_from_csv(path: str) -> list[str]:
+    """Labels that passed every stage, from lead_filter.py's --out-csv.
+
+    Read rather than retyped. The labels are already in a file the filter
+    wrote, and a hand-copied list is a second place for them to be wrong --
+    silently, since a mistyped label exports nothing and the view simply
+    lacks a molecule.
+    """
+    with open(path, newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    if not rows:
+        return []
+    if "all_stages" not in rows[0]:
+        raise ValueError(
+            f"{path} has no all_stages column; it is not a lead_filter.py "
+            f"--out-csv (columns: {', '.join(sorted(rows[0]))})")
+    return [r["label"] for r in rows if r["all_stages"] == "True"]
+
+
 def _parse_requests(items: list[str]) -> dict:
     wanted: dict[str, int | None] = {}
     for item in items:
@@ -386,7 +407,15 @@ def _parse_requests(items: list[str]) -> dict:
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("labels", nargs="+", help="LABEL or LABEL:POSE")
+    p.add_argument("labels", nargs="*", default=[],
+                    help="LABEL or LABEL:POSE, added to whatever --leads-csv "
+                         "and --controls supply")
+    p.add_argument("--leads-csv",
+                    help="lead_filter.py --out-csv; every row with "
+                         "all_stages True is exported and drawn as a lead")
+    p.add_argument("--controls", action="store_true",
+                    help="also export the four §10.4 calibration controls, "
+                         "drawn as references")
     p.add_argument("--poses", action="append", required=True,
                     help="directory of <label>_out.pdbqt; repeat to search "
                          "several")
@@ -403,11 +432,34 @@ def main(argv=None) -> int:
     p.add_argument("--title", default="")
     args = p.parse_args(argv)
 
+    labels, leads = list(args.labels), set(args.lead)
+    if args.leads_csv:
+        try:
+            found = leads_from_csv(args.leads_csv)
+        except (OSError, ValueError) as exc:
+            sys.stderr.write(f"{exc}\n")
+            return 2
+        if not found:
+            sys.stderr.write(
+                f"{args.leads_csv}: no row passed every stage, so there is no "
+                "lead to draw. That is a result, not an error -- but this "
+                "view would be references only.\n")
+        labels += found
+        leads |= set(found)
+    if args.controls:
+        from selectivity import CALIBRATION
+        labels += [c for group in CALIBRATION.values() for c in group]
+
+    if not labels:
+        sys.stderr.write("no labels: pass some, or --leads-csv, or "
+                         "--controls.\n")
+        return 2
+
     try:
-        report = export(args.poses, _parse_requests(args.labels), args.out_dir,
+        report = export(args.poses, _parse_requests(labels), args.out_dir,
                         args.receptor, _parse_residue(args.midas),
                         _parse_residue(args.contact) if args.contact else None,
-                        set(args.lead), args.name, args.title)
+                        leads, args.name, args.title)
     except ValueError as exc:
         sys.stderr.write(f"{exc}\n")
         return 2
