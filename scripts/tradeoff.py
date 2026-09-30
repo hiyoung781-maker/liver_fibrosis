@@ -214,6 +214,10 @@ def render(entries, ref_endpoints, sel_reference, arm, metric="delta") -> str:
     front = pareto_front(entries)
     front_labels = {e["label"] for e in front}
     n_leads = sum(1 for e in entries if e["category"] == "LEAD")
+    # The axis is named, not assumed. A table headed "선택성 Δ" while the
+    # numbers are percentile differences is the kind of label that ends up
+    # on a slide.
+    axis = "Δ" if metric == "delta" else "순위"
     band = next((e["selectivity_band"] for e in entries
                  if e.get("selectivity_band") is not None), DELTA_SD)
     lines = [
@@ -241,8 +245,8 @@ def render(entries, ref_endpoints, sel_reference, arm, metric="delta") -> str:
         f"구조 단계 통과: **{len(entries)}**개. Pareto front(선택성↑ · 독성↓) "
         f"위: **{len(front)}**개.",
         "",
-        "| 분류 | 분자 | affinity | 마진 | 선택성 Δ | 마진 | 독성 평균 | "
-        "기준 초과 엔드포인트 | Pareto |",
+        f"| 분류 | 분자 | affinity | 마진 | 선택성 {axis} | 마진 | "
+        "독성 평균 | 기준 초과 엔드포인트 | Pareto |",
         "|---|---|---|---|---|---|---|---|---|",
     ]
     order = {"LEAD": 0, "SELECTIVITY": 1, "SAFETY": 2, "BORDERLINE": 3,
@@ -308,7 +312,7 @@ def render(entries, ref_endpoints, sel_reference, arm, metric="delta") -> str:
         lines += ["", f"### {e['label']}  ({e['category']})", "",
                   f"- affinity **{e['affinity']:+.3f}** "
                   f"({margin_verdict(e['affinity_margin'], SEED_SD)})",
-                  f"- 선택성 Δ **{sel}** ({verdict})"]
+                  f"- 선택성 {axis} **{sel}** ({verdict})"]
         for endpoint, value in e["endpoints"].items():
             if value is None:
                 continue
