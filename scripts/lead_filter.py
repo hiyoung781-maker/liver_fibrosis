@@ -94,8 +94,19 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import sys
 from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# The §8.7 reference lives in funnel.py and is imported, never restated. It
+# was restated once -- on the command line, as -6.807 -- and for weeks
+# funnel.py filtered at -7.290 while lead_filter.py filtered at -6.807 on the
+# same pre-registered criterion. Nothing caught it until both printed to one
+# screen. -6.807 has no derivation anywhere in this repository; the value it
+# displaced is PLN-1474's best passing pose in results/v2_panel_geometry.csv.
+from funnel import PLN1474_CUTOFF
 
 __all__ = ["CACO2_ENDPOINT", "CACO2_MARGIN", "CONTEXT_ENDPOINTS", "REFERENCE",
            "STAGES", "TOXICITY_ENDPOINTS", "lead_rows", "summarize",
@@ -296,8 +307,12 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--funnel", required=True, help="funnel.py --out-csv")
     p.add_argument("--admet", required=True, help="admet_predict output CSV")
-    p.add_argument("--affinity-cutoff", type=float, required=True,
-                    help="PLN-1474's best PASSING pose in the adopted engine.")
+    p.add_argument("--affinity-cutoff", type=float, default=PLN1474_CUTOFF,
+                    help="PLN-1474's best PASSING pose in the adopted engine. "
+                         f"Defaults to funnel.PLN1474_CUTOFF "
+                         f"({PLN1474_CUTOFF:+.3f}), the pre-registered §8.7 "
+                         "value, so the reference is defined in ONE place. "
+                         "Passing anything else is recorded and warned about.")
     p.add_argument("--selectivity", type=Path,
                     help="selectivity.py --out JSON. Without it the "
                          "selectivity stage fails every molecule: a filter "
@@ -362,11 +377,23 @@ def main(argv=None) -> int:
                 "value, so there is no reference to filter against.\n")
             return 2
 
+    if abs(args.affinity_cutoff - PLN1474_CUTOFF) > 1e-9:
+        sys.stderr.write(
+            f"WARNING: --affinity-cutoff {args.affinity_cutoff:+.3f} is not "
+            f"the pre-registered §8.7 value {PLN1474_CUTOFF:+.3f} "
+            f"(difference {args.affinity_cutoff - PLN1474_CUTOFF:+.3f} "
+            "kcal/mol). The pre-registered value is PLN-1474's best PASSING "
+            "pose in results/v2_panel_geometry.csv. Use it unless the record "
+            "says why not.\n")
+
     rows = lead_rows(args.funnel, args.admet, args.affinity_cutoff,
                      args.reference, selectivity)
     summary = summarize(rows)
 
     print(f"\n=== {args.label or args.funnel} ===")
+    print(f"  affinity 컷오프: {args.affinity_cutoff:+.3f}"
+          + ("" if abs(args.affinity_cutoff - PLN1474_CUTOFF) < 1e-9
+             else f"  ← 사전등록 값 {PLN1474_CUTOFF:+.3f} 아님"))
     if args.selectivity:
         print(f"  선택성 지표: {args.selectivity_metric}")
     for position, stage in enumerate(STAGES, start=1):

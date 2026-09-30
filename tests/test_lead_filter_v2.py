@@ -333,5 +333,39 @@ class TestSummaryOrder(unittest.TestCase):
         self.assertEqual(s["caco2_better_than_reference"], ["a"])
 
 
+class TestTheCutoffHasOneDefinition(unittest.TestCase):
+    """funnel.py filtered at -7.290 and lead_filter.py at -6.807 on the same
+    pre-registered section 8.7 criterion, for weeks, because the value was
+    restated on the command line instead of imported. -6.807 has no
+    derivation anywhere in the repository. It cost three of the four reported
+    TL-C leads: gen_01909 at -7.283 misses the real cutoff by 0.007."""
+
+    def test_the_default_is_the_preregistered_value(self):
+        from funnel import PLN1474_CUTOFF
+        from lead_filter import PLN1474_CUTOFF as imported
+        self.assertEqual(imported, PLN1474_CUTOFF)
+        self.assertAlmostEqual(imported, -7.290, places=3)
+
+    def test_it_is_imported_not_restated(self):
+        # A second DEFINITION is a second thing to keep in step. Prose may
+        # quote the number; only an assignment can drift from funnel.py.
+        import inspect
+
+        import lead_filter
+        for line in inspect.getsource(lead_filter).splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#") or stripped.startswith("from "):
+                continue
+            self.assertNotRegex(stripped, r"^PLN1474_CUTOFF\s*=")
+
+    def test_the_wrong_cutoff_changes_which_molecules_pass(self):
+        # The four reported leads, against the value actually used and the
+        # pre-registered one.
+        leads = {"gen_01883": -7.952, "gen_01909": -7.283,
+                 "gen_01318": -7.044, "gen_03673": -6.979}
+        self.assertEqual(sum(1 for a in leads.values() if a < -6.807), 4)
+        self.assertEqual(sum(1 for a in leads.values() if a < -7.290), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
