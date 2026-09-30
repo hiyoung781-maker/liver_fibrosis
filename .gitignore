@@ -49,6 +49,7 @@ results/*
 !results/panel_geometry.csv
 !results/leads.csv
 !results/v2_*.md
+!results/FINAL_REPORT.md
 !results/v2_*.csv
 !results/v2_*.json
 !results/v2_TL-*/

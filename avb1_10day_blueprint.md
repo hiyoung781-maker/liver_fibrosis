@@ -1,5 +1,23 @@
 # 10-Day Blueprint: De Novo Design of Integrin αvβ1 Inhibitors with REINVENT4
 
+> **CANONICAL VERSION: `korean_avb1_10day_blueprint.md`.**
+>
+> This English copy stopped being updated on 2026-09-28 and is kept only as
+> a record of the v1 protocol. It does NOT contain the v2 rerun's results
+> (section 8.9 of the Korean version) or the eighteen factual corrections
+> applied on 2026-09-30, and several numbers in it have since been withdrawn:
+>
+> | in this file | status |
+> |---|---|
+> | cpd 25 "MDCK < 0.1 × 10⁻⁶ cm/s" | wrong series — Table 3 gives a–b 3.0 / b–a 3.2 |
+> | "a single stage of 600 steps" | the run was 1000 steps |
+> | "Caco-2 MAE 0.26–0.28", "inter-lab 0.57 log" | withdrawn, no source found |
+> | `TR01225179` used as the paper's name for the ligand | a PDB-title registry number; the paper calls it acid **1** |
+> | `CHEMBL4649232` "pIC50 9.78 (IC50 0.166 nM)" | it is a Ki, not an IC50 |
+>
+> Cite the Korean version. See `results/v2_blueprint_corrections.md` for the
+> full list.
+
 **Project:** evidence-based target prioritization → in silico inhibitor design for liver fibrosis
 **Target:** integrin αvβ1 (hepatic stellate cell–intrinsic, direct antifibrotic target)
 **Reference structure:** PDB 8W30 — αvβ1 headpiece in complex with TR01225179 [112]
