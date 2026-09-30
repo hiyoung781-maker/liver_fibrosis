@@ -18,16 +18,38 @@ would mitigate it and would introduce another transform, so v2 uses the
 equal mean and says this out loud. hERG, AMES and the three CYPs leave the
 filter and travel on the lead card.
 
-FOUR STAGES, IN THE PRE-REGISTERED ORDER (§9.1), all relative to PLN-1474:
+FIVE STAGES, AMENDED 2026-09-30 (change ledger in results/v2_lead_filter.md),
+all relative to PLN-1474:
 
-  1. geometry gate (§8.5b)
-  2. Caco-2 better than PLN-1474 by MORE THAN 0.5 log
-  3. affinity below PLN-1474's best PASSING pose
-  4. toxicity composite below PLN-1474's
+  1. geometry gate (§8.5b) + PLIP
+  2. affinity below PLN-1474's best PASSING pose
+  3. SELECTIVITY above PLN-1474's, by within-receptor rank
+  4. toxicity: EVERY §9.2 endpoint below PLN-1474's, not their mean
+  5. Caco-2 better than PLN-1474 by MORE THAN 0.5 log
 
-Every stage is a conjunction, so the order does not change the final set --
-but it changes the counts the report shows, and the pre-registered order is
-the one to report.
+Three amendments to §9.1's four stages, each with its reason:
+
+ORDER. Strongest evidence first. Structure, then a same-engine relative
+affinity, then selectivity, then model predictions -- with Caco-2 LAST
+because it is the filter this project itself calls partly circular. Every
+stage is a conjunction, so the final set is unchanged; the counts the report
+shows are not, and both orders are reported.
+
+SELECTIVITY BECOMES A STAGE. §9.1 had it only as criterion 6/7, a ranking
+axis. §10.4's clause making criterion 6 unevaluable when the calibration gate
+fails is amended away: the stage applies unconditionally. The calibration
+verdict is still computed and reported beside it, because it is what says
+whether the protocol has demonstrated any discriminating power -- and when it
+has not, `selectivity_calibrated` is False and the lead card must say so. A
+molecule with no selectivity value FAILS; the stage cannot pass what it did
+not measure.
+
+TOXICITY BECOMES PER-ENDPOINT. An equal mean hides one bad endpoint behind
+two good ones. Measured on this run: gen_03050 passes the mean at 0.1442
+while its SR-MMP is 0.3323, SIXTEEN TIMES PLN-1474's 0.0208, because a low
+DILI dilutes it. Requiring every endpoint to beat the reference removes the
+dynamic-range domination §9.2 admitted it could not fix. The mean is still
+computed and reported, since it is the pre-registered number.
 
 THE PERMEABILITY FILTER IS PARTLY CIRCULAR AND THAT HAS TO BE SAID. Measured
 on this project's own library, predicted Caco-2 correlates with TPSA at
@@ -54,7 +76,11 @@ import sys
 from pathlib import Path
 
 __all__ = ["CACO2_ENDPOINT", "CACO2_MARGIN", "CONTEXT_ENDPOINTS", "REFERENCE",
-           "TOXICITY_ENDPOINTS", "lead_rows", "summarize", "toxicity_composite"]
+           "STAGES", "TOXICITY_ENDPOINTS", "lead_rows", "summarize",
+           "toxicity_composite"]
+
+# Reported in this order; see the module docstring for why.
+STAGES = ("geometry", "affinity", "selectivity", "toxicity", "caco2")
 
 # §9.2: the three endpoints ADMET-AI predicts best, equally weighted.
 TOXICITY_ENDPOINTS = ("SR-MMP", "NR-AhR", "DILI")
@@ -96,8 +122,13 @@ def _read(path: str) -> list:
 
 
 def lead_rows(funnel_csv: str, admet_csv: str, affinity_cutoff: float,
-              reference: str = REFERENCE) -> list:
-    """One row per geometry-passing ligand with all four §9.1 flags."""
+              reference: str = REFERENCE, selectivity: dict | None = None) -> list:
+    """One row per geometry-passing ligand with all five stage flags.
+
+    `selectivity` is {"reference": float, "values": {label: float},
+    "calibration_passed": bool}. Absent, or absent for a molecule, fails the
+    selectivity stage -- it cannot pass what was not measured.
+    """
     admet = {}
     for row in _read(admet_csv):
         label = row.get("label") or row.get("Label") or ""
@@ -112,10 +143,17 @@ def lead_rows(funnel_csv: str, admet_csv: str, affinity_cutoff: float,
             "against and a default would be an invented reference.")
     ref_caco2 = _float(ref.get(CACO2_ENDPOINT))
     ref_tox = toxicity_composite(ref)
-    if ref_caco2 is None or ref_tox is None:
+    ref_endpoints = {e: _float(ref.get(e)) for e in TOXICITY_ENDPOINTS}
+    if ref_caco2 is None or ref_tox is None or any(
+            v is None for v in ref_endpoints.values()):
         raise ValueError(
             f"{admet_csv}: {reference} is missing {CACO2_ENDPOINT} or one of "
             f"{TOXICITY_ENDPOINTS}; the thresholds cannot be derived.")
+
+    selectivity = selectivity or {}
+    sel_values = selectivity.get("values") or {}
+    sel_reference = selectivity.get("reference")
+    sel_calibrated = bool(selectivity.get("calibration_passed", False))
 
     rows = []
     for entry in _read(funnel_csv):
@@ -127,47 +165,73 @@ def lead_rows(funnel_csv: str, admet_csv: str, affinity_cutoff: float,
         tox = toxicity_composite(prediction) if prediction else None
         affinity = _float(entry.get("best_passing_affinity"))
 
+        # Stage 4: every endpoint below the reference, not their mean.
+        worse = []
+        if prediction:
+            for endpoint in TOXICITY_ENDPOINTS:
+                value = _float(prediction.get(endpoint))
+                if value is None or value >= ref_endpoints[endpoint]:
+                    worse.append(endpoint)
+        else:
+            worse = list(TOXICITY_ENDPOINTS)
+
+        # Stage 3: selectivity, applied unconditionally (2026-09-30 amendment).
+        sel_value = sel_values.get(label)
+        if sel_reference is None or sel_value is None:
+            sel_status, sel_pass = "missing", False
+        else:
+            sel_status, sel_pass = "ok", sel_value > sel_reference
+
         row = {
             "label": label,
             "geometry_pass": True,
-            "caco2": caco2,
-            "caco2_pass": caco2 is not None and caco2 > ref_caco2 + CACO2_MARGIN,
             "best_passing_affinity": affinity,
             "affinity_pass": affinity is not None and affinity < affinity_cutoff,
+            "selectivity": sel_value,
+            "selectivity_pass": sel_pass,
+            "selectivity_status": sel_status,
+            "selectivity_calibrated": sel_calibrated,
             "toxicity": tox,
-            "toxicity_pass": tox is not None and tox < ref_tox,
+            "toxicity_pass": bool(prediction) and not worse,
+            "toxicity_worse_than_reference": worse,
+            "toxicity_mean_pass": tox is not None and tox < ref_tox,
+            "caco2": caco2,
+            "caco2_pass": caco2 is not None and caco2 > ref_caco2 + CACO2_MARGIN,
             "admet_status": "ok" if prediction else "missing",
             "plip_metal_any_passing": entry.get("plip_metal_any_passing") == "True",
             "plip_hbond_any_passing": entry.get("plip_hbond_any_passing") == "True",
             "n_poses": entry.get("n_poses"),
         }
+        for endpoint in TOXICITY_ENDPOINTS:
+            row[endpoint] = _float(prediction.get(endpoint)) if prediction else None
         for endpoint in CONTEXT_ENDPOINTS:
             row[endpoint] = _float(prediction.get(endpoint)) if prediction else None
-        row["all_four"] = (row["caco2_pass"] and row["affinity_pass"]
-                           and row["toxicity_pass"])
+        row["all_stages"] = all(row[f"{stage}_pass"] for stage in STAGES)
         rows.append(row)
 
-    rows.sort(key=lambda r: (not r["all_four"],
+    rows.sort(key=lambda r: (not r["all_stages"],
                              r["best_passing_affinity"]
                              if r["best_passing_affinity"] is not None else 0.0))
     return rows
 
 
 def summarize(rows: list) -> dict:
-    """The four-stage funnel, cumulative, in §9.1's order."""
-    stage1 = [r for r in rows if r["geometry_pass"]]
-    stage2 = [r for r in stage1 if r["caco2_pass"]]
-    stage3 = [r for r in stage2 if r["affinity_pass"]]
-    stage4 = [r for r in stage3 if r["toxicity_pass"]]
-    return {
-        "stage_1_geometry": len(stage1),
-        "stage_2_caco2": len(stage2),
-        "stage_3_affinity": len(stage3),
-        "stage_4_toxicity": len(stage4),
-        "leads": [r["label"] for r in stage4],
-        "admet_missing": [r["label"] for r in stage1
-                          if r.get("admet_status") == "missing"],
-    }
+    """The five-stage funnel, cumulative, in STAGES order."""
+    out: dict = {}
+    remaining = list(rows)
+    for position, stage in enumerate(STAGES, start=1):
+        remaining = [r for r in remaining if r.get(f"{stage}_pass")]
+        out[f"stage_{position}_{stage}"] = len(remaining)
+    out["leads"] = [r["label"] for r in remaining]
+    out["admet_missing"] = [r["label"] for r in rows
+                            if r.get("admet_status") == "missing"]
+    out["selectivity_missing"] = [r["label"] for r in rows
+                                  if r.get("selectivity_status") == "missing"]
+    out["selectivity_calibrated"] = bool(rows) and all(
+        r.get("selectivity_calibrated") for r in rows)
+    # The pre-registered toxicity rule, kept for the record.
+    out["toxicity_mean_pass"] = sum(1 for r in rows if r.get("toxicity_mean_pass"))
+    return out
 
 
 def main(argv=None) -> int:
@@ -176,24 +240,65 @@ def main(argv=None) -> int:
     p.add_argument("--admet", required=True, help="admet_predict output CSV")
     p.add_argument("--affinity-cutoff", type=float, required=True,
                     help="PLN-1474's best PASSING pose in the adopted engine.")
+    p.add_argument("--selectivity", type=Path,
+                    help="selectivity.py --out JSON. Without it the "
+                         "selectivity stage fails every molecule: a filter "
+                         "cannot pass what was not measured.")
+    p.add_argument("--selectivity-isoform", default=None,
+                    help="Which isoform's rank selectivity to filter on "
+                         "(default: the only one, if there is one).")
     p.add_argument("--reference", default=REFERENCE)
     p.add_argument("--label", default="")
     p.add_argument("--out-csv", type=Path)
     p.add_argument("--out-json", type=Path)
     args = p.parse_args(argv)
 
+    selectivity = None
+    if args.selectivity and args.selectivity.exists():
+        data = json.loads(args.selectivity.read_text())
+        tables = data.get("rank_selectivity") or {}
+        name = args.selectivity_isoform or (
+            next(iter(tables)) if len(tables) == 1 else None)
+        if name is None:
+            sys.stderr.write(
+                f"{args.selectivity} holds {len(tables)} isoforms "
+                f"({list(tables)}); name one with --selectivity-isoform.\n")
+            return 2
+        verdicts = data.get("calibration_rank") or {}
+        selectivity = {
+            "values": tables.get(name, {}),
+            "reference": None,
+            "calibration_passed": bool((verdicts.get(name) or {}).get("passed")),
+        }
+        # The reference's own selectivity, looked up by either label form.
+        for key in (args.reference, args.reference.replace("PANEL_", ""),
+                    f"PANEL_{args.reference}"):
+            if key in selectivity["values"]:
+                selectivity["reference"] = selectivity["values"][key]
+                break
+        if selectivity["reference"] is None:
+            sys.stderr.write(
+                f"{args.selectivity}: {args.reference} has no selectivity "
+                "value, so there is no reference to filter against.\n")
+            return 2
+
     rows = lead_rows(args.funnel, args.admet, args.affinity_cutoff,
-                     args.reference)
+                     args.reference, selectivity)
     summary = summarize(rows)
 
     print(f"\n=== {args.label or args.funnel} ===")
-    print(f"  1 기하 게이트          {summary['stage_1_geometry']}")
-    print(f"  2 + Caco-2 > 참조+{CACO2_MARGIN}   {summary['stage_2_caco2']}")
-    print(f"  3 + affinity < {args.affinity_cutoff:.3f}  {summary['stage_3_affinity']}")
-    print(f"  4 + 독성 < 참조         {summary['stage_4_toxicity']}")
+    for position, stage in enumerate(STAGES, start=1):
+        print(f"  {position} {stage:<12} {summary[f'stage_{position}_{stage}']}")
+    print(f"  (사전등록 독성 규칙: 동등평균 < 기준 통과 "
+          f"{summary['toxicity_mean_pass']})")
+    if summary["selectivity_missing"]:
+        print(f"  선택성 값 없음: {len(summary['selectivity_missing'])} "
+              "(3단계 실패로 기록)")
+    if not summary["selectivity_calibrated"]:
+        print("  경고: §10.4 보정 게이트를 통과하지 않은 선택성 값으로 "
+              "필터했다. 그 값의 타당성은 미검증이며 리드 카드에 병기해야 한다.")
     if summary["admet_missing"]:
-        print(f"  ADMET 예측 없음: {len(summary['admet_missing'])} "
-              f"(2·4단계 실패로 기록, 분모에서 빼지 않음)")
+        print(f"  ADMET 예측 없음: {len(summary['admet_missing'])}")
 
     if args.out_csv and rows:
         args.out_csv.parent.mkdir(parents=True, exist_ok=True)

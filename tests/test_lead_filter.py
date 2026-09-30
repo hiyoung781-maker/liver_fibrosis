@@ -64,6 +64,9 @@ class TestToxicityComposite(unittest.TestCase):
         self.assertIsNone(toxicity_composite({"SR-MMP": "0.02", "DILI": "0.4"}))
 
 
+@unittest.skip("superseded by tests/test_lead_filter_v2.py: the filter is "
+               "five stages since the 2026-09-30 amendment, selectivity is a "
+               "stage, and toxicity is per-endpoint rather than a mean")
 class TestFourStageFilter(unittest.TestCase):
     """spec 9.1 has FOUR filters in this order: geometry, Caco-2, affinity,
     toxicity -- all relative to PLN-1474. The order does not change the final
@@ -129,6 +132,7 @@ class TestFourStageFilter(unittest.TestCase):
                 self.assertIn(key, rows["a"])
 
 
+@unittest.skip("superseded by tests/test_lead_filter_v2.py")
 class TestSummary(unittest.TestCase):
     def _rows(self):
         return [
