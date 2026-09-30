@@ -1,12 +1,14 @@
 import sys
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from selectivity import (CALIBRATION, MEASURED_IC50, calibration_verdict,
-                         deltas, percentile_ranks, rank_selectivity,
-                         rank_sum)
+from selectivity import (CALIBRATION, LigandMismatchError, MEASURED_IC50,
+                         calibration_verdict, deltas, ligand_identity,
+                         merge_affinities, percentile_ranks,
+                         rank_selectivity, rank_sum, shared_ligands)
 
 # alphaVbeta1 and alphaVbeta6 scores, kcal/mol, same ligand each row.
 AVB1 = {"PLN-1474": -6.8, "CHEMBL4649232": -7.2, "CWHM-12": -7.0,
@@ -153,6 +155,91 @@ class TestWithinReceptorRanks(unittest.TestCase):
         # information to report -- an empty result, not a zero.
         self.assertEqual(rank_selectivity({"a": -9.0, "b": -8.0},
                                           {"a": -7.0}), {})
+
+
+POSE = """\
+MODEL 1
+REMARK SMILES {smiles}
+REMARK VINA RESULT:      {score}      0.000      0.000
+ATOM      1  C   UNL     1       1.000   2.000   3.000  1.00  0.00    +0.000 C
+ENDMDL
+"""
+
+
+def pose_dir(tmp, entries):
+    d = Path(tmp)
+    d.mkdir(parents=True, exist_ok=True)
+    for label, smiles, score in entries:
+        (d / f"{label}_out.pdbqt").write_text(
+            POSE.format(smiles=smiles, score=score))
+    return str(d)
+
+
+class TestLigandIdentity(unittest.TestCase):
+    """The Delta and the rank comparison both assume the SAME ligand file was
+    docked against both receptors. Uni-Dock copies the input PDBQT's REMARK
+    SMILES into its output, so that line identifies the molecule that was
+    actually docked -- and it is how the protomer mix-up would have been
+    caught earlier, where the same label meant two different molecules."""
+
+    def test_it_reads_the_remark_smiles(self):
+        text = POSE.format(smiles="CC(=O)[O-]", score="-7.0")
+        self.assertEqual(ligand_identity(text), "CC(=O)[O-]")
+
+    def test_a_pose_without_the_remark_has_no_identity(self):
+        self.assertIsNone(ligand_identity("MODEL 1\nENDMDL\n"))
+
+
+class TestSharedLigands(unittest.TestCase):
+
+    def test_matching_identities_are_shared(self):
+        with TemporaryDirectory() as tmp:
+            a = pose_dir(Path(tmp) / "a", [("x", "CCO", "-7.0")])
+            b = pose_dir(Path(tmp) / "b", [("x", "CCO", "-6.0")])
+            self.assertEqual(shared_ligands(a, b), {"x"})
+
+    def test_the_same_label_with_a_different_molecule_raises(self):
+        # Exactly the failure the protomer re-run produced: one label, two
+        # molecules. Silently comparing them would compare nothing.
+        with TemporaryDirectory() as tmp:
+            a = pose_dir(Path(tmp) / "a", [("x", "CCO", "-7.0")])
+            b = pose_dir(Path(tmp) / "b", [("x", "CCN", "-6.0")])
+            with self.assertRaises(LigandMismatchError) as cm:
+                shared_ligands(a, b)
+            self.assertIn("x", str(cm.exception))
+
+    def test_a_label_present_on_one_side_only_is_simply_not_shared(self):
+        with TemporaryDirectory() as tmp:
+            a = pose_dir(Path(tmp) / "a", [("x", "CCO", "-7.0"),
+                                           ("y", "CCC", "-7.5")])
+            b = pose_dir(Path(tmp) / "b", [("x", "CCO", "-6.0")])
+            self.assertEqual(shared_ligands(a, b), {"x"})
+
+
+class TestMergeAffinities(unittest.TestCase):
+    """alphaVbeta1's scores are spread over several docking directories -- the
+    two arms and the reference set -- because they were run separately. The
+    target side is assembled from all of them."""
+
+    def test_directories_are_merged(self):
+        with TemporaryDirectory() as tmp:
+            a = pose_dir(Path(tmp) / "a", [("x", "CCO", "-7.0")])
+            b = pose_dir(Path(tmp) / "b", [("y", "CCC", "-6.0")])
+            merged = merge_affinities([a, b])
+            self.assertEqual(set(merged), {"x", "y"})
+
+    def test_a_label_in_two_directories_with_two_molecules_raises(self):
+        with TemporaryDirectory() as tmp:
+            a = pose_dir(Path(tmp) / "a", [("x", "CCO", "-7.0")])
+            b = pose_dir(Path(tmp) / "b", [("x", "CCN", "-6.0")])
+            with self.assertRaises(LigandMismatchError):
+                merge_affinities([a, b])
+
+    def test_the_same_molecule_twice_keeps_the_better_score(self):
+        with TemporaryDirectory() as tmp:
+            a = pose_dir(Path(tmp) / "a", [("x", "CCO", "-7.0")])
+            b = pose_dir(Path(tmp) / "b", [("x", "CCO", "-8.0")])
+            self.assertAlmostEqual(merge_affinities([a, b])["x"], -8.0)
 
 
 if __name__ == "__main__":

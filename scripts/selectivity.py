@@ -64,9 +64,21 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-__all__ = ["CALIBRATION", "MEASURED_IC50", "best_affinities",
-           "calibration_verdict", "deltas", "percentile_ranks",
-           "rank_selectivity", "rank_sum"]
+__all__ = ["CALIBRATION", "LigandMismatchError", "MEASURED_IC50",
+           "best_affinities", "calibration_verdict", "deltas",
+           "ligand_identity", "merge_affinities", "percentile_ranks",
+           "rank_selectivity", "rank_sum", "shared_ligands"]
+
+
+class LigandMismatchError(RuntimeError):
+    """One label, two different molecules.
+
+    Both the Delta and the rank comparison assume the SAME ligand file was
+    docked against both receptors. Uni-Dock copies the input PDBQT's
+    `REMARK SMILES` into its output, so that line identifies what was actually
+    docked -- and it is how the protomer mix-up would have been caught, where
+    a label meant one molecule in one run and another in the next.
+    """
 
 # spec §10.4's controls, and the measured IC50 (nM) that is their answer key.
 CALIBRATION = {
@@ -108,6 +120,69 @@ def deltas(target: dict, subtype: dict) -> dict:
     """
     return {label: subtype[label] - target[label]
             for label in target if label in subtype}
+
+
+def ligand_identity(pose_text: str):
+    """The `REMARK SMILES` of a Uni-Dock output, or None if it carries none."""
+    for line in pose_text.splitlines():
+        if line.startswith("REMARK SMILES ") and "IDX" not in line:
+            return line[len("REMARK SMILES "):].strip()
+    return None
+
+
+def _identities(pose_dir: str, pattern: str = "*_out.pdbqt") -> dict:
+    out = {}
+    for path in sorted(Path(pose_dir).glob(pattern)):
+        out[path.stem.removesuffix("_out")] = ligand_identity(path.read_text())
+    return out
+
+
+def shared_ligands(target_dir: str, subtype_dir: str) -> set:
+    """Labels present in both directories, verified to be the same molecule.
+
+    A label whose REMARK SMILES differs between the two raises: comparing
+    those scores would compare two molecules, not two receptors.
+    """
+    target, subtype = _identities(target_dir), _identities(subtype_dir)
+    shared = set(target) & set(subtype)
+    mismatched = {label: (target[label], subtype[label]) for label in shared
+                  if target[label] is not None and subtype[label] is not None
+                  and target[label] != subtype[label]}
+    if mismatched:
+        listed = "; ".join(f"{k}: {a} vs {b}"
+                           for k, (a, b) in sorted(mismatched.items())[:5])
+        raise LigandMismatchError(
+            f"{len(mismatched)} label(s) name different molecules in "
+            f"{target_dir} and {subtype_dir}: {listed}. Dock the SAME prepared "
+            "PDBQT against both receptors -- otherwise the comparison is "
+            "between molecules, not receptors.")
+    return shared
+
+
+def merge_affinities(pose_dirs: list, pattern: str = "*_out.pdbqt") -> dict:
+    """Best affinity per label across several directories, identity-checked.
+
+    alphaVbeta1's scores live in more than one directory -- the two arms and
+    the reference set were docked separately -- so the target side is
+    assembled from all of them. A label appearing twice as two different
+    molecules raises; as the same molecule, the better score wins.
+    """
+    merged: dict = {}
+    seen: dict = {}
+    for directory in pose_dirs:
+        identities = _identities(directory, pattern)
+        for label, score in best_affinities(directory, pattern).items():
+            identity = identities.get(label)
+            if label in seen and identity is not None \
+                    and seen[label] is not None and seen[label] != identity:
+                raise LigandMismatchError(
+                    f"{label} is {seen[label]} in one directory and "
+                    f"{identity} in {directory}. These are different "
+                    "molecules under one label.")
+            seen.setdefault(label, identity)
+            if label not in merged or score < merged[label]:
+                merged[label] = score
+    return merged
 
 
 def percentile_ranks(scores: dict) -> dict:
@@ -203,8 +278,11 @@ def rank_sum(per_isoform: dict) -> dict:
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--target-poses", required=True,
-                    help="Uni-Dock output directory for alphaVbeta1.")
+    p.add_argument("--target-poses", action="append", required=True,
+                    metavar="DIR",
+                    help="A Uni-Dock output directory for alphaVbeta1. Repeat "
+                         "it: the target's scores are spread over the two arms "
+                         "and the reference set, which were docked separately.")
     p.add_argument("--isoform", action="append", default=[], metavar="NAME=DIR",
                     help="A validated isoform and its pose directory. Repeat "
                          "for each. Only isoforms that passed 10.3 belong here.")
@@ -219,13 +297,30 @@ def main(argv=None) -> int:
             "criterion 6 is unevaluable and that is the result to report.\n")
         return 2
 
-    target = best_affinities(args.target_poses)
-    delta_by_isoform, rank_by_isoform = {}, {}
+    try:
+        target = merge_affinities(args.target_poses)
+    except LigandMismatchError as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 2
+
+    delta_by_isoform, rank_by_isoform, shared_counts = {}, {}, {}
     for item in args.isoform:
         name, _, directory = item.partition("=")
-        subtype = best_affinities(directory)
-        delta_by_isoform[name] = deltas(target, subtype)
-        rank_by_isoform[name] = rank_selectivity(target, subtype)
+        # Every label used here is verified to name the same molecule on both
+        # sides. Without that the comparison is between molecules.
+        try:
+            shared = set()
+            for target_dir in args.target_poses:
+                shared |= shared_ligands(target_dir, directory)
+        except LigandMismatchError as exc:
+            sys.stderr.write(f"{exc}\n")
+            return 2
+        subtype = {k: v for k, v in best_affinities(directory).items()
+                   if k in shared}
+        restricted = {k: v for k, v in target.items() if k in shared}
+        shared_counts[name] = len(shared)
+        delta_by_isoform[name] = deltas(restricted, subtype)
+        rank_by_isoform[name] = rank_selectivity(restricted, subtype)
 
     rank_verdicts = {n: calibration_verdict(t) for n, t in rank_by_isoform.items()}
     delta_verdicts = {n: calibration_verdict(t) for n, t in delta_by_isoform.items()}
@@ -235,7 +330,15 @@ def main(argv=None) -> int:
     lines = [
         "# 선택성 축과 §10.4 보정 게이트",
         "",
-        f"대상 수용체 포즈: `{args.target_poses}`   분자 {len(target)}개",
+        "대상 수용체 포즈: " + ", ".join(f"`{d}`" for d in args.target_poses)
+        + f"   분자 {len(target)}개",
+        "아이소폼별 공통 리간드 수: "
+        + ", ".join(f"{n} {c}개" for n, c in shared_counts.items()),
+        "",
+        "공통 리간드는 두 수용체에서 `REMARK SMILES`가 일치하는 것만이다 — "
+        "같은 라벨이 서로 다른 분자를 가리키면 실행을 멈춘다. protomer를 고치기 "
+        "전과 후의 실행이 같은 라벨을 썼고, 그 검증이 없으면 수용체가 아니라 "
+        "분자를 비교하게 된다.",
         f"아이소폼: {', '.join(isoforms)}",
         "",
         "## 주 지표는 수용체 내 순위다",
