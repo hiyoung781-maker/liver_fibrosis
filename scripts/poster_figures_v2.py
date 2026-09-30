@@ -42,7 +42,7 @@ ARM_COLOURS = {"TL-A": "#c0392b", "TL-C": "#2471a3"}
 DISPLAY = {"TL-A-prime": "TL-A", "TL-A": "TL-A", "TL-C": "TL-C"}
 
 STAGE_LABELS = {
-    "start": "sampled\n(property window)",
+    "start": "docked\nproperty window",
     "geometry": "1  geometry\nMIDAS + Asn224",
     "affinity": f"2  affinity\n< {PLN1474_CUTOFF:+.3f} kcal/mol",
     "interaction": "3  interaction\nPLIP metal complex",
@@ -72,52 +72,77 @@ def _style():
     return plt
 
 
-def funnel_figure(arms: dict, out_path: Path) -> dict:
-    """Horizontal bars, one row per stage, both arms.
+def funnel_figure(counts: dict, out_path: Path, arm: str = "TL-C") -> dict:
+    """A funnel: stacked trapezoids narrowing at each stage.
 
-    Log x, because 5,212 and 1 do not share a linear axis. A count of zero
-    has no place on a log axis and is written at the floor instead of drawn,
-    so the reader is not left to infer it from a missing bar.
+    WIDTH IS LOG-SCALED AND THE FIGURE SAYS SO. 5,212 molecules enter and 1
+    leaves; width proportional to count makes every stage after the first a
+    line one pixel wide, and width proportional to nothing at all is a
+    decoration. log10 keeps the shape readable, and a reader who assumes
+    width means count would misread it by three orders of magnitude, so the
+    axis note is not optional.
+
+    Each band carries the stage's THRESHOLD, not just its name. The funnel
+    is the method; a band labelled only "affinity" tells no one what was
+    required.
     """
-    plt = _style()
     import numpy as np
 
+    plt = _style()
     order = ["start"] + list(stages("off"))
-    fig, axis = plt.subplots(figsize=(9.5, 5.2))
-    height = 0.36
-    positions = np.arange(len(order))[::-1]
+    values = [counts[arm][s] for s in order]
 
-    for offset, (arm, counts) in enumerate(arms.items()):
-        colour = ARM_COLOURS[arm]
-        values = [counts[s] for s in order]
-        y = positions + (offset - 0.5) * height
-        # A zero gets no bar. Clamping it to the axis floor draws a stub
-        # that reads as "a few", and the one stage where an arm returns
-        # nothing is the stage the figure exists to show.
-        drawn = [v if v > 0 else 0 for v in values]
-        axis.barh(y, drawn, height=height, color=colour,
-                  alpha=0.85 if arm == "TL-C" else 0.55,
-                  label=f"{arm}  ({'transfer learning' if arm == 'TL-A' else 'no transfer learning'})")
-        for yi, value in zip(y, values):
-            axis.text(max(value, 0.82) * 1.15, yi, f"{value:,}" if value else "0",
-                      va="center", ha="left", fontsize=10,
-                      fontweight="bold" if value <= 1 else "normal",
-                      color=colour if value else "#b03a2e")
+    # log10(count), floored so a stage returning 1 still has a visible mouth
+    # and a stage returning 0 closes it completely.
+    widths = [np.log10(v) + 1 if v > 0 else 0.0 for v in values]
+    widths = [w / widths[0] for w in widths]
 
-    axis.set_yticks(positions)
-    axis.set_yticklabels([STAGE_LABELS[s] for s in order], fontsize=9.5)
-    axis.set_xscale("log")
-    axis.set_xlim(0.8, 12000)
-    axis.set_xlabel("molecules (log scale)")
-    axis.set_title("Five-stage filter, both arms — every threshold relative to PLN-1474")
-    axis.legend(frameon=False, loc="lower right", fontsize=9.5)
-    axis.grid(axis="x", alpha=0.25, which="both")
-    axis.set_axisbelow(True)
+    fig, axis = plt.subplots(figsize=(10.5, 7.4))
+    band_height = 1.0
+    palette = plt.cm.Blues(np.linspace(0.35, 0.92, len(order)))
+
+    for i in range(len(order)):
+        top, bottom = -i * band_height, -(i + 1) * band_height
+        w_top = widths[i]
+        w_bottom = widths[i + 1] if i + 1 < len(widths) else widths[i] * 0.9
+        axis.fill(
+            [-w_top / 2, w_top / 2, w_bottom / 2, -w_bottom / 2],
+            [top, top, bottom, bottom],
+            color=palette[i], edgecolor="white", linewidth=2, zorder=2)
+
+        mid = (top + bottom) / 2
+        label = STAGE_LABELS[order[i]].replace("\n", "  ·  ")
+        axis.text(-widths[0] / 2 - 0.05, mid, label, ha="right", va="center",
+                  fontsize=11.5, color="#1c2833")
+        count = values[i]
+        axis.text(widths[0] / 2 + 0.05, mid, f"{count:,}", ha="left",
+                  va="center", fontsize=14, fontweight="bold",
+                  color="#1a5276" if count else "#b03a2e")
+        if i:
+            previous = values[i - 1]
+            share = f"{count / previous * 100:.1f}%" if previous else "—"
+            axis.text(widths[0] / 2 + 0.05, mid - 0.24, f"({share} of above)",
+                      ha="left", va="center", fontsize=9.5, color="#7f8c8d")
+
+    axis.set_xlim(-1.55, 1.15)
+    axis.set_ylim(-len(order) * band_height - 0.75, 0.85)
+    axis.axis("off")
+    axis.text(0, 0.55, f"{arm}  —  five-stage filter",
+              ha="center", fontsize=15, fontweight="bold", color="#1c2833")
+    axis.text(0, 0.22,
+              "every threshold is relative to PLN-1474, a Phase 1 compound",
+              ha="center", fontsize=10.5, color="#566573")
+    axis.text(0, -len(order) * band_height - 0.42,
+              "band width ∝ log10(molecules), not to the count itself — "
+              f"{values[-1]:,} and {values[0]:,} share no linear axis",
+              ha="center", fontsize=9, color="#7f8c8d", style="italic")
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path)
     fig.savefig(out_path.with_suffix(".pdf"))
     plt.close(fig)
-    return {"figure": str(out_path), "arms": arms}
+    return {"figure": str(out_path), "arm": arm,
+            "counts": dict(zip(order, values))}
 
 
 def tradeoff_figure(entries: list, band: float, sel_reference: float,
@@ -248,10 +273,10 @@ def main(argv=None) -> int:
         for position, stage in enumerate(stages("off"), start=1):
             counts[arm][stage] = summary[f"stage_{position}_{stage}"]
 
-    report = funnel_figure(counts, args.out_dir / "v2_fig1_funnel.png")
-    print(f"wrote {report['figure']}")
-    for arm, values in counts.items():
-        print(f"  {arm:6s} " + "  ".join(f"{k}={v}" for k, v in values.items()))
+    report = funnel_figure(counts, args.out_dir / "v2_fig1_funnel.png",
+                           args.main_arm)
+    print(f"wrote {report['figure']}  ({args.main_arm} only)")
+    print("  " + "  ".join(f"{k}={v}" for k, v in report["counts"].items()))
 
     # ---- figure 2 ----
     funnel_csv, admet_csv, selectivity_json = parsed[args.main_arm]
