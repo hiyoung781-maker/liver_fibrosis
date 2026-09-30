@@ -60,6 +60,21 @@ class TestCalibrationGate(unittest.TestCase):
         self.assertFalse(v["passed"])
         self.assertIn("CWHM-12", str(v["failed"]))
 
+    def test_a_prefixed_control_label_is_still_found(self):
+        # The reference set is docked under whichever name its input used.
+        # Reading PANEL_PLN-1474 as "PLN-1474 is missing" costs a full
+        # re-dock to discover, and the report looks identical either way.
+        d = {"PANEL_PLN-1474": 1.2, "PANEL_CHEMBL4649232": 1.0,
+             "PANEL_CWHM-12": -0.3, "PANEL_GLPG0187": 0.1}
+        v = calibration_verdict(d)
+        self.assertTrue(v["passed"], v["failed"])
+        self.assertEqual(v["missing"], [])
+
+    def test_the_two_naming_conventions_can_be_mixed(self):
+        d = {"PLN-1474": 1.2, "PANEL_CHEMBL4649232": 1.0,
+             "CWHM-12": -0.3, "PANEL_GLPG0187": 0.1}
+        self.assertTrue(calibration_verdict(d)["passed"])
+
     def test_a_missing_control_fails_rather_than_being_skipped(self):
         d = {"PLN-1474": 1.2, "CWHM-12": -0.3, "GLPG0187": 0.1}
         v = calibration_verdict(d)

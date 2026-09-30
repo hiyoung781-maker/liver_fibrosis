@@ -275,14 +275,19 @@ def calibration_verdict(delta: dict) -> dict:
     answer is known in advance.
     """
     failed = []
-    missing = [name for group in CALIBRATION.values() for name in group
-               if name not in delta]
+    # The reference set is docked under whichever name its input file used --
+    # bare from data/selectivity_refs.smi, prefixed from docking/panel_pdbqt.
+    # A lookup that knows only one of them reports a control that IS docked as
+    # missing, which is indistinguishable from one that was never docked.
+    keys = {name: _control_key(name, delta)
+            for group in CALIBRATION.values() for name in group}
+    missing = sorted(name for name, key in keys.items() if key is None)
     if missing:
         failed.append(f"controls absent from the Delta table: {missing}")
         return {"passed": False, "failed": failed, "missing": missing}
 
-    selective = {n: delta[n] for n in CALIBRATION["selective"]}
-    non_selective = {n: delta[n] for n in CALIBRATION["non_selective"]}
+    selective = {n: delta[keys[n]] for n in CALIBRATION["selective"]}
+    non_selective = {n: delta[keys[n]] for n in CALIBRATION["non_selective"]}
     for sel_name, sel in selective.items():
         for non_name, non in non_selective.items():
             if sel <= non:
