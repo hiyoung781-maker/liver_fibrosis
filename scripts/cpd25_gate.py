@@ -189,13 +189,18 @@ def main(argv=None) -> int:
     p.add_argument("--out-json", type=Path)
     args = p.parse_args(argv)
 
+    # dock_panel.py writes PANEL_-prefixed labels; selectivity_refs.smi and
+    # the ChEMBL id are bare. Fifth place this has bitten the campaign, so it
+    # goes through the one function that knows the answer.
+    from selectivity import label_variants
+    wanted = set(label_variants(args.label))
     with open(args.plip, newline="") as handle:
-        rows = [r for r in csv.DictReader(handle) if r.get("label") == args.label]
+        rows = [r for r in csv.DictReader(handle) if r.get("label") in wanted]
     if not rows:
         sys.stderr.write(
-            f"{args.plip}: no rows labelled {args.label!r}. §8.2 decides the "
-            "gate from compound 25 and cannot be applied without it; dock and "
-            "run PLIP on it first.\n")
+            f"{args.plip}: no rows labelled any of {sorted(wanted)}. §8.2 "
+            "decides the gate from compound 25 and cannot be applied without "
+            "it; dock and run PLIP on it first.\n")
         return 2
     if "hbond_anchor_window" not in rows[0]:
         sys.stderr.write(

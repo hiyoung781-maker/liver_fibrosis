@@ -110,5 +110,19 @@ class TestApplyingTheGate(unittest.TestCase):
         self.assertFalse(passes({"metal_ca501": "1", "hbond_asn224": ""}))
 
 
+class TestLabelSpelling(unittest.TestCase):
+    """dock_panel.py writes PANEL_-prefixed labels; the ChEMBL id is bare.
+    The gate script looked for the bare form only and reported compound 25 as
+    never docked when its PLIP rows were sitting in the file under
+    PANEL_CHEMBL5532604."""
+
+    def test_both_spellings_resolve_to_the_same_compound(self):
+        from selectivity import label_variants
+        variants = set(label_variants("CHEMBL5532604"))
+        self.assertIn("PANEL_CHEMBL5532604", variants)
+        self.assertIn("CHEMBL5532604", variants)
+        self.assertEqual(set(label_variants("PANEL_CHEMBL5532604")), variants)
+
+
 if __name__ == "__main__":
     unittest.main()
