@@ -115,6 +115,15 @@ __all__ = ["CACO2_ENDPOINT", "CACO2_MARGIN", "CONTEXT_ENDPOINTS", "REFERENCE",
 # Reported in this order; see the module docstring for why.
 STAGES = ("geometry", "affinity", "interaction", "selectivity", "toxicity")
 
+# Caco-2 left the filter on 2026-09-30 (see the docstring) and can be put
+# back with --caco2. "better" drops the pre-registered 0.5-log margin and
+# asks only that the value beat the reference; "margin" is §9.1 as written.
+CACO2_MODES = ("off", "better", "margin")
+
+
+def stages(caco2_mode: str = "off") -> tuple:
+    return STAGES + (("caco2",) if caco2_mode != "off" else ())
+
 # §9.2: the three endpoints ADMET-AI predicts best, equally weighted.
 TOXICITY_ENDPOINTS = ("SR-MMP", "NR-AhR", "DILI")
 
@@ -157,7 +166,8 @@ def _read(path: str) -> list:
 
 
 def lead_rows(funnel_csv: str, admet_csv: str, affinity_cutoff: float,
-              reference: str = REFERENCE, selectivity: dict | None = None) -> list:
+              reference: str = REFERENCE, selectivity: dict | None = None,
+              caco2_mode: str = "off") -> list:
     """One row per geometry-passing ligand with all five stage flags.
 
     `selectivity` is {"reference": float, "values": {label: float},
@@ -245,6 +255,11 @@ def lead_rows(funnel_csv: str, admet_csv: str, affinity_cutoff: float,
             "toxicity_worse_than_reference": worse,
             "toxicity_mean_pass": tox is not None and tox < ref_tox,
             "caco2": caco2,
+            "caco2_pass": (True if caco2_mode == "off" else
+                           caco2 is not None
+                           and caco2 > ref_caco2 + (CACO2_MARGIN
+                                                    if caco2_mode == "margin"
+                                                    else 0.0)),
             # Reported, not a stage. "_preregistered" names what it is: the
             # rule §9.1 asked for, kept visible beside the rule now used.
             "caco2_better_than_reference": caco2 is not None and caco2 > ref_caco2,
@@ -259,7 +274,8 @@ def lead_rows(funnel_csv: str, admet_csv: str, affinity_cutoff: float,
             row[endpoint] = _float(prediction.get(endpoint)) if prediction else None
         for endpoint in CONTEXT_ENDPOINTS:
             row[endpoint] = _float(prediction.get(endpoint)) if prediction else None
-        row["all_stages"] = all(row[f"{stage}_pass"] for stage in STAGES)
+        row["all_stages"] = all(row[f"{stage}_pass"]
+                                for stage in stages(caco2_mode))
         # What the pre-registered five-stage rule would have selected.
         row["all_stages_preregistered"] = (row["all_stages"]
                                            and row["caco2_preregistered_pass"])
@@ -271,7 +287,7 @@ def lead_rows(funnel_csv: str, admet_csv: str, affinity_cutoff: float,
     return rows
 
 
-def summarize(rows: list) -> dict:
+def summarize(rows: list, caco2_mode: str = "off") -> dict:
     """The four-stage funnel, cumulative, in STAGES order.
 
     `leads_preregistered` reports what the five-stage rule with the Caco-2
@@ -279,7 +295,7 @@ def summarize(rows: list) -> dict:
     """
     out: dict = {}
     remaining = list(rows)
-    for position, stage in enumerate(STAGES, start=1):
+    for position, stage in enumerate(stages(caco2_mode), start=1):
         remaining = [r for r in remaining if r.get(f"{stage}_pass")]
         out[f"stage_{position}_{stage}"] = len(remaining)
     out["leads"] = [r["label"] for r in remaining]
@@ -334,6 +350,11 @@ def main(argv=None) -> int:
                          "cancels here, because every use of the value is a "
                          "comparison against PLN-1474, which is itself a "
                          "difference.")
+    p.add_argument("--caco2", choices=CACO2_MODES, default="off",
+                    help="Put Caco-2 back in the filter. 'better' asks only "
+                         "that it beat PLN-1474; 'margin' is §9.1 as "
+                         "written, better by more than 0.5 log. Off by "
+                         "default (2026-09-30 amendment).")
     p.add_argument("--reference", default=REFERENCE)
     p.add_argument("--label", default="")
     p.add_argument("--out-csv", type=Path)
@@ -387,8 +408,8 @@ def main(argv=None) -> int:
             "says why not.\n")
 
     rows = lead_rows(args.funnel, args.admet, args.affinity_cutoff,
-                     args.reference, selectivity)
-    summary = summarize(rows)
+                     args.reference, selectivity, args.caco2)
+    summary = summarize(rows, args.caco2)
 
     print(f"\n=== {args.label or args.funnel} ===")
     print(f"  affinity 컷오프: {args.affinity_cutoff:+.3f}"
@@ -396,7 +417,7 @@ def main(argv=None) -> int:
              else f"  ← 사전등록 값 {PLN1474_CUTOFF:+.3f} 아님"))
     if args.selectivity:
         print(f"  선택성 지표: {args.selectivity_metric}")
-    for position, stage in enumerate(STAGES, start=1):
+    for position, stage in enumerate(stages(args.caco2), start=1):
         print(f"  {position} {stage:<12} {summary[f'stage_{position}_{stage}']}")
     print(f"  (사전등록 독성 규칙: 동등평균 < 기준 통과 "
           f"{summary['toxicity_mean_pass']})")
