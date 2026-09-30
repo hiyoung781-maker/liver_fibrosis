@@ -5,6 +5,17 @@ from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
+# build_complex reads the pose through Meeko, which lives in the docking
+# environment and not in the training one. Without this the whole suite stops
+# here on a ModuleNotFoundError, which reads as a regression rather than as a
+# test that needs a different interpreter -- the rest of this file is pure
+# text handling and runs anywhere.
+try:
+    import meeko  # noqa: F401
+    HAVE_MEEKO = True
+except Exception:
+    HAVE_MEEKO = False
+
 from poses_to_complex import (LIGAND_CHAIN, MIDAS, MIDAS_LINK_CUTOFF,
                               build_complex, build_many, midas_link_record)
 
@@ -28,6 +39,7 @@ MIDAS_POSE = "tests/fixtures/pose_midas.pdbqt"
 MIDAS_POSE_NOCHAIN = "tests/fixtures/pose_midas_nochain.pdbqt"
 
 
+@unittest.skipUnless(HAVE_MEEKO, "meeko not installed")
 class TestComplexBuilding(unittest.TestCase):
     """PLIP computes donor-H...acceptor angles, so it needs explicit
     hydrogens. PDBQT merges nonpolar hydrogens into heavy atoms, so it
@@ -53,6 +65,7 @@ class TestComplexBuilding(unittest.TestCase):
             self.assertTrue(any(l[76:78].strip() == "H" for l in lig_lines))
 
 
+@unittest.skipUnless(HAVE_MEEKO, "meeko not installed")
 class TestFailureIsolation(unittest.TestCase):
     """One pose failing to convert must not stop a batch of ~85,000 poses
     from finishing; failures are recorded and the rest proceed."""
@@ -70,6 +83,7 @@ class TestFailureIsolation(unittest.TestCase):
             self.assertEqual(len(result["failed"]), 1)
 
 
+@unittest.skipUnless(HAVE_MEEKO, "meeko not installed")
 class TestMidasLinkRecord(unittest.TestCase):
     """PLIP merges a ligand and a metal into one composite binding site ONLY
     when the input PDB carries a LINK record joining them (preparation.py
@@ -139,6 +153,7 @@ class TestMidasLinkRecord(unittest.TestCase):
         self.assertIsNone(midas_link_record(lig, []))
 
 
+@unittest.skipUnless(HAVE_MEEKO, "meeko not installed")
 class TestLigandChainIsExplicit(unittest.TestCase):
     """A docked pose arrives with no chain id. Open Babel then relabels the
     chain-less HETATM residue as chain Z, while a LINK written from the
