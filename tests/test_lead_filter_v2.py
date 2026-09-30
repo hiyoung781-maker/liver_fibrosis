@@ -202,6 +202,43 @@ class TestSelectivityStage(unittest.TestCase):
             self.assertEqual(rows["a"]["selectivity_status"], "missing")
 
 
+class TestSelectivityIsReferenceRelative(unittest.TestCase):
+    """The receptor-offset objection that moved the primary axis from Delta to
+    rank does not survive contact with how the value is USED. Every use is a
+    comparison against PLN-1474, and PLN-1474's own value is a difference, so
+    a uniform receptor offset cancels on both sides. Rank was paying
+    population dependence for a problem that was already solved -- the same
+    four controls gave FAIL with one arm's molecules and PASS with the
+    other's."""
+
+    def _leads(self, tmp, target, subtype):
+        from selectivity import deltas
+        d = deltas(target, subtype)
+        labels = [k for k in d if k != REFERENCE]
+        selectivity = {"values": d, "reference": d[REFERENCE],
+                       "calibration_passed": True}
+        f, a = Path(tmp) / "f.csv", Path(tmp) / "a.csv"
+        write(f, FUNNEL_FIELDS, [funnel(l) for l in labels])
+        write(a, ADMET_FIELDS, [REF_ADMET] + [admet(l) for l in labels])
+        return sorted(r["label"] for r in lead_rows(str(f), str(a), -6.807,
+                                                    selectivity=selectivity)
+                      if r["all_stages"])
+
+    def test_a_uniform_receptor_offset_does_not_move_the_leads(self):
+        # Delta(ref) = -0.22. "a" is +0.95, above it; "b" is -0.50, below --
+        # so the test shows the filter still discriminates under the shift,
+        # not merely that both answers are the same.
+        target = {REFERENCE: -7.29, "a": -7.95, "b": -7.50}
+        subtype = {REFERENCE: -7.51, "a": -7.00, "b": -8.00}
+        with TemporaryDirectory() as tmp:
+            plain = self._leads(tmp, target, subtype)
+        with TemporaryDirectory() as tmp:
+            shifted = self._leads(
+                tmp, target, {k: v - 1.5 for k, v in subtype.items()})
+        self.assertEqual(plain, shifted)
+        self.assertEqual(plain, ["a"])
+
+
 class TestSummaryOrder(unittest.TestCase):
     def test_the_funnel_narrows_in_stage_order(self):
         rows = [{"label": "a", "geometry_pass": True, "affinity_pass": True,

@@ -285,6 +285,20 @@ def main(argv=None) -> int:
     p.add_argument("--selectivity-isoform", default=None,
                     help="Which isoform's rank selectivity to filter on "
                          "(default: the only one, if there is one).")
+    p.add_argument("--selectivity-metric", choices=("delta", "rank"),
+                    default="delta",
+                    help="Which axis in the selectivity JSON to filter on. "
+                         "delta (the §10.1 pre-registered one) is the default "
+                         "because it is population independent: it is a "
+                         "per-ligand difference, so the same ligand gets the "
+                         "same value whatever else was docked. rank is a "
+                         "percentile and moves with the population -- the "
+                         "same four controls gave FAIL with one arm's "
+                         "molecules and PASS with the other's. The receptor "
+                         "offset that rank was introduced to cancel already "
+                         "cancels here, because every use of the value is a "
+                         "comparison against PLN-1474, which is itself a "
+                         "difference.")
     p.add_argument("--reference", default=REFERENCE)
     p.add_argument("--label", default="")
     p.add_argument("--out-csv", type=Path)
@@ -294,7 +308,9 @@ def main(argv=None) -> int:
     selectivity = None
     if args.selectivity and args.selectivity.exists():
         data = json.loads(args.selectivity.read_text())
-        tables = data.get("rank_selectivity") or {}
+        key = {"delta": "deltas", "rank": "rank_selectivity"}[
+            args.selectivity_metric]
+        tables = data.get(key) or {}
         name = args.selectivity_isoform or (
             next(iter(tables)) if len(tables) == 1 else None)
         if name is None:
@@ -302,7 +318,9 @@ def main(argv=None) -> int:
                 f"{args.selectivity} holds {len(tables)} isoforms "
                 f"({list(tables)}); name one with --selectivity-isoform.\n")
             return 2
-        verdicts = data.get("calibration_rank") or {}
+        verdicts = data.get(
+            {"delta": "calibration_delta",
+             "rank": "calibration_rank"}[args.selectivity_metric]) or {}
         selectivity = {
             "values": tables.get(name, {}),
             "reference": None,
@@ -329,6 +347,8 @@ def main(argv=None) -> int:
     summary = summarize(rows)
 
     print(f"\n=== {args.label or args.funnel} ===")
+    if args.selectivity:
+        print(f"  선택성 지표: {args.selectivity_metric}")
     for position, stage in enumerate(STAGES, start=1):
         print(f"  {position} {stage:<12} {summary[f'stage_{position}_{stage}']}")
     print(f"  (사전등록 독성 규칙: 동등평균 < 기준 통과 "

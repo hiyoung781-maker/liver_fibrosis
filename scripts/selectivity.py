@@ -498,6 +498,15 @@ def main(argv=None) -> int:
                     value = control_values(table)[control]
                     shown = "없음" if value is None else f"{value:+.3f}"
                     lines.append(f"| {control} | {shown} | {expectation} |")
+            if label.startswith("대조군끼리만"):
+                n_controls = len(control_rank_by_isoform[name])
+                step = 1.0 / (n_controls - 1) if n_controls > 1 else 0.0
+                lines += ["", f"분자 {n_controls}개를 서로 순위 매긴 백분위라 "
+                          f"값이 {step:.3f} 단위로만 나온다. 이 해상도에서 "
+                          "두 대조군이 같은 값에 떨어지는 것은 순위가 뒤집혔다는 "
+                          "뜻이 아니라 **구분되지 않는다**는 뜻이다. 동점으로 "
+                          "인한 FAIL은 프로토콜의 실패가 아니라 이 지표가 "
+                          "대조군 4개로는 변별력이 없다는 뜻이다."]
             if not verdict["passed"]:
                 lines += [""] + [f"- {reason}" for reason in verdict["failed"]]
                 status = control_status.get(name, {})
