@@ -66,6 +66,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 __all__ = ["CALIBRATION", "LigandMismatchError", "MEASURED_IC50",
            "best_affinities", "calibration_verdict", "control_values", "deltas",
+           "label_variants",
            "ligand_identity", "merge_affinities", "percentile_ranks",
            "rank_selectivity", "rank_sum", "shared_ligands"]
 
@@ -252,15 +253,27 @@ def _inventory(target_dirs: list, subtype_dirs: list,
     return "\n".join(lines) + "\n"
 
 
-def _control_key(control: str, table: dict):
-    """The key `table` uses for a §10.4 control, or None.
+def label_variants(label: str) -> tuple:
+    """Every spelling one reference compound is stored under, most likely
+    first.
 
-    The reference set is docked twice under two naming conventions -- bare
-    (`PLN-1474`, from data/selectivity_refs.smi) on the selectivity side and
-    prefixed (`PANEL_PLN-1474`) in the geometry and ADMET tables -- so a
-    lookup that knows only one of them reports a docked control as missing.
+    The reference set travels under two conventions: bare (`PLN-1474`, from
+    data/selectivity_refs.smi) and prefixed (`PANEL_PLN-1474`, from
+    docking/panel_pdbqt and the geometry and ADMET tables). Which one an
+    artefact uses depends on which input built it. Code that knows only one
+    spelling reports a compound that IS there as missing -- which has now
+    happened four times in this campaign: in the calibration verdict, in the
+    printed control table, in the never-docked diagnostic, and in the pose
+    exporter, where it emptied both ChimeraX views of every control. This is
+    the one place that answers the question.
     """
-    for key in (control, f"PANEL_{control}", control.replace("PANEL_", "")):
+    bare = label[len("PANEL_"):] if label.startswith("PANEL_") else label
+    return (label, bare, f"PANEL_{bare}")
+
+
+def _control_key(control: str, table: dict):
+    """The key `table` uses for a §10.4 control, or None."""
+    for key in label_variants(control):
         if key in table:
             return key
     return None

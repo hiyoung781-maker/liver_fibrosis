@@ -44,6 +44,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from export_poses import LIGAND_RESNAME, _safe, write_ligand_pdb
 from poses_to_sdf import poses_from_pdbqt
+from selectivity import label_variants
 
 __all__ = ["METAL_COLOURS", "LEAD_COLOURS", "REFERENCE_COLOURS",
            "metal_atom", "contact_residues", "export", "chimerax_script",
@@ -186,8 +187,13 @@ def _nearest(positions, indices, target):
 def _load(pose_dirs: list[str], label: str, pose: int | None):
     """The requested pose of one label, from whichever directory holds it."""
     for directory in pose_dirs:
-        path = os.path.join(directory, f"{label}_out.pdbqt")
-        if not os.path.exists(path):
+        # The reference set is docked under either spelling; see
+        # selectivity.label_variants for why this is not a guess.
+        for spelling in label_variants(label):
+            path = os.path.join(directory, f"{spelling}_out.pdbqt")
+            if os.path.exists(path):
+                break
+        else:
             continue
         poses = poses_from_pdbqt(path, label=label)
         if not poses:

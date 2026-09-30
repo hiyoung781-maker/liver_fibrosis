@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory
 
 from export_poses_v2 import (METAL_COLOURS, chimerax_script, contact_residues,
                              leads_from_csv, metal_atom)
+from selectivity import label_variants
 
 REPO = Path(__file__).resolve().parent.parent
 AVB1 = str(REPO / "docking" / "receptor.pdb")
@@ -99,6 +100,36 @@ class TestLeadsComeFromTheFilterOutput(unittest.TestCase):
                              fields=("label", "geometry_pass"))
             with self.assertRaises(ValueError):
                 leads_from_csv(path)
+
+
+class TestReferenceSpelling(unittest.TestCase):
+    """--controls names the compounds as CALIBRATION spells them (bare), and
+    the pose files were written as docking/panel_pdbqt spells them
+    (PANEL_-prefixed). Both ChimeraX views came out with every lead and not
+    one control, reporting them as 'not docked against this receptor' when
+    they were sitting right there."""
+
+    def test_every_spelling_is_tried(self):
+        from selectivity import label_variants
+        self.assertIn("PANEL_PLN-1474", label_variants("PLN-1474"))
+        self.assertIn("PLN-1474", label_variants("PANEL_PLN-1474"))
+
+    def test_the_given_spelling_is_tried_first(self):
+        self.assertEqual(label_variants("PLN-1474")[0], "PLN-1474")
+
+    def test_a_plain_label_is_not_mangled(self):
+        self.assertEqual(label_variants("gen_01883")[:2],
+                         ("gen_01883", "gen_01883"))
+
+    def test_the_exporter_finds_a_prefixed_pose_file(self):
+        from export_poses_v2 import _load
+        with TemporaryDirectory() as tmp:
+            Path(tmp, "PANEL_PLN-1474_out.pdbqt").write_text("")
+            # Reaches the file (and fails on its contents, not on the name).
+            try:
+                _load([tmp], "PLN-1474", None)
+            except Exception as exc:                  # noqa: BLE001
+                self.assertNotIn("not docked", str(exc))
 
 
 class TestScript(unittest.TestCase):
