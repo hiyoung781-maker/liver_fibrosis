@@ -6,8 +6,8 @@ from tempfile import TemporaryDirectory
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from selectivity import (CALIBRATION, LigandMismatchError, MEASURED_IC50,
-                         calibration_verdict, deltas, ligand_identity,
-                         merge_affinities, percentile_ranks,
+                         calibration_verdict, control_values, deltas,
+                         ligand_identity, merge_affinities, percentile_ranks,
                          rank_selectivity, rank_sum, shared_ligands)
 
 # alphaVbeta1 and alphaVbeta6 scores, kcal/mol, same ligand each row.
@@ -89,6 +89,45 @@ class TestCalibrationGate(unittest.TestCase):
         self.assertAlmostEqual(MEASURED_IC50["CWHM-12"]["avb6"], 1.5)
         self.assertAlmostEqual(MEASURED_IC50["GLPG0187"]["avb1"], 1.3)
         self.assertAlmostEqual(MEASURED_IC50["GLPG0187"]["avb6"], 1.4)
+
+
+class TestControlValues(unittest.TestCase):
+    """One lookup for "what did the controls do", used by the verdict AND by
+    the table the report prints. They looked it up separately once, under two
+    naming conventions, and the report FAILED while quoting real numbers above
+    a table saying every control was absent."""
+
+    def test_it_reports_a_value_per_control(self):
+        v = control_values({"PLN-1474": 1.2, "CHEMBL4649232": 1.0,
+                            "CWHM-12": -0.3, "GLPG0187": 0.1})
+        self.assertEqual(set(v), {"PLN-1474", "CHEMBL4649232",
+                                  "CWHM-12", "GLPG0187"})
+        self.assertAlmostEqual(v["CWHM-12"], -0.3)
+
+    def test_a_control_not_in_the_table_is_None_not_absent_from_the_result(self):
+        # The report needs a row for it either way; a dropped key would print
+        # a table with fewer rows than there are controls.
+        v = control_values({"PLN-1474": 1.2})
+        self.assertIsNone(v["CWHM-12"])
+        self.assertEqual(len(v), 4)
+
+    def test_it_finds_prefixed_labels(self):
+        v = control_values({"PANEL_PLN-1474": 1.2})
+        self.assertAlmostEqual(v["PLN-1474"], 1.2)
+
+    def test_the_verdict_and_the_table_never_disagree(self):
+        # The regression: a verdict that found the controls beside a table
+        # that did not. Whatever the naming, if the verdict ran on values then
+        # the table has those same values.
+        table = {"PANEL_PLN-1474": -0.323, "PANEL_CHEMBL4649232": -0.310,
+                 "PANEL_CWHM-12": -0.304, "PANEL_GLPG0187": -0.270}
+        verdict = calibration_verdict(table)
+        values = control_values(table)
+        self.assertEqual(verdict["missing"], [])
+        self.assertFalse(any(v is None for v in values.values()))
+        self.assertAlmostEqual(values["CWHM-12"], -0.304)
+        # CWHM-12 must not look more selective than PLN-1474; here it does.
+        self.assertFalse(verdict["passed"])
 
 
 class TestRankSum(unittest.TestCase):

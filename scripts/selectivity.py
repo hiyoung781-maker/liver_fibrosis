@@ -65,7 +65,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 __all__ = ["CALIBRATION", "LigandMismatchError", "MEASURED_IC50",
-           "best_affinities", "calibration_verdict", "deltas",
+           "best_affinities", "calibration_verdict", "control_values", "deltas",
            "ligand_identity", "merge_affinities", "percentile_ranks",
            "rank_selectivity", "rank_sum", "shared_ligands"]
 
@@ -266,6 +266,23 @@ def _control_key(control: str, table: dict):
     return None
 
 
+def control_values(table: dict) -> dict:
+    """{control: value or None} for the four §10.4 controls.
+
+    THE SINGLE SOURCE for "what did the controls do". The verdict and the
+    report it prints must not look this up separately: they did, under two
+    different naming conventions, and produced a report whose FAIL quoted
+    real numbers above a table saying every control was absent. One function,
+    one answer.
+    """
+    out = {}
+    for group in CALIBRATION.values():
+        for name in group:
+            key = _control_key(name, table)
+            out[name] = None if key is None else table[key]
+    return out
+
+
 def calibration_verdict(delta: dict) -> dict:
     """§10.4: do the four controls come out the way their IC50s say?
 
@@ -279,15 +296,14 @@ def calibration_verdict(delta: dict) -> dict:
     # bare from data/selectivity_refs.smi, prefixed from docking/panel_pdbqt.
     # A lookup that knows only one of them reports a control that IS docked as
     # missing, which is indistinguishable from one that was never docked.
-    keys = {name: _control_key(name, delta)
-            for group in CALIBRATION.values() for name in group}
-    missing = sorted(name for name, key in keys.items() if key is None)
+    values = control_values(delta)
+    missing = sorted(n for n, v in values.items() if v is None)
     if missing:
         failed.append(f"controls absent from the Delta table: {missing}")
         return {"passed": False, "failed": failed, "missing": missing}
 
-    selective = {n: delta[keys[n]] for n in CALIBRATION["selective"]}
-    non_selective = {n: delta[keys[n]] for n in CALIBRATION["non_selective"]}
+    selective = {n: values[n] for n in CALIBRATION["selective"]}
+    non_selective = {n: values[n] for n in CALIBRATION["non_selective"]}
     for sel_name, sel in selective.items():
         for non_name, non in non_selective.items():
             if sel <= non:
@@ -390,13 +406,14 @@ def main(argv=None) -> int:
     control_status = {}
     for item in args.isoform:
         name, _, directory = item.partition("=")
-        missing = [c for c in controls
-                   if c not in rank_by_isoform.get(name, {})]
+        values = control_values(rank_by_isoform.get(name, {}))
+        missing = [c for c in controls if values[c] is None]
         control_status[name] = {
             "missing": missing,
-            "absent_from_target": [c for c in missing if _control_key(c, target) is None],
-            "absent_from_isoform": [
-                c for c in missing if _control_key(c, target) is not None],
+            "absent_from_target": [c for c in missing
+                                   if _control_key(c, target) is None],
+            "absent_from_isoform": [c for c in missing
+                                    if _control_key(c, target) is not None],
         }
 
     rank_verdicts = {n: calibration_verdict(t) for n, t in rank_by_isoform.items()}
@@ -455,7 +472,7 @@ def main(argv=None) -> int:
             for group, expectation in (("selective", "선택적"),
                                        ("non_selective", "비선택적")):
                 for control in CALIBRATION[group]:
-                    value = table.get(control)
+                    value = control_values(table)[control]
                     shown = "없음" if value is None else f"{value:+.3f}"
                     lines.append(f"| {control} | {shown} | {expectation} |")
             if not verdict["passed"]:
