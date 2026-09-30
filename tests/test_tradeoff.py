@@ -194,5 +194,39 @@ class TestParetoFront(unittest.TestCase):
                          ["top", "mid", "clean"])
 
 
+class TestTheBandHasTheMetricsUnits(unittest.TestCase):
+    """DELTA_SD is kcal/mol; a rank selectivity is a percentile difference.
+    Using one band for both is a units error -- 0.221 on a scale running -1
+    to 1 flags almost everything as noise, which is what it did."""
+
+    POP = [-9.0 + 0.005 * i for i in range(340)]
+
+    def test_the_rank_band_is_a_percentile_not_kcal(self):
+        from tradeoff import selectivity_band
+        band = selectivity_band("rank", self.POP)
+        self.assertGreater(band, 0.0)
+        self.assertLess(band, 1.0)
+        self.assertNotAlmostEqual(band, DELTA_SD)
+
+    def test_the_delta_band_is_unchanged(self):
+        from tradeoff import selectivity_band
+        self.assertAlmostEqual(selectivity_band("delta", self.POP), DELTA_SD)
+
+    def test_a_denser_population_gives_a_wider_rank_band(self):
+        # More molecules within one SD means a score wobble moves you past
+        # more of them, so the same kcal/mol uncertainty is a larger rank
+        # uncertainty.
+        from lead_cards import rank_noise_band
+        dense = [-9.0 + 0.001 * i for i in range(340)]
+        sparse = [-9.0 + 0.02 * i for i in range(340)]
+        self.assertGreater(rank_noise_band(dense), rank_noise_band(sparse))
+
+    def test_too_few_molecules_gives_no_band_rather_than_a_wrong_one(self):
+        import math
+
+        from lead_cards import rank_noise_band
+        self.assertTrue(math.isnan(rank_noise_band([-8.0, -7.0])))
+
+
 if __name__ == "__main__":
     unittest.main()

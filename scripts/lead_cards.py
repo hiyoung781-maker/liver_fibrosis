@@ -28,7 +28,8 @@ import math
 import sys
 from pathlib import Path
 
-__all__ = ["SEED_SD", "SEED_RANGE", "margin_verdict", "cards"]
+__all__ = ["SEED_SD", "SEED_RANGE", "DELTA_SD", "rank_noise_band",
+           "margin_verdict", "cards"]
 
 # §7.7, PLN-1474 re-docked under five seeds. The reference is the noisiest
 # ligand measured (11 rotatable bonds); A1AFA, with 5, gave SD 0.004.
@@ -42,6 +43,40 @@ DELTA_SD = SEED_SD * math.sqrt(2)
 
 TOXICITY_ENDPOINTS = ("SR-MMP", "NR-AhR", "DILI")
 CONTEXT = ("hERG", "AMES", "Solubility_AqSolDB", "CYP3A4_Veith")
+
+
+def rank_noise_band(scores, sd: float = SEED_SD) -> float:
+    """The noise band for a RANK selectivity margin, in percentile units.
+
+    DELTA_SD is in kcal/mol and a rank selectivity is a difference of
+    percentiles, so comparing one to the other is a units error -- 0.221 on a
+    scale that runs from -1 to 1 would flag almost everything as noise, and
+    did, until this existed.
+
+    The conversion is empirical and needs no assumption about the shape of
+    the distribution: perturbing a score by one seed SD moves that molecule
+    past however many others lie within `sd` of it, so the rank displacement
+    is that count over the population. The median over all molecules is the
+    typical displacement, and the band is sqrt(2) times it because the
+    selectivity is a difference of two independently ranked receptors.
+
+    The estimate uses the target receptor's distribution for both sides. The
+    isoform's own scores are not in the selectivity JSON, and the two
+    populations are the same molecules docked twice, so their densities are
+    close but not identical -- stated rather than hidden.
+    """
+    values = sorted(v for v in scores if v is not None)
+    n = len(values)
+    if n < 3:
+        return float("nan")
+    import bisect
+    displacements = [
+        (bisect.bisect_right(values, v + sd) - bisect.bisect_left(values, v))
+        / (n - 1)
+        for v in values]
+    displacements.sort()
+    median = displacements[len(displacements) // 2]
+    return median * math.sqrt(2)
 
 
 def margin_verdict(margin: float, sd: float) -> str:

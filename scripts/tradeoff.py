@@ -44,7 +44,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from funnel import PLN1474_CUTOFF
-from lead_cards import DELTA_SD, SEED_RANGE, SEED_SD, margin_verdict
+from lead_cards import (DELTA_SD, SEED_RANGE, SEED_SD, margin_verdict,
+                        rank_noise_band)
 
 __all__ = ["TOXICITY_ENDPOINTS", "categorise", "pareto_front", "rows"]
 
@@ -95,6 +96,16 @@ def pareto_front(entries: list) -> list:
     return sorted(front, key=lambda e: -e["selectivity"])
 
 
+def selectivity_band(metric: str, affinities) -> float:
+    """The noise band for a selectivity margin, in that metric's own units.
+
+    A Delta is kcal/mol and a rank is a percentile difference. Using one
+    band for both is a units error: 0.221 on a scale running -1 to 1 flags
+    almost everything as noise.
+    """
+    return DELTA_SD if metric == "delta" else rank_noise_band(affinities)
+
+
 def categorise(entry: dict) -> str:
     # BORDERLINE is tested FIRST, before LEAD. A molecule that clears the
     # affinity cutoff by less than the reference's own seed range has not
@@ -105,14 +116,16 @@ def categorise(entry: dict) -> str:
     if entry["all_stages"]:
         return "LEAD"
     margin = entry["selectivity_margin"]
-    if margin is not None and margin >= DELTA_SD and len(entry["tox_worse"]) == 1:
+    band = entry.get("selectivity_band", DELTA_SD)
+    if margin is not None and margin >= band and len(entry["tox_worse"]) == 1:
         return "SELECTIVITY"
     if not entry["tox_worse"] and entry["admet_status"] == "ok":
         return "SAFETY"
     return "other"
 
 
-def rows(funnel_csv, admet_csv, selectivity, reference=REFERENCE) -> list:
+def rows(funnel_csv, admet_csv, selectivity, reference=REFERENCE,
+         metric: str = "delta") -> list:
     with open(funnel_csv, newline="") as handle:
         funnel = list(csv.DictReader(handle))
     with open(admet_csv, newline="") as handle:
@@ -124,6 +137,9 @@ def rows(funnel_csv, admet_csv, selectivity, reference=REFERENCE) -> list:
 
     values = selectivity.get("values") or {}
     sel_reference = selectivity.get("reference")
+    band = selectivity_band(metric, [_float(r.get("best_passing_affinity"))
+                                     for r in funnel
+                                     if r.get("geometry_pass") == "True"])
 
     out = []
     for row in funnel:
@@ -183,9 +199,10 @@ def rows(funnel_csv, admet_csv, selectivity, reference=REFERENCE) -> list:
         # stage asks only that the margin be positive; this says whether the
         # margin is larger than the noise on it. gen_01883 passes by 0.005
         # against a band of 0.221.
+        entry["selectivity_band"] = band
         entry["selectivity_within_noise"] = (
             entry["selectivity_pass"]
-            and entry["selectivity_margin"] < DELTA_SD)
+            and entry["selectivity_margin"] < band)
         entry["all_stages"] = (entry["selectivity_pass"] and not worse
                                and entry["admet_status"] == "ok")
         entry["category"] = categorise(entry)
@@ -193,10 +210,12 @@ def rows(funnel_csv, admet_csv, selectivity, reference=REFERENCE) -> list:
     return out
 
 
-def render(entries, ref_endpoints, sel_reference, arm) -> str:
+def render(entries, ref_endpoints, sel_reference, arm, metric="delta") -> str:
     front = pareto_front(entries)
     front_labels = {e["label"] for e in front}
     n_leads = sum(1 for e in entries if e["category"] == "LEAD")
+    band = next((e["selectivity_band"] for e in entries
+                 if e.get("selectivity_band") is not None), DELTA_SD)
     lines = [
         f"# 논의 후보 — {arm}",
         "",
@@ -209,8 +228,15 @@ def render(entries, ref_endpoints, sel_reference, arm) -> str:
         "",
         f"마진은 0이 아니라 잡음과 비교한다. §7.7이 PLN-1474를 시드 5개로 "
         f"재도킹해 SD **{SEED_SD:.3f}** kcal/mol, 폭 **{SEED_RANGE:.3f}**을 "
-        f"측정했다. Δ는 독립적으로 도킹된 두 점수의 차이이므로 잡음 대역이 "
-        f"약 √2배인 **{DELTA_SD:.3f}**다.",
+        "측정했다."
+        + (f" Δ는 독립적으로 도킹된 두 점수의 차이이므로 잡음 대역이 약 "
+           f"√2배인 **{band:.3f}** kcal/mol이다."
+           if metric == "delta" else
+           f" 순위 선택성은 백분위 차이라 단위가 없으므로 이 SD를 백분위로 "
+           f"환산한다 — 한 분자의 점수를 1 SD 흔들면 그 범위 안에 있는 "
+           f"분자 수만큼 등수가 밀리며, 이 집단에서 그 값의 중앙값에 √2를 "
+           f"곱한 **{band:.3f}**가 대역이다. kcal/mol 대역을 백분위에 "
+           f"그대로 쓰면 −1~1 척도에서 거의 전부가 잡음으로 표시된다."),
         "",
         f"구조 단계 통과: **{len(entries)}**개. Pareto front(선택성↑ · 독성↓) "
         f"위: **{len(front)}**개.",
@@ -258,8 +284,8 @@ def render(entries, ref_endpoints, sel_reference, arm) -> str:
               "최대−최소이며 표본 수에 따라 커지는 극값 통계이므로 "
               "±대역으로 쓰지 않는다.",
               "",
-              f"**⚠** — 선택성 단계는 통과했으나 마진이 Δ 잡음 대역"
-              f"({DELTA_SD:.3f}) 이내다. 단계 통과와 무언가를 보인 것은 "
+              f"**⚠** — 선택성 단계는 통과했으나 마진이 잡음 대역"
+              f"({band:.3f}) 이내다. 단계 통과와 무언가를 보인 것은 "
               "다르다. 이 표시가 붙은 분자에 대해 **선택성을 주장하지 "
               "않는다.**",
               "", "Pareto front는 선택성(↑)과 §9.2 독성 평균(↓) 두 축에서 "
@@ -278,7 +304,7 @@ def render(entries, ref_endpoints, sel_reference, arm) -> str:
                 or e["label"] in front_labels]
     for e in detailed:
         sel = "—" if e["selectivity"] is None else f"{e['selectivity']:+.3f}"
-        verdict = margin_verdict(e["selectivity_margin"] or 0, DELTA_SD)
+        verdict = margin_verdict(e["selectivity_margin"] or 0, band)
         lines += ["", f"### {e['label']}  ({e['category']})", "",
                   f"- affinity **{e['affinity']:+.3f}** "
                   f"({margin_verdict(e['affinity_margin'], SEED_SD)})",
@@ -304,7 +330,7 @@ def main(argv=None) -> int:
     p.add_argument("--selectivity", type=Path, required=True)
     p.add_argument("--selectivity-isoform", default=None)
     p.add_argument("--selectivity-metric", choices=("delta", "rank"),
-                    default="delta")
+                    default="rank")
     p.add_argument("--reference", default=REFERENCE)
     p.add_argument("--arm", default="")
     p.add_argument("--out", type=Path, required=True)
@@ -325,7 +351,8 @@ def main(argv=None) -> int:
     selectivity = {"values": table, "reference": sel_reference}
 
     try:
-        entries = rows(args.funnel, args.admet, selectivity, args.reference)
+        entries = rows(args.funnel, args.admet, selectivity, args.reference,
+                       args.selectivity_metric)
     except (OSError, ValueError) as exc:
         sys.stderr.write(f"{exc}\n")
         return 2
@@ -334,7 +361,8 @@ def main(argv=None) -> int:
         ref = {r["label"]: r for r in csv.DictReader(handle)}[args.reference]
     ref_endpoints = {e: _float(ref.get(e)) for e in TOXICITY_ENDPOINTS}
 
-    text = render(entries, ref_endpoints, sel_reference, args.arm or args.funnel)
+    text = render(entries, ref_endpoints, sel_reference,
+                  args.arm or args.funnel, args.selectivity_metric)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(text)
     print(text)
