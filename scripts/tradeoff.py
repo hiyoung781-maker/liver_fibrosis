@@ -51,6 +51,17 @@ __all__ = ["TOXICITY_ENDPOINTS", "categorise", "pareto_front", "rows"]
 TOXICITY_ENDPOINTS = ("SR-MMP", "NR-AhR", "DILI")
 REFERENCE = "PANEL_PLN-1474"
 
+# How close to the cutoff counts as "not shown to have cleared it".
+#
+# The SD, not the range. Section 7.7 reports both -- SD 0.156 and range
+# 0.517 -- and the range is the max minus the min of five draws: an extreme
+# statistic that GROWS with the number of seeds and is not an uncertainty
+# interval. Using it as a +/- band called 107 of 179 TL-C molecules
+# borderline, including margins of 0.5, which is most of the population by
+# construction: the population is everything below the cutoff, and the
+# distribution is dense just under it.
+BORDERLINE_BAND = SEED_SD
+
 
 def _float(value):
     try:
@@ -161,8 +172,10 @@ def rows(funnel_csv, admet_csv, selectivity, reference=REFERENCE) -> list:
             "admet_status": "ok" if prediction else "missing",
             "plip_hbond": row.get("plip_hbond_any_passing") == "True",
             "caco2": _float(prediction.get("Caco2_Wang")) if prediction else None,
-            # Inside the reference's own seed range of the cutoff.
-            "borderline_affinity": abs(affinity - PLN1474_CUTOFF) < SEED_RANGE,
+            # Within one seed SD of the cutoff: the margin is smaller than
+            # the variation the engine shows on the reference itself.
+            "borderline_affinity": (abs(affinity - PLN1474_CUTOFF)
+                                    < BORDERLINE_BAND),
         }
         entry["selectivity_pass"] = (entry["selectivity_margin"] is not None
                                      and entry["selectivity_margin"] > 0)
@@ -209,6 +222,7 @@ def render(entries, ref_endpoints, sel_reference, arm) -> str:
              "other": 4}
     shown = [e for e in entries if e["category"] != "other"
              or e["label"] in front_labels]
+    hidden = len(entries) - len(shown)
     shown.sort(key=lambda e: (order[e["category"]],
                               -(e["selectivity_margin"] or -99)))
     for e in shown:
@@ -224,6 +238,10 @@ def render(entries, ref_endpoints, sel_reference, arm) -> str:
             f"{e['affinity_margin']:+.3f} | {sel} | {selm} | {tox} | {worse} | "
             f"{'●' if e['label'] in front_labels else ''} |")
 
+    if hidden:
+        lines += ["", f"표에서 생략: **{hidden}**개. 독성 엔드포인트를 둘 "
+                  "이상 초과하면서 Pareto front에도 없는 분자들이며, "
+                  "trade-off가 아니라 단순히 독성이 높은 경우다."]
     lines += ["", "## 분류가 주장할 수 있는 것", "",
               "- **LEAD** — 사전등록 단계를 전부 통과. 유일하게 리드라고 "
               "부를 수 있다.",
@@ -233,8 +251,11 @@ def render(entries, ref_endpoints, sel_reference, arm) -> str:
               "- **SAFETY** — 독성 세 엔드포인트가 모두 기준 이하이나 "
               "선택성 마진이 잡음 이내. 친화도와 내약성은 말할 수 있고 "
               "**선택성은 말할 수 없다.**",
-              "- **BORDERLINE** — affinity가 컷오프에서 기준값 자신의 시드 "
-              f"폭({SEED_RANGE:.3f}) 이내. 통과도 탈락도 근거가 없다.",
+              "- **BORDERLINE** — affinity 마진이 기준값 자신의 시드 "
+              f"SD({BORDERLINE_BAND:.3f}) 이내. 통과도 탈락도 근거가 없다. "
+              f"§7.7이 함께 보고한 폭 {SEED_RANGE:.3f}은 시드 5개의 "
+              "최대−최소이며 표본 수에 따라 커지는 극값 통계이므로 "
+              "±대역으로 쓰지 않는다.",
               "",
               f"**⚠** — 선택성 단계는 통과했으나 마진이 Δ 잡음 대역"
               f"({DELTA_SD:.3f}) 이내다. 단계 통과와 무언가를 보인 것은 "

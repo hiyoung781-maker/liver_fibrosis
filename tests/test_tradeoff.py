@@ -7,8 +7,9 @@ from tempfile import TemporaryDirectory
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from funnel import PLN1474_CUTOFF
-from lead_cards import DELTA_SD, SEED_RANGE
-from tradeoff import REFERENCE, TOXICITY_ENDPOINTS, categorise, pareto_front, rows
+from lead_cards import DELTA_SD, SEED_RANGE, SEED_SD
+from tradeoff import (BORDERLINE_BAND, REFERENCE, TOXICITY_ENDPOINTS,
+                      categorise, pareto_front, rows)
 
 FUNNEL_FIELDS = ["label", "geometry_pass", "best_passing_affinity",
                  "plip_gate_pass", "plip_hbond_any_passing"]
@@ -141,8 +142,23 @@ class TestCategories(unittest.TestCase):
 
     def test_a_clear_margin_is_not_borderline(self):
         with TemporaryDirectory() as tmp:
-            e = self._one(tmp, PLN1474_CUTOFF - SEED_RANGE - 0.01, SEL_REF + 1.0)
+            e = self._one(tmp, PLN1474_CUTOFF - 0.30, SEL_REF + 1.0)
             self.assertFalse(e["borderline_affinity"])
+
+    def test_the_band_is_the_sd_not_the_range(self):
+        """Section 7.7 reports SD 0.156 and range 0.517. The range is the max
+        minus the min of five draws -- an extreme statistic that grows with
+        the number of seeds, not an uncertainty interval. Used as a band it
+        called 107 of 179 TL-C molecules borderline, margins of 0.5
+        included."""
+        self.assertAlmostEqual(BORDERLINE_BAND, SEED_SD)
+        self.assertLess(BORDERLINE_BAND, SEED_RANGE)
+
+    def test_a_margin_of_a_third_of_a_kcal_is_a_real_margin(self):
+        with TemporaryDirectory() as tmp:
+            e = self._one(tmp, PLN1474_CUTOFF - 0.35, SEL_REF + 1.0, dili=0.60)
+            self.assertFalse(e["borderline_affinity"])
+            self.assertEqual(e["category"], "SELECTIVITY")
 
 
 class TestParetoFront(unittest.TestCase):
