@@ -2,7 +2,7 @@
 
 **프로젝트:** 근거 기반 타깃 우선순위 선정 → 간섬유화 치료를 위한 in silico 저해제 설계
 **타깃:** integrin αvβ1 (hepatic stellate cell 내재적, 직접 항섬유화 타깃)
-**기준 구조:** PDB 8W30 — TR01225179와 복합체를 이룬 αvβ1 headpiece [112]
+**기준 구조:** PDB 8W30 — 논문이 **acid 1**이라 부르는 화합물과 복합체를 이룬 αvβ1 headpiece [112]. (`TR01225179`는 논문의 명명이 아니라 **PDB 엔트리 타이틀에만 나오는 Takeda 사내 등록번호**다. 이 문서에서는 화합물을 가리킬 때 논문 호칭 "acid 1", 구조 좌표를 가리킬 때 CCD 코드 `A1AFA`를 쓴다.)
 **동반 파일:** `avb1_target_decision_brief.md`(논증 구조 + 공격 표면), `reinvent4_avb1_scoring_config_sketch.toml`(주석 달린, 문법 검증 완료 config), `avb1_pocket_3d.png`, `avb1_pocket_contacts.png/.svg`, `avb1_8w30_contacts.csv`
 **큐레이션된 데이터(§3.1, 실행 완료):** `scripts/curate_actives.py` → `data/actives_core.smi`, `data/actives_core_B.smi`(+ `_train`/`_valid` 분할), `data/actives_extended.smi`, `data/similarity_refs.smi`, `data/benchmark_panel.smi`, `data/actives_annotated.csv`, `data/CURATION_LOG.md`
 **계산 환경(D1, 실행 완료):** `TRANSFER.md`, `scripts/kbds_probe.sh`, `scripts/setup_kbds.sh`, `env/`, `slurm/` — REINVENT4 **v4.5.11** 고정, torch **2.5.1+cu118**, conda env **`reinvent`**
@@ -11,7 +11,7 @@
 
 ## 0. 설계 가설 (한 문장)
 
-αvβ1 **결합** pharmacophore — MIDAS-metal을 배위하는 carboxylate, β1-Asn224에 대한 H-bond donor, αv-Tyr178에 맞서는 aromatic 요소 — 는 공개된 azabenzimidazolone series보다 **더 drug-like한 신규 scaffold**로도 구현될 수 있다. 그 series의 rat 경구 생체이용률 1.3%와 series 전반의 MDCK permeability < 0.1×10⁻⁶ cm/s는 **타깃 자체의 한계가 아니라 그 series에 국한된 한계**다 [111].
+αvβ1 **결합** pharmacophore — MIDAS-metal을 배위하는 carboxylate, β1-Asn224에 대한 H-bond donor, αv-Tyr178에 맞서는 aromatic 요소 — 는 공개된 azabenzimidazolone series보다 **더 drug-like한 신규 scaffold**로도 구현될 수 있다. 그 series의 rat 경구 생체이용률 1.3%와 compound 25의 MDCK permeability (a–b 3.0 / b–a 3.2 ×10⁻⁶ cm/s, Table 3)는 **타깃 자체의 한계가 아니라 그 series에 국한된 한계**다 [111].
 
 아래 모든 내용은 그 한 문장을 검증하기 위해 설계되었으며, 가설이 실패했을 때 그 사실을 정직하게 말할 수 있도록 구성되었다.
 
@@ -26,7 +26,7 @@
 | 1 | **Carboxylate → MIDAS Ca²⁺ (β1 Ca501)** | 2.62 Å, monodentate (두 번째 carboxylate O는 4.54 Å) | **타협 불가 anchor.** 알려진 모든 αvβ1/αv-class 저해제는 carboxylate다(RGD mimetic). → RL에서 `MatchingSubstructure`로 carboxylic acid 지정; docking 후 필터: carboxylate O → Ca501 ≤ 3.2 Å |
 | 2 | **리간드 amide NH → β1-Asn224 backbone O** | 2.63 Å H-bond. **Asn224는 β3에 보존** — 결합 요소이며 선택성 요소가 아니다(§8.4) | 강력한 2차 anchor → docking 후 H-bond 필터(donor가 Asn224 O로부터 3.5 Å 이내); RL에서는 active와의 유사도를 통해 간접적으로 반영(모든 active가 이 contact를 형성) |
 | 3 | **αv-Tyr178과의 aromatic contact** | 최근접 원자 3.70 Å, T-shaped/offset (centroid 6.21 Å, ring 각도 74.6°) | aromatic ring 1개 이상 필요; 목적함수로는 직접 강제하지 않고 §8.5 docking 기하 필터와 정성 분석에서 확인 |
-| 4 | **β1 hydrophobic subpocket** (Pro186 3.16 Å, Tyr133 3.17 Å, Cys187 3.88 Å, Lys182 3.82 Å, Leu225 2.95 Å). **이 중 β3와 다른 것은 Leu225 하나**(β3는 Arg) — 선택성이 있다면 여기서 온다(§8.4) | hit의 dichlorophenyl이 여기에 위치 | 소수성 부피 수용 가능 → SlogP 약 3까지는 **확실히 허용된다**; potency가 이곳에서 결정됨. **주의:** 이 행이 §5의 `SlogP` 페널티 기준값 "약 3"의 출처였으나, 이는 접촉 거리에서 얻은 정성적 *허용 하한*("적어도 3까지는 괜찮다")이며 "3을 넘으면 벌점"을 뜻하지 않는다. 이 오독은 §5.4에서 정정하고 `SlogP`를 목적함수에서 제거했다 |
+| 4 | **β1 hydrophobic subpocket** (Pro186 3.16 Å, Tyr133 3.17 Å, Cys187 3.88 Å, Lys182 3.82 Å, Leu225 2.95 Å). **이 중 β3와 다른 것은 Leu225 하나**(β3는 Arg). **다만 Leu225 접촉 자체는 선택성의 원천이 아니다** — Sabat p.10307은 MIDAS와 β1-Leu225를 **공용 앵커**로 서술하며 pan 화합물(GLPG0187·CWHM-12)도 이를 만든다. αvβ1 선호를 만드는 것은 그 앵커 위에서 **β1 소수성 포켓을 채우는지**다(§8.4에서 정정) | hit의 dichlorophenyl이 여기에 위치 | 소수성 부피 수용 가능 → SlogP 약 3까지는 **확실히 허용된다**; potency가 이곳에서 결정됨. **주의:** 이 행이 §5의 `SlogP` 페널티 기준값 "약 3"의 출처였으나, 이는 접촉 거리에서 얻은 정성적 *허용 하한*("적어도 3까지는 괜찮다")이며 "3을 넘으면 벌점"을 뜻하지 않는다. 이 오독은 §5.4에서 정정하고 `SlogP`를 목적함수에서 제거했다 |
 | 5 | **αv-Asp218 — 8W30 hit는 관여하지 않음** (7.0 Å) | 공개 series에서 cpd 25의 benzimidazolone NH가 관여 [111]. **닿는 방식이 문제다** — 염기성 Arg 모방체의 염다리는 pan-αv와 연관되고(GSK3008348의 1,8-나프티리딘 [114]), 중성 단일좌 H-bond는 그렇지 않다. αv 잔기이므로 αvβx 사이의 선택성은 이것으로 설명되지 않는다(§8.4) | Growth vector. substructure 필터로는 **의도적으로 인코딩하지 않음**(novelty를 과도하게 제약하므로); 상위 docking pose의 수동 검토에 사용 |
 | 6 | **계면 water HOH2107** | 리간드로부터 4.68 Å; αv-Glu121(2.6 Å) / β1-Ser177(3.0 Å)을 연결 | water 매개 상호작용 또는 water 치환을 통한 이득 가능성; 사후 검토 용도로만 사용 |
 | — | MIDAS-loop 잔기 Ser132/Ser134/Glu229 | carboxylate로부터 3.0–3.3 Å | metal site의 맥락 정보; 직접적 제약은 없음 |
@@ -61,7 +61,7 @@ REINVENT4 [39, 40]는 run type으로 `sampling`, `scoring`, `transfer_learning`,
 
 `scripts/curate_actives.py`가 ChEMBL_37을 대상으로 생성한다. 모든 출처 ID는 가정이 아니라 검증된 값이다.
 
-**출처.** ChEMBL 문헌 `CHEMBL5500400` = Sabat 2024 [111](doi 10.1021/acs.jmedchem.4c00743), 26개 분자 — 논문의 화합물 번호는 25까지에 외부 비교군 C8을 더한 것으로 끝나므로 ChEMBL 커버리지는 **완전하며 PDF 전사가 필요 없다**. ChEMBL 타깃 `CHEMBL2111407` = Integrin αvβ1, 활성 413건 / 분자 253개. RCSB CCD `A1AFA` = 8W30 리간드 TR01225179, *N*-(2,4-dichlorobenzoyl)-L-phenylalanine — ChEMBL 사본(`CHEMBL5556476`)은 입체중심을 잃었으므로 CCD 정의를 사용한다. 툴 화합물은 PubChem.
+**출처.** ChEMBL 문헌 `CHEMBL5500400` = Sabat 2024 [111](doi 10.1021/acs.jmedchem.4c00743), 26개 분자 — 논문의 화합물 번호는 25까지에 외부 비교군 C8을 더한 것으로 끝난다. ChEMBL 커버리지가 완전한지는 **재확인하지 않았다** — 26이라는 수가 일치할 뿐이며, 어떤 26개인지 대조한 기록이 없다. 인용 전 확인이 필요하다. ChEMBL 타깃 `CHEMBL2111407` = Integrin αvβ1, 활성 413건 / 분자 253개. RCSB CCD `A1AFA` = 8W30 리간드(논문의 **acid 1**, PDB 타이틀의 `TR01225179`), 구성은 *N*-(2,4-dichlorobenzoyl)phenylalanine이다. **논문은 1을 라세미체로 보고하며 pIC50 5.3은 50:50 혼합물의 값이다** — "L"은 침전 모델에서 온 것이지 논문이 단일 거울상체를 시험했다는 뜻이 아니다 — ChEMBL 사본(`CHEMBL5556476`)은 입체중심을 잃었으므로 CCD 정의를 사용한다. 툴 화합물은 PubChem.
 
 **아래 모든 것을 좌우하는 화학형 구분.** 각 분자에 Arg 모방 염기성 헤드(guanidine/cyclic amidine, tetrahydronaphthyridine, 2-aminopyridine, benzimidazol-2-amine, 2-aminoazole, 지방족 아민) 보유 여부를 태깅한다. 보유한 분자는 양쪽성 이온 RGD 모드로 결합하며, 8W30 리간드와 Sabat series는 어느 것도 갖지 않는다.
 
@@ -133,7 +133,7 @@ RGD 툴 화합물 4개는 potency 신호를 위해 의도적으로 코어에 포
 **결과:** potency proxy는 `TanimotoSimilarity`이며, 따라서 §5의 endpoint 처리가 선택이 아니라 필수 요소가 된다. ChEMBL 수집의 실질적 이득은 QSAR 모델이 아니라 **novelty 기준선을 ~30개가 아닌 197개 active 위에서 계산한다는 점**이고, 이것이 §8.3의 scaffold novelty 주장을 실질적으로 강화한다.
 
 ### 3.4 벤치마크 패널 (D2에 고정)
-- **양성:** `data/benchmark_panel.smi` — 8W30 리간드 A1AFA, `CHEMBL4649232`, PLN-1474, bexotegrast, CWHM-12, GLPG0187. C8은 제외했다(§3.1 참조). **`CHEMBL4649232`를 "cpd 25"로 부르지 않는다** — 저장소에 둘을 동일시하는 기록이 없고 §3.4의 옛 문구는 "cpd 25 계열"이라고만 적었다. 이 분자의 근거는 그 자체로 충분하다: `data/actives_annotated.csv` 기준 **pIC50 9.78(IC50 0.166 nM)로 큐레이션한 전체 집합에서 가장 강력한 non-RGD active**이며, 우리가 겨냥하는 공간이 non-RGD이므로 양성 패널에 있어야 할 분자다(MW 502.4, TPSA 133.3, cLogP 4.02). TPSA 133.3이 Sabat 25개 계열의 *중앙값* 133.3과 같은 것은 우연이며, 동일성의 근거가 아니다.
+- **양성:** `data/benchmark_panel.smi` — 8W30 리간드 A1AFA, `CHEMBL4649232`, PLN-1474, bexotegrast, CWHM-12, GLPG0187. C8은 제외했다(§3.1 참조). **`CHEMBL4649232`를 "cpd 25"로 부르지 않는다** — 저장소에 둘을 동일시하는 기록이 없고 §3.4의 옛 문구는 "cpd 25 계열"이라고만 적었다. 이 분자의 근거는 그 자체로 충분하다: `data/actives_annotated.csv` 기준 **Ki 0.166 nM(pKi 9.78)로 큐레이션한 전체 집합에서 가장 강력한 non-RGD active**(측정은 `[3H]C8` 치환 assay이며 1차 출처는 Hatley *ChemMedChem* 2019다 — IC50이 아니라 Ki이므로 IC50 기반 값과 직접 비교하지 않는다)이며, 우리가 겨냥하는 공간이 non-RGD이므로 양성 패널에 있어야 할 분자다(MW 502.4, TPSA 133.3, cLogP 4.02). TPSA 133.3이 Sabat 25개 계열의 *중앙값* 133.3과 같은 것은 우연이며, 동일성의 근거가 아니다.
 - **음성 패널은 폐기한다(2026-09-26).** 목적함수가 카르복실레이트를 게이트로 요구하므로(§5.1) 카르복실산이 없는 분자는 총점 상한이 6.31e-04다. 무작위 drug-like ChEMBL 분자는 대부분 카르복실산이 없으니 음성 패널은 그 바닥에 몰리고, "생성 집합이 음성 패널을 능가한다"는 **"생성 분자에 카르복실산이 있다"를 다시 재는 것**이 된다 — 목적함수가 강제하고 §5.5가 통과율로 이미 보고하는 사실이다. 정보량이 없으므로 만들지 않는다.
 - 의미 있는 비교는 양성 패널이며, **순환하지 않는 축**에서만 한다: §8.5 docking 기하, §9.2 ADMET-AI permeability, Murcko 신규성(§8.3), alert/counter-screen. **총점으로 비교하지 않는다** — 총점은 우리가 설계한 목적함수의 값이므로 순환이다(§5.4).
 - 이 패널은 생성 분자와 **완전히 동일한** scoring + triage funnel을 통과한다. 포스터의 모든 비교가 정직해지는 근거가 바로 이것이다.
@@ -223,7 +223,7 @@ K-BDS가 아니라 로컬 TITAN Xp(sm_61)에서 실행했다. 두 환경은 동�
 
 ## 5. Step 2 — Single-stage learning (RL): 단일 단계 구성 (D4–D5)
 
-> **2026-09-26 재설계.** 기존 2단계 커리큘럼(Stage 1 focus 200 steps → Stage 2 optimize 400 steps)을 폐기하고 단일 stage 600 steps로 교체했다. 근거와 측정 데이터 전체는 `docs/superpowers/specs/2026-09-26-step2-single-stage-rl-design.md`에 있다.
+> **2026-09-26 재설계.** 기존 2단계 커리큘럼(Stage 1 focus 200 steps → Stage 2 optimize 400 steps)을 폐기하고 단일 stage로 교체했다. **실행된 step 수는 1000이며**(shared settings의 `max_steps` 및 §8.7.1과 일치), 재설계 당시 본문에 적힌 600은 오기다. 근거와 측정 데이터 전체는 `docs/superpowers/specs/2026-09-26-step2-single-stage-rl-design.md`에 있다.
 
 **공통 설정:** `learning_strategy` type `"dap"`, `sigma = 128`, `rate = 0.0001`; `batch_size = 128`(GPU); `diversity_filter` = `IdenticalMurckoScaffold`, `bucket_size = 25`, `minscore = 0.4`(**전 구간 적용**); `inception`은 active로 시드("좋은 분자가 어떤 모습인지"에 대한 기억); 집계는 `geometric_mean`; `max_steps = 1000`.
 * DAP (Differentiable Augmented Posterior): log-likelihood를 미분 가능한 형태로 매 스텝 다시 계산해서 역전파합니다. REINVENT 4의 기본 권장값이고, MAULI/MASCOF/SDAP 같은 다른 전략보다 수렴이 빠르고 안정적입니다. 특별한 이유 없으면 dap 유지가 맞습니다.
@@ -343,7 +343,7 @@ PAINS는 **이 TOML로 표현할 수 없다** — `reinvent_plugins`에는 PAINS
 | **PLN-1474** | **100.6** | 경구, αvβ1 선택적, Phase 1 무사 완료(84명, DLT 없음) [85] |
 | **bexotegrast** | **112.5** | 경구 αvβ6/αvβ1 이중 저해, Phase 2a INTEGRIS [98, 99] |
 | A1AFA | 66.4 | 8W30 결정 리간드 — 구조적 하한 |
-| cpd 25 계열(Sabat 25개) | 중앙 133.3 / 최대 170.0 | 경구 F 1.3%, MDCK < 0.1×10⁻⁶ [111] — 경구용 제안 아님 |
+| cpd 25 계열(Sabat 25개) | 중앙 133.3 / 최대 170.0 | 경구 F 1.3%, cpd 25 MDCK a–b 3.0 / b–a 3.2 ×10⁻⁶ (Table 3) [111] — 경구용 제안 아님 |
 | GLPG0187 / CWHM-12 | 158.7 / 172.4 | 비선택적 / 비경구 |
 
 하한 40은 결정 리간드(66.4)보다 낮아 아무것도 벌주지 않는다. 상한 115는 **경구 임상 화합물 중 TPSA가 높은 쪽(bexotegrast 112.5)에 마진을 둔 값**이다. 후보 비교(카르복실산 게이트 적용 상태, "산 부분집합"은 카르복실산 보유 prior 샘플 254개):
@@ -577,13 +577,13 @@ NN-Tanimoto의 **중앙값은 두 arm이 같고 p90만 갈린다**(0.39 vs 0.58)
 
 **첫째, 바가 구성상 낮다.** cpd 25는 lead compound로 제시된 분자가 아니다 — §5.4가 TPSA 창의 근거로 이 계열을 **거부한 이유**가 "그 계열 TPSA가 높은 것은 애초에 경구용으로 제안된 구조가 아니기 때문이고, 따라서 순환"이었다. 같은 반박이 투과성 기준선에도 그대로 적용된다. 경구 노출을 위해 최적화된 적 없는 분자를 능가하는 것은 발견이 아니다.
 
-**둘째, 동종 비교가 아니었다.** 기존 문구는 **우리의 예측값**을 cpd 25의 **실측값**(MDCK < 0.1×10⁻⁶ cm/s, oral F 1.3% [111])과 맞대고 있었다. 모델 출력과 실험값의 비교는 방향성조차 보장되지 않는다. PLN-1474의 ADME는 비공개이므로 §9.2가 **ADMET-AI를 양쪽에 적용한 예측 대 예측**이 된다 — 더 어려운 바이지만 유효한 비교다.
+**둘째, 동종 비교가 아니었다.** 기존 문구는 **우리의 예측값**을 cpd 25의 **실측값**(MDCK a–b 3.0 / b–a 3.2 ×10⁻⁶ cm/s Table 3, oral F 1.3% [111])과 맞대고 있었다. 모델 출력과 실험값의 비교는 방향성조차 보장되지 않는다. PLN-1474의 ADME는 비공개이므로 §9.2가 **ADMET-AI를 양쪽에 적용한 예측 대 예측**이 된다 — 더 어려운 바이지만 유효한 비교다.
 
 PLN-1474가 올바른 앵커인 근거는 이미 문서 안에 있다: αvβ1 저해제 중 **유일하게 임상에 진입**했고(Phase 1 완료, 이후 개발 중단), §5.4가 TPSA 창 `(40, 115)`를 이 분자의 100.6에 맞춰 그었다. 투과성 기준선도 같은 분자로 두는 것이 일관된다.
 
 **`CHEMBL5933542` = PLN-1474 확인.** 평탄화하면 `data/benchmark_panel.smi`의 PLN-1474와 정확히 동일한 SMILES가 되고, ChEMBL이 보고하는 TPSA 100.55가 §5.4의 100.6과 일치한다.
 
-**확인 과정에서 나온 사실 하나 — §8.3의 5파일 합집합 논거는 유지된다.** ChEMBL은 `CHEMBL5933542`를 **이름 없이, synonym 없이, `max_phase` null**로 갖고 있으며, 활성 기록은 **αvβ6 IC50 50 nM 세 건뿐이고 αvβ1 기록이 없다.** 그래서 `data/actives_extended.smi`의 정의("ChEMBL αvβ1 active ≤ 1 µM")가 이 분자를 놓친 것이 정당하며, §8.3이 참조 파일 5개의 합집합을 쓰는 이유가 그대로 성립한다. 다만 `scripts/known_scaffolds.py`의 주석이 PLN-1474를 "구조가 AdisInsight에서 왔고 ChEMBL 활성 기록이 아니다"로 적었던 것은 부정확했다 — **구조는 ChEMBL에 있고**, 없는 것은 αvβ1 활성 기록이다. 주석을 정정했다.
+**확인 과정에서 나온 사실 하나 — §8.3의 5파일 합집합 논거는 유지된다.** ChEMBL은 `CHEMBL5933542`를 **이름 없이, synonym 없이, `max_phase` null**로 갖고 있으며, 활성 기록은 **검열된 `<50 nM` αvβ6 IC50 1건과 값이 비어 있는 kon/k_off 2건뿐이며 αvβ1 기록이 없다.** (이전 문구 "αvβ6 IC50 50 nM 세 건"은 부정확했다. 결론 — αvβ1 기록 없음 — 은 그대로다.) 그래서 `data/actives_extended.smi`의 정의("ChEMBL αvβ1 active ≤ 1 µM")가 이 분자를 놓친 것이 정당하며, §8.3이 참조 파일 5개의 합집합을 쓰는 이유가 그대로 성립한다. 다만 `scripts/known_scaffolds.py`의 주석이 PLN-1474를 "구조가 AdisInsight에서 왔고 ChEMBL 활성 기록이 아니다"로 적었던 것은 부정확했다 — **구조는 ChEMBL에 있고**, 없는 것은 αvβ1 활성 기록이다. 주석을 정정했다.
 
 ---
 
@@ -636,7 +636,7 @@ PLN-1474가 올바른 앵커인 근거는 이미 문서 안에 있다: αvβ1 �
    - **타우토머 정규화가 여기에 직접 걸린다(§8.0).** 검증했다: PLN-1474의 두 타우토머는 정규화 없이 **서로 다른 Murcko SMILES**를 낸다(`...C1=CC=C2CCCN=C2N1` vs `...c1ccc2c(n1)NCCC2`). 정규화 후 동일해진다. 정규화를 빼면 신규성 주장이 표현 차이로 뚫린다.
 4. **선택성 — 주장하지 않고 관찰로 보고한다(2026-09-27 개정).** 기존의 "αvβ3/α5β1 active에 대한 Tanimoto ≥ 0.5 플래그" 조항은 **철회한다**: §3.2가 규정한 counter-screen 세트가 산출된 적이 없어 실행 불가이고, §3.2 자신이 "유사도 ≠ 활성"이라 적었을 만큼 기전이 약하다. 대신 §8.5의 통과 pose에서 다음 셋을 **측정해 보고한다**.
 
-   (i) **β1-Leu225 측쇄 접촉** — 리간드 소수성 원자가 Leu225 측쇄 탄소(CB/CG/CD1/CD2)로부터 4.5 Å 이내인가. ITGB1(P05556, signal peptide 20잔기 제거)과 ITGB3(P05106)의 βI 도메인을 정렬하면 Sabat이 선택성의 원천으로 지목한 소수성 포켓 다섯 잔기 중 **Leu225만이 β3와 다르다**(β3는 **Arg** — 소수성 벽이 하전 측쇄로 바뀐다). Tyr133·Pro186·Cys187·Asn224·Asp226은 모두 보존이다. 이것이 GLPG0187·CWHM-12가 같은 3-aminopropionyl 골격으로 Leu225 **backbone**을 잡으면서도 pan인 이유를 설명한다 — 포켓은 Leu의 **측쇄**를 요구한다.
+   (i) **β1-Leu225 측쇄 접촉** — 리간드 소수성 원자가 Leu225 측쇄 탄소(CB/CG/CD1/CD2)로부터 4.5 Å 이내인가. ITGB1(P05556, signal peptide 20잔기 제거)과 ITGB3(P05106)의 βI 도메인을 정렬하면 Sabat이 선택성의 원천으로 지목한 소수성 포켓 다섯 잔기 중 **Leu225만이 β3와 다르다**(β3는 **Arg** — 소수성 벽이 하전 측쇄로 바뀐다). Tyr133·Pro186·Cys187·Asn224·Asp226은 모두 보존이다. 이것이 GLPG0187·CWHM-12가 같은 3-aminopropionyl 골격으로 Leu225 **backbone**을 잡으면서도 pan인 이유를 설명한다 — 포켓은 Leu의 **측쇄**를 요구한다. **따라서 Leu225 접촉 자체는 선택성의 원천이 아니라 공용 앵커다**(Sabat p.10307: *"When anchored by the MIDAS and β1-Leu225 interactions…"*). 선택성은 그 앵커 위에서 compact lipophilic group이 β1 소수성 포켓을 채우는지로 결정되며, v1 측정에서 이 접촉의 통과율이 64.3%로 변별력이 약했던 것도 그 때문이다. §8.2는 이를 반영해 **Leu225 측쇄 접촉을 게이트로 쓰지 않는다.**
 
    (ii) **αv-Asp218 접촉의 성격** — Asp218 카르복실산소로부터 4.0 Å 이내에 (a) 중성 수소결합 공여체가 있는가, (b) 염기성 질소(Arg 모방 헤드)가 있는가. (b)는 문헌에서 pan-αv와 연관된다: αvβ6 임상 후보 GSK3008348의 1,8-나프티리딘이 Asp218과 **염다리**를 이루고 [114], Sabat의 THN 도입이 pan-αv를 낳았다 [111].
 
@@ -671,13 +671,13 @@ PLN-1474가 올바른 앵커인 근거는 이미 문서 안에 있다: αvβ1 �
 
 여전히 **선택성의 증거가 아니다.** 위의 단서가 그대로 적용된다 — α 서브유닛 축을 다루지 않았고, 선택성을 부여한다는 접촉이 이 타깃에서 결정학적으로 관측된 적이 없으며, 실측 교차 IC50이 유일한 근거다.
 5. **Docking — affinity 순위가 아니라 기하학적 필터:**
-   - Receptor: 8W30의 chain A+B; 리간드 TR01225179와 물 분자 **전량** 제거(이것이 방법이다. HOH2107 민감도 분석은 철회했다 — 사유는 아래 *물 처리* 항)
+   - Receptor: 8W30의 chain A+B; 리간드(acid 1, CCD `A1AFA`)와 물 분자 **전량** 제거(이것이 방법이다. HOH2107 민감도 분석은 철회했다 — 사유는 아래 *물 처리* 항)
    - 도구: smina / AutoDock Vina; 리간드 centroid 기준 약 20 Å box
    - **알려진 한계:** Vina 계열 scoring function은 metal coordination을 모델링하지 못한다 — 가장 중요한 상호작용(carboxylate → MIDAS Ca²⁺)이 scorer에게는 보이지 않는다. 따라서:
-     - **(a) 검증:** TR01225179를 redocking한다. 최상위 pose에서 carboxylate-O → Ca501 ≤ 3.2 Å를 요구한다(이상적으로는 결정 구조 pose 대비 heavy-atom RMSD < 2 Å도). **검증에 실패하면 어떤 것도 docking으로 순위 매기지 말 것** — similarity/QSAR 기반 triage로 후퇴하고 이를 포스터에 명시한다.
+     - **(a) 검증:** acid 1(CCD `A1AFA`)을 redocking한다. 최상위 pose에서 carboxylate-O → Ca501 ≤ 3.2 Å를 요구한다(이상적으로는 결정 구조 pose 대비 heavy-atom RMSD < 2 Å도). **검증에 실패하면 어떤 것도 docking으로 순위 매기지 말 것** — similarity/QSAR 기반 triage로 후퇴하고 이를 포스터에 명시한다.
      - **(b) 사후 필터:** carboxylate O → Ca501 ≤ 3.2 Å **이면서** H-bond donor가 β1-Asn224 backbone O로부터 3.5 Å 이내에 있는 pose만 채택한다. Docking score는 동점 처리용으로만 사용한다.
 
-   **검증 결과 — 실행 완료, 통과(2026-09-27).** conda `docking` 환경(smina 2020.12.10, openbabel)에서 8W30 chain A+B(리간드·물·글리칸 제거, **Ca²⁺ 6개 유지**)에 TR01225179를 되돌려 넣었다: `--autobox_ligand` + `--autobox_add 6 --exhaustiveness 16 --num_modes 20 --seed 42`.
+   **검증 결과 — 실행 완료, 통과(2026-09-27).** conda `docking` 환경(smina 2020.12.10, openbabel)에서 8W30 chain A+B(리간드·물·글리칸 제거, **Ca²⁺ 6개 유지**)에 acid 1을 되돌려 넣었다: `--autobox_ligand` + `--autobox_add 6 --exhaustiveness 16 --num_modes 20 --seed 42`.
 
    | pose | affinity | O→Ca501 | N→Asn224 O | RMSD |
    |---|---|---|---|---|
@@ -810,7 +810,7 @@ funnel 전체: 샘플링 19,485 → §8.2 생존자 7,767 → 3D embedding 성�
 **카르복실산 SMARTS가 좁았다.** `pose_geometry.py`가 §5.1과 같은 `[CX3](=O)[OX2H1,OX1-]`를 쓰고 있었다. PDBQT는 두 카르복실 산소를 다 `OA`로 쓰고 전하를 담지 않으므로, 그 경로로 돌아온 pose의 산소는 **수소도 전하도 없고 어느 쪽에도 매치되지 않는다.** 탈양성자화 대조군에서 `ca_dist = inf`가 나오고 전 pose가 탈락했는데 **원인이 화학처럼 보였다.** 실제 실행은 Meeko가 `REMARK SMILES`로 중성 COOH를 복원해서 우연히 무사했다. → `[CX3](=[OX1])[OX2H1,OX1]`로 넓혔다. **§5.1의 SMARTS는 건드리지 않는다** — 그것은 생성 SMILES를 채점하고 §5.1이 고정한 값이다.
 
 **점수 추출을 치명적으로 만든 회귀.** Uni-Dock의 pose 에너지는 `REMARK VINA RESULT`에 있고 Meeko가 RDKit 분자에 올려주지 않으므로 `PDBQTMolecule`의 `pose.score`에서 읽어야 한다. 그 수집을 구조 파싱과 같은 `try`에 넣어서, `VINA RESULT`가 없는 PDBQT(도킹 출력이 아닌 갓 준비된 리간드)에서 **pose가 0개 반환**됐다. 테스트 8개가 잡았다. 점수 부재는 점수만 잃게 하고 pose를 잃게 해서는 안 된다.
-6. **ADMET:** 생존 분자에 ADMET-AI(또는 동등 도구) 적용 — permeability proxy, 용해도, microsome 안정성, hERG, CYP. **기준선은 PLN-1474이며, 같은 도구로 예측해 비교한다(예측 대 예측).** 이전 문구는 cpd 25의 *실측* 약점(MDCK < 0.1×10⁻⁶ cm/s, oral F 1.3% [111])을 기준선으로 삼았으나 두 가지 이유로 개정했다(§7.5).
+6. **ADMET:** 생존 분자에 ADMET-AI(또는 동등 도구) 적용 — permeability proxy, 용해도, microsome 안정성, hERG, CYP. **기준선은 PLN-1474이며, 같은 도구로 예측해 비교한다(예측 대 예측).** 이전 문구는 cpd 25의 *실측* 약점(MDCK a–b 3.0 / b–a 3.2 ×10⁻⁶ cm/s Table 3, oral F 1.3% [111])을 기준선으로 삼았으나 두 가지 이유로 개정했다(§7.5).
 7. **최종 선별:** 다음을 만족하는 lead 약 10–20개 — 기하학적 필터 통과, 예측 permeability가 **PLN-1474보다 우수**, **Murcko scaffold가 §8.3의 106개 집합(`data/known_scaffolds.smi`)에 없음**, alert 없음, 카르복실레이트 보유. QED와 NN-Tanimoto(최근접 active 이름 포함)는 **게이트가 아니라 보고 지표**로 병기한다.
 
 ### 8.7.1 실행 결과 — 완료(2026-09-28)
@@ -1024,7 +1024,7 @@ RL 곡선도 같은 방향을 가리킨다: 두 아암 모두 step ~150에서 �
 | 4. CustomAlerts 플래그 없음 | ✅ | §8.2 생존자 정의에 포함 |
 | 5. 양성 패널과 비순환 축 비교 | ✅ (단서 있음) | 아래 |
 
-**기준 2는 0.5 log 여유로 판정했다.** §7.5가 정한 바닥값이며, 모델 오차(Caco-2 MAE 0.26–0.28)가 같은 화합물의 실험실 간 변동(중앙 0.57 log)과 같은 크기이므로 그 이하 차이는 능가라고 말할 수 없다. 여유 없이 세면 1,321개지만 **쓸 수 있는 숫자는 389개다.**
+**기준 2는 0.5 log 여유로 판정했다.** §7.5가 정한 바닥값이다. **이 마진을 정당화하던 두 수치는 미검증이라 철회한다** — "Caco-2 MAE 0.26–0.28"과 "실험실 간 변동 중앙 0.57 log"는 출처를 확인하지 못했다. 번들된 ADMET-AI 성능표에서 Chemprop-RDKit의 Caco-2 오차를 확인해 인용하기 전까지, 0.5 log가 잡음 상한을 넘는다는 주장은 하지 않는다. (v2에서 이 마진은 §9.3.1 대장 2번으로 게이트에서 제외되었고, 그 근거는 여기 철회한 수치가 아니라 Caco2_Wang이 906개로 학습된 유일한 회귀 엔드포인트라는 사실과 판정 대상 차이가 0.004–0.057 log였다는 측정이다.) 여유 없이 세면 1,321개지만 **쓸 수 있는 숫자는 389개다.**
 
 **기준 5의 단서.** 패널과의 비교는 세 축에서 성립한다 — 기하 필터는 동일한 프로토콜로 패널에도 적용했고(§8.7.1), permeability는 같은 ADMET 실행에서 예측 대 예측으로 비교했고, Murcko 신규성은 정의상 성립한다. 다만 **패널 6개 중 2개(GLPG0187, CHEMBL4649232)는 기하 필터를 통과하지 못했다.** 패널의 4/6이 RGD-zwitterion이고 우리 필터가 non-RGD 결합 양식을 기술하므로 예상된 결과이며, "동등하게 통과"를 문자 그대로 요구하면 그 둘과는 이 축에서 비교가 성립하지 않는다. 그 사실을 감추지 않고 적는다.
 
@@ -1063,7 +1063,7 @@ RL 곡선도 같은 방향을 가리킨다: 두 아암 모두 step ~150에서 �
 | D4 | **선행 작업:** 타우토머 정규화를 비교 계층(`scripts/normalize.py`)에 추가 → `novelty_band.json` 재계산(§8.0); `CustomAlerts` aniline 패턴 교체 검증(§5.4). **`curate_actives.standardize()`는 의도적으로 그대로 둔다** — 그 출력은 TL-A 학습 입력이자 RL inception seed인 `data/actives_core.smi`에 기록되므로, 여기에 타우토머 정규화를 추가하면 이미 완료된 D3 run이 무효화된다. 정규화는 비교 계층에만 존재한다(`scripts/normalize.py:8-9`, `scripts/curate_actives.py:243-246`). 그 후 RL 단일 stage 0–300 step | 참조 세트 0점 화합물이 **§5.4에 기록된 1건 외에 없음**을 확인한 뒤 착수 — RL이 적용하는 여덟 SMARTS는 `actives_extended`의 `CHEMBL4756602` 하나를 `[Nr0][Nr0]`(비고리 N–N, 하이드라진류)로 0점 처리한다. 이 패턴은 정당한 reactive alert이고 190개 중 1개는 aniline의 164/190 같은 파국이 아니므로 받아들이되 숨기지 않는다. PAINS는 RL에 없고 `objective.py`/§8 triage에서만 적용되므로 거기서는 3건이 된다(`CHEMBL244434`, `CHEMBL244013`이 `mannich_A(296)`). 100 step마다 §5.5 진단 기록 |
 | D5 | RL 단일 stage 300–600 step | 최종 agent; 알려진 series로의 붕괴 감시(NN-Tanimoto가 0.6 초과로 상승 → DF `minscore` 0.4 → 0.5로 상향, 필요시 이전 체크포인트에서 재시작). **similarity 가중치 조정은 불가** — 그 component는 목적함수에 없다(§5.2) |
 | D6 | Sampling 20k **(완료)**; 벤치마크 패널 scoring **(완료, §7.1)** | `data/library.smi` 19,485개 + `data/library_prior.smi` 18,346개 (§6.1); 기준 점수 분포 |
-| D7 | Docking 설정 + TR01225179 redocking 검증 **(완료)** | smina 0.63 Å RMSD 통과(§8.5a). Uni-Dock 재검증도 통과 — Ca501 2.682 / Asn224 2.920 Å(§8.5.1). fallback 불필요 |
+| D7 | Docking 설정 + acid 1 redocking 검증 **(완료)** | smina 0.63 Å RMSD 통과(§8.5a). Uni-Dock 재검증도 통과 — Ca501 2.682 / Asn224 2.920 Å(§8.5.1). fallback 불필요 |
 | D8 | Docking + 기하 필터 + §8.4 관찰 + ADMET + 최종 선별 **(전부 완료)** | 기하 통과 1,586 후보(§8.5.1) → §9 기준 1–4 충족 **389개**(§9.6) → affinity·독성 순위로 **lead 20개**(§8.7.1). 산출물 `results/{geometry,selectivity,panel_geometry,admet_survivors,leads}.csv`, `logs/leads.txt`. counter-screen은 철회(§8.4) |
 | D9 | 벤치마크 비교, lead 선별, 결과 표 + 그림 | 상위 lead 10–20개 |
 | D10 | 예비일: 포스터 조립(pocket 그림은 이미 완료), 7분 발표 리허설, 공격 표면 대비 | — |
@@ -1131,6 +1131,6 @@ pip는 바이너리 전용(`--only-binary=:all:`)으로 설치한다. 이 옵션
 - [98] Lancaster et al., INTEGRIS-IPF, Am. J. Respir. Crit. Care Med. (2024) — bexotegrast
 - [103] Henderson et al., Nat. Med. (2013) — HSC αv deletion; CWHM-12
 - [111] Sabat et al., J. Med. Chem. (2024) — Design and Discovery of a Potent and Selective Inhibitor of Integrin αvβ1
-- [112] PDB 8W30 — αvβ1 headpiece + TR01225179
+- [112] PDB 8W30 — αvβ1 headpiece + acid 1 (엔트리 타이틀 `TR01225179`)
 - [113] Qie, Wang, Li et al., *Molecular Diversity* (2026), doi 10.1007/s11030-026-11625-z — REINVENT4 stage-wise RL로 EGFR 저해제 설계 + 실험 검증. 이 프로젝트가 참조하는 **선행 RL 프로토콜**
 - [114] Zheng Y, Leftheris K, *J. Med. Chem.* **2020**, 63, 5675–5696, doi 10.1021/acs.jmedchem.9b01869 — *Insights into Protein–Ligand Interactions in Integrin Complexes: Advances in Structure Determinations*. αv 서브유닛이 공유되므로 αvβx 사이의 선택성은 β 서브유닛이 결정한다는 원칙, 2020년까지 αvβ1 구조 부재, α5의 Trp157·Gln221·Ser224, GSK3008348의 Asp218 염다리, 2,6-디클로로페닐이 여러 인테그린 저해제의 범용 SDL 근접 모티프라는 사실의 출처.
