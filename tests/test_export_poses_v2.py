@@ -176,15 +176,34 @@ class TestScript(unittest.TestCase):
         self.assertIn("NEIGHBOURING metal site", script)
         self.assertIn("medium sea green sphere (MG B/2102)", script)
 
+    def test_a_non_carboxylate_contact_is_drawn_separately(self):
+        """Compound 25 reaches the MIDAS with something that is not its
+        carboxylate -- 7.4-9.8 A on the measured atom while PLIP still
+        reports metal coordination. Drawing only the carboxylate distance
+        puts a 9.8 A dash on a pose that is touching the metal."""
+        entry = {**self.ENTRY, "metal_distance": 9.84, "near_atom": "@O5",
+                 "near_distance": 2.31, "near_element": "O"}
+        script = self._script(entries=[entry])
+        self.assertIn("9.84 A carboxylate (FAIL", script)
+        self.assertIn("2.31 A nearest O", script)
+        self.assertIn("NOT a carboxylate", script)
+        self.assertIn("distance #2@O5 #1/B:501@CA color orange", script)
+
+    def test_nothing_extra_is_drawn_when_the_carboxylate_is_the_contact(self):
+        # near_atom is None when the nearest coordinating atom IS the one the
+        # filter measured; a second dash on the same pair would double it.
+        script = self._script()
+        self.assertNotIn("color orange", script)
+
     def test_the_pass_or_fail_of_each_drawn_distance_is_in_the_script(self):
         script = self._script()
-        self.assertIn("2.61 A (PASS, cutoff 3.2)", script)
+        self.assertIn("2.61 A carboxylate (PASS, cutoff 3.2)", script)
         self.assertIn("3.02 A (PASS, cutoff 3.5)", script)
 
     def test_a_failing_pose_says_so(self):
         entry = {**self.ENTRY, "metal_distance": 8.37}
         script = self._script(entries=[entry])
-        self.assertIn("8.37 A (FAIL, cutoff 3.2)", script)
+        self.assertIn("8.37 A carboxylate (FAIL, cutoff 3.2)", script)
 
 
 if __name__ == "__main__":

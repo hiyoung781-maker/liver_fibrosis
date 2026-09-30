@@ -246,6 +246,16 @@ def export(pose_dirs: list[str], wanted: dict, out_dir: str, receptor: str,
 
         oxygens, donors = _carboxylate_and_donor(mol)
         metal_index, metal_distance = _nearest(positions, oxygens, metal["xyz"])
+        # The filter measures the CARBOXYLATE oxygen, but a ligand can reach
+        # the MIDAS with something else -- compound 25 does, at 7.4-9.8 A
+        # carboxylate while PLIP still reports metal coordination. Drawing
+        # only the carboxylate distance hides the contact that is actually
+        # there, so the nearest coordinating heavy atom is drawn too, in a
+        # different colour, whenever it is a different atom.
+        coordinating = [i for i, atom in enumerate(mol.GetAtoms())
+                        if atom.GetSymbol() in ("O", "N", "S")]
+        near_index, near_distance = _nearest(positions, coordinating,
+                                             metal["xyz"])
         donor_index, donor_distance = _nearest(positions, donors, contact_o)
         affinity = (float(mol.GetProp("affinity"))
                     if mol.HasProp("affinity") else None)
@@ -258,6 +268,12 @@ def export(pose_dirs: list[str], wanted: dict, out_dir: str, receptor: str,
             "metal_atom": (f"@{names[metal_index]}"
                            if metal_index is not None else None),
             "metal_distance": metal_distance,
+            "near_atom": (f"@{names[near_index]}"
+                          if near_index is not None
+                          and near_index != metal_index else None),
+            "near_distance": near_distance,
+            "near_element": (mol.GetAtomWithIdx(near_index).GetSymbol()
+                             if near_index is not None else None),
             "donor_atom": (f"@{names[donor_index]}"
                            if donor_index is not None else None),
             "donor_distance": donor_distance,
@@ -344,7 +360,12 @@ def chimerax_script(entries, metal, midas, contact, context, title="",
                      f"affinity {affinity} kcal/mol")
         verdict = "PASS" if entry["metal_distance"] <= CA_CUTOFF else "FAIL"
         lines.append(f"#   {metal['element']:<8s} {entry['metal_distance']:.2f} A "
-                     f"({verdict}, cutoff {CA_CUTOFF})")
+                     f"carboxylate ({verdict}, cutoff {CA_CUTOFF})")
+        if entry.get("near_atom"):
+            lines.append(f"#   {metal['element']:<8s} "
+                         f"{entry['near_distance']:.2f} A nearest "
+                         f"{entry['near_element']} -- NOT a carboxylate, so "
+                         "the geometry gate does not count it")
         if contact:
             verdict = "PASS" if entry["donor_distance"] <= DONOR_CUTOFF else "FAIL"
             lines.append(f"#   donor    {entry['donor_distance']:.2f} A "
@@ -361,6 +382,10 @@ def chimerax_script(entries, metal, midas, contact, context, title="",
         if entry["metal_atom"]:
             lines.append(f"distance #{index}{entry['metal_atom']} "
                          f"{midas_spec}@{metal['name']} color yellow dashes 6 "
+                         "radius 0.06 decimalPlaces 2")
+        if entry.get("near_atom"):
+            lines.append(f"distance #{index}{entry['near_atom']} "
+                         f"{midas_spec}@{metal['name']} color orange dashes 3 "
                          "radius 0.06 decimalPlaces 2")
         if contact and entry["donor_atom"]:
             lines.append(f"distance #{index}{entry['donor_atom']} "
@@ -394,7 +419,12 @@ def chimerax_script(entries, metal, midas, contact, context, title="",
     lines += ["# heteroatoms by element on every ligand (N blue, O red, "
               "S yellow)",
               f"# yellow dashes = carboxylate to the MIDAS metal "
-              f"(cutoff {CA_CUTOFF} A)"]
+              f"(cutoff {CA_CUTOFF} A)",
+              "# orange dashes = nearest O/N/S to the metal where that is NOT "
+              "the carboxylate;",
+              "#                 drawn because a ligand can coordinate the "
+              "MIDAS with another atom,",
+              "#                 which the geometry gate does not count"]
     if contact:
         lines.append(f"# cyan  dashes  = donor to {contact[0]}/{contact[1]} "
                      f"backbone O (cutoff {DONOR_CUTOFF} A)")
