@@ -130,6 +130,51 @@ class TestControlValues(unittest.TestCase):
         self.assertFalse(verdict["passed"])
 
 
+class TestControlOnlyRankingIsPopulationIndependent(unittest.TestCase):
+    """Measured: the same four controls, the same two receptors, gave FAIL
+    with one arm's molecules in the population and PASS with the other's
+    (TL-A-prime PLN-1474 -0.323 against TL-C -0.194). A percentile moves when
+    the population moves, so a calibration gate computed that way is partly
+    measuring which molecules were generated. Ranked among themselves, the
+    controls cannot move."""
+
+    TARGET = {"PLN-1474": -7.3, "CHEMBL4649232": -8.0,
+              "CWHM-12": -7.6, "GLPG0187": -7.4}
+    SUBTYPE = {"PLN-1474": -7.0, "CHEMBL4649232": -7.6,
+               "CWHM-12": -8.3, "GLPG0187": -8.0}
+
+    def _controls_only(self, extra_target, extra_subtype):
+        target = {**self.TARGET, **extra_target}
+        subtype = {**self.SUBTYPE, **extra_subtype}
+        keys = list(self.TARGET)
+        return rank_selectivity({k: target[k] for k in keys},
+                                {k: subtype[k] for k in keys})
+
+    def test_two_different_populations_give_the_same_control_values(self):
+        a = self._controls_only({"g1": -9.0, "g2": -8.5},
+                                {"g1": -6.0, "g2": -6.2})
+        b = self._controls_only({"g3": -6.5, "g4": -6.6, "g5": -6.7},
+                                {"g3": -9.5, "g4": -9.1, "g5": -9.2})
+        self.assertEqual(a, b)
+
+    def test_it_still_reads_the_controls_in_the_right_order(self):
+        sel = self._controls_only({}, {})
+        # CWHM-12 and GLPG0187 lose the most ground on the isoform here.
+        self.assertGreater(sel["PLN-1474"], sel["CWHM-12"])
+        self.assertGreater(sel["CHEMBL4649232"], sel["GLPG0187"])
+        self.assertTrue(calibration_verdict(sel)["passed"])
+
+    def test_the_whole_population_version_does_move(self):
+        # The property that motivated this: same controls, different verdict.
+        keys = list(self.TARGET)
+        wide = rank_selectivity({**self.TARGET, "g": -9.9},
+                                {**self.SUBTYPE, "g": -5.0})
+        narrow = rank_selectivity({**self.TARGET, "g": -5.0},
+                                  {**self.SUBTYPE, "g": -9.9})
+        self.assertNotEqual({k: wide[k] for k in keys},
+                            {k: narrow[k] for k in keys})
+
+
 class TestRankSum(unittest.TestCase):
     """spec 10.1: rank each validated isoform's Delta DESCENDING (1 = most
     selective), and a molecule's rank-sum is the reverse of the sum of those

@@ -369,7 +369,9 @@ def main(argv=None) -> int:
         sys.stderr.write(f"{exc}\n")
         return 2
 
+    controls = list(CALIBRATION["selective"]) + list(CALIBRATION["non_selective"])
     delta_by_isoform, rank_by_isoform, shared_counts = {}, {}, {}
+    control_rank_by_isoform = {}
     for item in args.isoform:
         name, _, directory = item.partition("=")
         dirs = [d for d in directory.split(",") if d]
@@ -397,12 +399,22 @@ def main(argv=None) -> int:
         shared_counts[name] = len(shared)
         delta_by_isoform[name] = deltas(restricted, subtype)
         rank_by_isoform[name] = rank_selectivity(restricted, subtype)
+        # Ranked among THEMSELVES, not among the generated set. The rank
+        # measure is a percentile, so a control's value depends on which
+        # molecules were ranked with it -- and the same four controls against
+        # the same two receptors gave FAIL with one arm's molecules and PASS
+        # with the other's. A calibration gate whose verdict moves with the
+        # population is not measuring the protocol. This one cannot move.
+        control_keys = [k for k in (_control_key(c, restricted)
+                                    for c in controls) if k is not None]
+        control_rank_by_isoform[name] = rank_selectivity(
+            {k: restricted[k] for k in control_keys if k in restricted},
+            {k: subtype[k] for k in control_keys if k in subtype})
 
     # A control absent from BOTH sides was never docked against the isoform;
     # a control the target has but the isoform does not is a docking that did
     # not produce a pose. The gate reports the same FAIL for each, and they
     # need different fixes, so name which one happened.
-    controls = list(CALIBRATION["selective"]) + list(CALIBRATION["non_selective"])
     control_status = {}
     for item in args.isoform:
         name, _, directory = item.partition("=")
@@ -417,6 +429,8 @@ def main(argv=None) -> int:
         }
 
     rank_verdicts = {n: calibration_verdict(t) for n, t in rank_by_isoform.items()}
+    control_verdicts = {n: calibration_verdict(t)
+                        for n, t in control_rank_by_isoform.items()}
     delta_verdicts = {n: calibration_verdict(t) for n, t in delta_by_isoform.items()}
     scores = rank_sum(rank_by_isoform)
 
@@ -459,10 +473,19 @@ def main(argv=None) -> int:
                   "αvβ6에서 두 비선택성 대조군은 실험 IC50이 αvβ1과 거의 같으므로"
                   "(CWHM-12 1.8 대 1.5 nM, GLPG0187 1.3 대 1.4 nM) 이 게이트의 "
                   "변별력은 약하다."]
+    lines += ["", "**이 게이트가 줄 수 있는 증거의 상한.** 판정은 선택적 2개가 "
+              "비선택적 2개보다 위에 오는지만 본다. 네 값의 순서가 무작위라면 "
+              "그렇게 될 확률이 1/C(4,2) = 1/6 ≈ 17%다. 통과는 프로토콜이 "
+              "틀리지 않았다는 정도를 말할 뿐, 선택성 예측이 맞다는 증거로는 "
+              "약하다. 대조군 넷이 놓인 폭과 생성 분자가 놓인 폭을 함께 봐야 "
+              "한다 — 후자가 전자를 크게 벗어나면 외삽이다."]
 
     for name in isoforms:
         for label, verdicts, table in (("순위 기반 (주)", rank_verdicts,
                                         rank_by_isoform[name]),
+                                       ("대조군끼리만 순위 (집단 독립)",
+                                        control_verdicts,
+                                        control_rank_by_isoform[name]),
                                        ("Δ 기반 (사전등록)", delta_verdicts,
                                         delta_by_isoform[name])):
             verdict = verdicts[name]
@@ -527,6 +550,8 @@ def main(argv=None) -> int:
          # A gate that could not run is not a gate that failed, and the two
          # need different fixes. `calibration_ran` false means a control was
          # never docked against the isoform.
+         "calibration_control_only": control_verdicts,
+         "control_rank_selectivity": control_rank_by_isoform,
          "calibration_ran": not never_docked,
          "control_status": control_status},
         indent=2) + "\n")
