@@ -196,11 +196,12 @@ def rows(funnel_csv, admet_csv, selectivity, reference=REFERENCE) -> list:
 def render(entries, ref_endpoints, sel_reference, arm) -> str:
     front = pareto_front(entries)
     front_labels = {e["label"] for e in front}
+    n_leads = sum(1 for e in entries if e["category"] == "LEAD")
     lines = [
         f"# 논의 후보 — {arm}",
         "",
         "**이 문서는 리드를 만들지 않는다.** 리드는 사전등록 5단 필터가 "
-        "정하며 TL-C에서 1개다. 여기 있는 것은 **구조 단계를 모두 통과한** "
+        f"정하며 이 아암에서 {n_leads}개다. 여기 있는 것은 **구조 단계를 모두 통과한** "
         "분자들 — geometry(§8.5b), affinity < "
         f"{PLN1474_CUTOFF:+.3f}(§8.7), 상호작용 게이트(§8.2) — 이고, "
         "그 다음 실제로 서로 상충하는 두 축 위에 어디 있는지를 보인다. "
@@ -267,7 +268,15 @@ def render(entries, ref_endpoints, sel_reference, arm) -> str:
               "쓰되, 엔드포인트별 값을 같은 행에 실어 평균이 나쁜 하나를 "
               "가리지 못하게 한다."]
 
-    for e in shown[:8]:
+    # Detail the rows a reader would actually present: the lead, the genuine
+    # trade-offs, and whatever else holds a corner of the front. Slicing the
+    # first N instead filled the section with BORDERLINE rows -- which is
+    # where the sort puts them, since they carry the largest selectivity
+    # margins and the largest toxicity failures at once.
+    detailed = [e for e in shown
+                if e["category"] in ("LEAD", "SELECTIVITY")
+                or e["label"] in front_labels]
+    for e in detailed:
         sel = "—" if e["selectivity"] is None else f"{e['selectivity']:+.3f}"
         verdict = margin_verdict(e["selectivity_margin"] or 0, DELTA_SD)
         lines += ["", f"### {e['label']}  ({e['category']})", "",
