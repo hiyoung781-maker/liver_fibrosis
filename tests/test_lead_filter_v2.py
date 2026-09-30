@@ -44,13 +44,61 @@ class TestStageOrder(unittest.TestCase):
     """Every stage is a conjunction, so the order does not change the final
     set -- it changes the counts the report shows. The order runs strongest
     evidence first: structure, then a same-engine relative affinity, then
-    selectivity, then model predictions, with Caco-2 last because it is the
-    one this project itself calls partly circular (predicted Caco-2 correlates
-    with TPSA at r = -0.571 and TPSA is an axis the RL objective optimises)."""
+    selectivity, then model predictions.
+
+    Caco-2 was the fifth stage until 2026-09-30 and is now reported rather
+    than applied: Caco2_Wang is the only regression endpoint in the set, its
+    error is near 0.3 log, and the differences it was being asked to
+    adjudicate are near 0.05 log."""
 
     def test_selectivity_sits_between_affinity_and_toxicity(self):
         self.assertEqual(STAGES, ("geometry", "affinity", "selectivity",
-                                  "toxicity", "caco2"))
+                                  "toxicity"))
+
+    def test_caco2_is_not_a_stage(self):
+        self.assertNotIn("caco2", STAGES)
+
+
+class TestCaco2IsReportedNotApplied(unittest.TestCase):
+    """The pre-registered rule wanted Caco-2 better than PLN-1474's -5.586 by
+    more than 0.5 log. The five molecules that reached it predicted -6.193,
+    -6.143, -5.644, -5.582 and -5.529: the two that beat the reference beat it
+    by 0.004 and 0.057 log, against a model error near 0.3, and the margin
+    alone removed all five. The value stays on the row; it stops deciding."""
+
+    def _rows(self, tmp, admet_rows):
+        # Stage 3 is a conjunction like the others, so these rows carry a
+        # passing selectivity value; what is under test is Caco-2.
+        labels = [r["label"] for r in admet_rows if r["label"] != REFERENCE]
+        selectivity = {"values": {**{l: 0.5 for l in labels}, REFERENCE: 0.0},
+                       "reference": 0.0, "calibration_passed": True}
+        f, a = Path(tmp) / "f.csv", Path(tmp) / "a.csv"
+        write(f, FUNNEL_FIELDS, [funnel(l) for l in labels])
+        write(a, ADMET_FIELDS, admet_rows)
+        return {r["label"]: r for r in lead_rows(str(f), str(a), -6.807,
+                                                 selectivity=selectivity)}
+
+    def test_a_molecule_far_below_the_reference_is_still_a_lead(self):
+        with TemporaryDirectory() as tmp:
+            rows = self._rows(tmp, [REF_ADMET, admet("leaky", caco2=-6.193)])
+            self.assertTrue(rows["leaky"]["all_stages"])
+            self.assertFalse(rows["leaky"]["caco2_better_than_reference"])
+            self.assertFalse(rows["leaky"]["all_stages_preregistered"])
+
+    def test_the_value_and_the_preregistered_verdict_both_survive(self):
+        with TemporaryDirectory() as tmp:
+            rows = self._rows(tmp, [REF_ADMET, admet("clear", caco2=-5.0)])
+            self.assertAlmostEqual(rows["clear"]["caco2"], -5.0)
+            self.assertTrue(rows["clear"]["caco2_preregistered_pass"])
+            self.assertTrue(rows["clear"]["all_stages_preregistered"])
+
+    def test_the_margin_still_decides_the_preregistered_verdict(self):
+        # -5.2 beats -5.586 but by 0.386, inside the 0.5 the spec asked for.
+        with TemporaryDirectory() as tmp:
+            rows = self._rows(tmp, [REF_ADMET, admet("near", caco2=-5.2)])
+            self.assertTrue(rows["near"]["caco2_better_than_reference"])
+            self.assertFalse(rows["near"]["caco2_preregistered_pass"])
+            self.assertTrue(rows["near"]["all_stages"])
 
 
 class TestPerEndpointToxicity(unittest.TestCase):
@@ -158,17 +206,37 @@ class TestSummaryOrder(unittest.TestCase):
     def test_the_funnel_narrows_in_stage_order(self):
         rows = [{"label": "a", "geometry_pass": True, "affinity_pass": True,
                  "selectivity_pass": True, "toxicity_pass": True,
-                 "caco2_pass": True, "all_stages": True},
+                 "all_stages": True, "caco2_preregistered_pass": True,
+                 "caco2_better_than_reference": True},
                 {"label": "b", "geometry_pass": True, "affinity_pass": True,
                  "selectivity_pass": True, "toxicity_pass": True,
-                 "caco2_pass": False, "all_stages": False},
+                 "all_stages": True, "caco2_preregistered_pass": False,
+                 "caco2_better_than_reference": False},
                 {"label": "c", "geometry_pass": True, "affinity_pass": True,
                  "selectivity_pass": False, "toxicity_pass": True,
-                 "caco2_pass": True, "all_stages": False}]
+                 "all_stages": False, "caco2_preregistered_pass": True,
+                 "caco2_better_than_reference": True}]
         s = summarize(rows)
         counts = [s[f"stage_{i}_{name}"] for i, name in enumerate(STAGES, 1)]
-        self.assertEqual(counts, [3, 3, 2, 2, 1])
-        self.assertEqual(s["leads"], ["a"])
+        self.assertEqual(counts, [3, 3, 2, 2])
+        self.assertEqual(s["leads"], ["a", "b"])
+
+    def test_the_summary_still_reports_what_the_caco2_gate_would_have_cut(self):
+        # The amendment was made after seeing the gate leave zero leads, so
+        # the report carries its cost rather than absorbing it: "b" is a lead
+        # now and would not have been under the pre-registered rule.
+        rows = [{"label": "a", "geometry_pass": True, "affinity_pass": True,
+                 "selectivity_pass": True, "toxicity_pass": True,
+                 "all_stages": True, "all_stages_preregistered": True,
+                 "caco2_better_than_reference": True},
+                {"label": "b", "geometry_pass": True, "affinity_pass": True,
+                 "selectivity_pass": True, "toxicity_pass": True,
+                 "all_stages": True, "all_stages_preregistered": False,
+                 "caco2_better_than_reference": False}]
+        s = summarize(rows)
+        self.assertEqual(s["leads"], ["a", "b"])
+        self.assertEqual(s["leads_preregistered"], ["a"])
+        self.assertEqual(s["caco2_better_than_reference"], ["a"])
 
 
 if __name__ == "__main__":

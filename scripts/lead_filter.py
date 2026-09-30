@@ -18,22 +18,38 @@ would mitigate it and would introduce another transform, so v2 uses the
 equal mean and says this out loud. hERG, AMES and the three CYPs leave the
 filter and travel on the lead card.
 
-FIVE STAGES, AMENDED 2026-09-30 (change ledger in results/v2_lead_filter.md),
+FOUR STAGES, AMENDED 2026-09-30 (change ledger in results/v2_lead_filter.md),
 all relative to PLN-1474:
 
   1. geometry gate (§8.5b) + PLIP
   2. affinity below PLN-1474's best PASSING pose
   3. SELECTIVITY above PLN-1474's, by within-receptor rank
   4. toxicity: EVERY §9.2 endpoint below PLN-1474's, not their mean
-  5. Caco-2 better than PLN-1474 by MORE THAN 0.5 log
 
-Three amendments to §9.1's four stages, each with its reason:
+Caco-2 is computed and reported on every row. It does not gate. Four
+amendments to §9.1's four stages, each with its reason:
 
 ORDER. Strongest evidence first. Structure, then a same-engine relative
 affinity, then selectivity, then model predictions -- with Caco-2 LAST
 because it is the filter this project itself calls partly circular. Every
 stage is a conjunction, so the final set is unchanged; the counts the report
 shows are not, and both orders are reported.
+
+CACO-2 STOPS GATING (2026-09-30, made AFTER seeing it leave zero leads --
+recorded that way deliberately, because the reason has to stand without that
+fact). §9.1 required Caco-2 better than PLN-1474 by more than 0.5 log.
+Caco2_Wang is ADMET-AI's only REGRESSION endpoint here, trained on 906
+compounds, with a reported error near 0.3 log. The five molecules that reach
+this stage predict -6.193, -6.143, -5.644, -5.582 and -5.529 against
+PLN-1474's -5.586: the two that beat the reference beat it by 0.004 and 0.057
+log, roughly a tenth of the model's own error, and the 0.5-log margin exceeds
+the whole set's 0.66-log spread. The gate therefore cuts noise, not signal,
+and one margin term decides every outcome.
+
+It does NOT come out because TPSA already covers permeability. Every molecule
+reaching this stage passed the same TPSA 40-115 window during RL, so TPSA
+cannot separate them and is not a substitute for this endpoint. The value
+stays on every row, and both counts -- gated and not -- are reported.
 
 SELECTIVITY BECOMES A STAGE. §9.1 had it only as criterion 6/7, a ranking
 axis. §10.4's clause making criterion 6 unevaluable when the calibration gate
@@ -80,13 +96,15 @@ __all__ = ["CACO2_ENDPOINT", "CACO2_MARGIN", "CONTEXT_ENDPOINTS", "REFERENCE",
            "toxicity_composite"]
 
 # Reported in this order; see the module docstring for why.
-STAGES = ("geometry", "affinity", "selectivity", "toxicity", "caco2")
+STAGES = ("geometry", "affinity", "selectivity", "toxicity")
 
 # §9.2: the three endpoints ADMET-AI predicts best, equally weighted.
 TOXICITY_ENDPOINTS = ("SR-MMP", "NR-AhR", "DILI")
 
 CACO2_ENDPOINT = "Caco2_Wang"
-# §9.1 filter 2: "PLN-1474보다 > 0.5 log 우위". Higher Caco-2 = more permeable.
+# §9.1 filter 2 required this margin. It no longer gates (see the docstring);
+# it is kept so the report can still say what the pre-registered rule would
+# have done, which is the only honest way to record an amendment like this.
 CACO2_MARGIN = 0.5
 
 # The reference every filter is relative to, as admet_input labels it.
@@ -154,6 +172,7 @@ def lead_rows(funnel_csv: str, admet_csv: str, affinity_cutoff: float,
     sel_values = selectivity.get("values") or {}
     sel_reference = selectivity.get("reference")
     sel_calibrated = bool(selectivity.get("calibration_passed", False))
+    sel_ran = bool(selectivity.get("calibration_ran", True))
 
     rows = []
     for entry in _read(funnel_csv):
@@ -191,12 +210,17 @@ def lead_rows(funnel_csv: str, admet_csv: str, affinity_cutoff: float,
             "selectivity_pass": sel_pass,
             "selectivity_status": sel_status,
             "selectivity_calibrated": sel_calibrated,
+            "selectivity_calibration_ran": sel_ran,
             "toxicity": tox,
             "toxicity_pass": bool(prediction) and not worse,
             "toxicity_worse_than_reference": worse,
             "toxicity_mean_pass": tox is not None and tox < ref_tox,
             "caco2": caco2,
-            "caco2_pass": caco2 is not None and caco2 > ref_caco2 + CACO2_MARGIN,
+            # Reported, not a stage. "_preregistered" names what it is: the
+            # rule §9.1 asked for, kept visible beside the rule now used.
+            "caco2_better_than_reference": caco2 is not None and caco2 > ref_caco2,
+            "caco2_preregistered_pass": (caco2 is not None
+                                         and caco2 > ref_caco2 + CACO2_MARGIN),
             "admet_status": "ok" if prediction else "missing",
             "plip_metal_any_passing": entry.get("plip_metal_any_passing") == "True",
             "plip_hbond_any_passing": entry.get("plip_hbond_any_passing") == "True",
@@ -207,6 +231,9 @@ def lead_rows(funnel_csv: str, admet_csv: str, affinity_cutoff: float,
         for endpoint in CONTEXT_ENDPOINTS:
             row[endpoint] = _float(prediction.get(endpoint)) if prediction else None
         row["all_stages"] = all(row[f"{stage}_pass"] for stage in STAGES)
+        # What the pre-registered five-stage rule would have selected.
+        row["all_stages_preregistered"] = (row["all_stages"]
+                                           and row["caco2_preregistered_pass"])
         rows.append(row)
 
     rows.sort(key=lambda r: (not r["all_stages"],
@@ -216,7 +243,11 @@ def lead_rows(funnel_csv: str, admet_csv: str, affinity_cutoff: float,
 
 
 def summarize(rows: list) -> dict:
-    """The five-stage funnel, cumulative, in STAGES order."""
+    """The four-stage funnel, cumulative, in STAGES order.
+
+    `leads_preregistered` reports what the five-stage rule with the Caco-2
+    margin would have returned, so the amendment never hides its own cost.
+    """
     out: dict = {}
     remaining = list(rows)
     for position, stage in enumerate(STAGES, start=1):
@@ -229,8 +260,15 @@ def summarize(rows: list) -> dict:
                                   if r.get("selectivity_status") == "missing"]
     out["selectivity_calibrated"] = bool(rows) and all(
         r.get("selectivity_calibrated") for r in rows)
-    # The pre-registered toxicity rule, kept for the record.
+    out["selectivity_calibration_ran"] = not rows or all(
+        r.get("selectivity_calibration_ran", True) for r in rows)
+    # The pre-registered rules, kept for the record: what §9.1/§9.2 as
+    # written would have returned, beside what the amendments return.
     out["toxicity_mean_pass"] = sum(1 for r in rows if r.get("toxicity_mean_pass"))
+    out["leads_preregistered"] = [r["label"] for r in rows
+                                  if r.get("all_stages_preregistered")]
+    out["caco2_better_than_reference"] = [
+        r["label"] for r in remaining if r.get("caco2_better_than_reference")]
     return out
 
 
@@ -269,6 +307,10 @@ def main(argv=None) -> int:
             "values": tables.get(name, {}),
             "reference": None,
             "calibration_passed": bool((verdicts.get(name) or {}).get("passed")),
+            # Older runs have no such key; assume the gate ran, since the
+            # only thing that sets it false is a control that was never
+            # docked, and that is a state this version detects explicitly.
+            "calibration_ran": bool(data.get("calibration_ran", True)),
         }
         # The reference's own selectivity, looked up by either label form.
         for key in (args.reference, args.reference.replace("PANEL_", ""),
@@ -291,10 +333,18 @@ def main(argv=None) -> int:
         print(f"  {position} {stage:<12} {summary[f'stage_{position}_{stage}']}")
     print(f"  (사전등록 독성 규칙: 동등평균 < 기준 통과 "
           f"{summary['toxicity_mean_pass']})")
+    print(f"  Caco-2는 게이트가 아니다 (2026-09-30 개정). 리드 "
+          f"{len(summary['leads'])}개 중 기준보다 투과성이 좋은 것 "
+          f"{len(summary['caco2_better_than_reference'])}개; 사전등록한 "
+          f"0.5 log 마진까지 걸었다면 {len(summary['leads_preregistered'])}개.")
     if summary["selectivity_missing"]:
         print(f"  선택성 값 없음: {len(summary['selectivity_missing'])} "
               "(3단계 실패로 기록)")
-    if not summary["selectivity_calibrated"]:
+    if not summary["selectivity_calibration_ran"]:
+        print("  경고: §10.4 보정 게이트가 실행되지 않았다 — 대조군이 "
+              "아이소폼에 도킹되지 않았다. 아무것도 검증하지 않은 축으로 "
+              "3단계를 자른 것이므로, 참조를 도킹해 다시 실행해야 한다.")
+    elif not summary["selectivity_calibrated"]:
         print("  경고: §10.4 보정 게이트를 통과하지 않은 선택성 값으로 "
               "필터했다. 그 값의 타당성은 미검증이며 리드 카드에 병기해야 한다.")
     if summary["admet_missing"]:

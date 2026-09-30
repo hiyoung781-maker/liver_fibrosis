@@ -54,25 +54,60 @@ BAND_WINDOW = 15
 NLL_COLUMNS = {"Agent": "Agent NLL", "Prior": "Prior NLL",
                "Target": "Augmented NLL"}
 
-# The section 5.1 scoring components, as REINVENT4 names their columns.
-SCORE_COLUMNS = {
-    "carboxylate MIDAS anchor": "carboxylate (MIDAS anchor)",
-    "TPSA": "TPSA (40-115 window)",
-    "SA score": "SA score (guard rail)",
-}
+# The section 5.1 scoring components, plotted as their RAW values rather than
+# as REINVENT4's transformed scores. The transformed score of every component
+# sits at 1.0 for nearly the whole run, so it shows only that the objective is
+# satisfied, never by how much. Each panel draws its transform's own bounds,
+# which is what makes the raw axis readable: the distance between the
+# distribution and the bound IS the headroom the guard rail was set to catch.
+#
+# (column, title, y limits, [(y, label), ...] transform bounds)
+RAW_PANELS = (
+    ("carboxylate MIDAS anchor (raw)", "carboxylate count (MIDAS anchor)",
+     (0, 5), [(1, "right_step high=1")]),
+    ("TPSA (raw)", "TPSA, A^2  (double_sigmoid 40-115)",
+     (0, 200), [(40, "low 40"), (115, "high 115")]),
+    # SA score runs 1-10 and LOWER is easier to make, so the whole axis is
+    # drawn: a panel clipped to the observed range would hide that the guard
+    # rail never binds. reverse_sigmoid low=6 high=8 means full marks at or
+    # below 6, zero at or above 8.
+    ("SA score (raw)", "SA score  (1 easy - 10 hard; guard rail 6-8)",
+     (1, 10), [(6, "full marks <= 6"), (8, "zero >= 8")]),
+)
+
+SCORE_COLUMNS = {c: title for c, title, _, _ in RAW_PANELS}
 
 COLOURS = {"TL-A-prime": "#c0392b", "TL-C": "#2471a3"}
 
 
-def per_step(csv_path: str, columns: list) -> "object":
+# REINVENT4 writes SMILES_state 1 for a valid molecule, 0 for one it could
+# not parse and 2 for a duplicate. An invalid molecule has no descriptors, so
+# its raw columns are written as 0 -- which is a real value on a count axis
+# and an impossible one on an SA axis that starts at 1. Left in, those zeros
+# drag every quartile band to the floor; they are a validity statistic, not a
+# component value, so the panels exclude them and the count is reported.
+VALID_STATE = 1
+
+
+def per_step(csv_path: str, columns: list, drop_invalid: bool = False):
     """Per-step median and interquartile range for the named columns.
 
     Returns a DataFrame indexed by step with (column, stat) columns. Steps are
-    REINVENT4's own `step`; each holds that step's sampled batch.
+    REINVENT4's own `step`; each holds that step's sampled batch. With
+    `drop_invalid`, molecules REINVENT4 could not parse are excluded.
     """
     import pandas as pd
 
-    frame = pd.read_csv(csv_path, usecols=["step"] + columns)
+    needed = ["step"] + columns + (["SMILES_state"] if drop_invalid else [])
+    frame = pd.read_csv(csv_path, usecols=needed)
+    if drop_invalid:
+        frame = frame[frame["SMILES_state"] == VALID_STATE]
+        # A raw 0 survives the state filter in a few hundred rows per arm
+        # where the descriptor itself failed; SA score cannot be 0.
+        for column in columns:
+            if column.endswith("(raw)") and column.startswith("SA"):
+                frame = frame[frame[column] > 0]
+        frame = frame.drop(columns=["SMILES_state"])
     grouped = frame.groupby("step")[columns]
     out = grouped.median().add_suffix("|median")
     out = out.join(grouped.quantile(0.25).add_suffix("|q25"))
@@ -103,14 +138,17 @@ def build(results_dir: Path, out_path: Path, sweep_csv: Path | None) -> dict:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    columns = list(NLL_COLUMNS) + ["Score"] + list(SCORE_COLUMNS)
-    tables, scaffolds = {}, {}
+    columns = list(NLL_COLUMNS) + ["Score"]
+    raw_columns = [c for c, _, _, _ in RAW_PANELS]
+    tables, raws, scaffolds, invalid = {}, {}, {}, {}
     for arm in ARMS:
         path = results_dir / f"v2_{arm}" / "rl_1.csv"
         if not path.exists():
             raise FileNotFoundError(f"{path} is missing; run the RL arm first")
         tables[arm] = per_step(str(path), columns)
+        raws[arm] = per_step(str(path), raw_columns, drop_invalid=True)
         scaffolds[arm] = _scaffolds_per_step(str(path))
+        invalid[arm] = int(tables[arm]["n"].sum() - raws[arm]["n"].sum())
 
     have_sweep = sweep_csv is not None and sweep_csv.exists()
     rows = 3 if have_sweep else 2
@@ -120,7 +158,7 @@ def build(results_dir: Path, out_path: Path, sweep_csv: Path | None) -> dict:
     axis = axes[0][0]
     for arm in ARMS:
         _band(axis, tables[arm], "Score", COLOURS[arm], DISPLAY[arm])
-    axis.set_title("total score (geometric mean of 3 components)")
+    axis.set_title("total score (4 components; CustomAlerts is a 0/1 factor)")
     axis.set_xlabel("step"); axis.set_ylabel("score"); axis.legend(frameon=False)
 
     for position, arm in enumerate(ARMS, start=1):
@@ -134,14 +172,20 @@ def build(results_dir: Path, out_path: Path, sweep_csv: Path | None) -> dict:
         axis.set_xlabel("step"); axis.set_ylabel("NLL")
         axis.legend(frameon=False, fontsize=8)
 
-    # Row 2: the three scoring components, both arms overlaid, then diversity.
-    for position, (column, title) in enumerate(SCORE_COLUMNS.items()):
+    # Row 2: the three scoring components as RAW values, both arms overlaid,
+    # each with its transform's bounds drawn.
+    for position, (column, title, ylim, bounds) in enumerate(RAW_PANELS):
         axis = axes[1][position]
         for arm in ARMS:
-            _band(axis, tables[arm], column, COLOURS[arm], DISPLAY[arm])
+            _band(axis, raws[arm], column, COLOURS[arm], DISPLAY[arm])
+        for y, text in bounds:
+            axis.axhline(y, color="#7f8c8d", ls="--", lw=1.0)
+            axis.annotate(text, xy=(0.99, y), xycoords=("axes fraction", "data"),
+                          ha="right", va="bottom", fontsize=7.5,
+                          color="#7f8c8d")
         axis.set_title(title)
-        axis.set_xlabel("step"); axis.set_ylabel("component score")
-        axis.set_ylim(-0.02, 1.02)
+        axis.set_xlabel("step"); axis.set_ylabel("raw value")
+        axis.set_ylim(*ylim)
         if position == 0:
             axis.legend(frameon=False)
 
@@ -197,6 +241,11 @@ def build(results_dir: Path, out_path: Path, sweep_csv: Path | None) -> dict:
                        "scaffolds_first": int(scaffolds[arm].iloc[0]),
                        "scaffolds_last": int(scaffolds[arm].iloc[-1])}
                  for arm in ARMS},
+        "invalid": invalid,
+        "sa_median_last": {DISPLAY[a]: float(raws[a]["SA score (raw)|median"].iloc[-1])
+                           for a in ARMS},
+        "sa_max": {DISPLAY[a]: float(raws[a]["SA score (raw)|q75"].max())
+                   for a in ARMS},
         "sweep": bool(have_sweep),
     }
 
@@ -221,6 +270,9 @@ def main(argv=None) -> int:
               f"score {stats['score_first']:.3f} -> {stats['score_last']:.3f}  "
               f"scaffolds/step {stats['scaffolds_first']} -> "
               f"{stats['scaffolds_last']}")
+    print(f"  SA score (raw, guard rail bites above 6): median at the last "
+          f"step {report['sa_median_last']}")
+    print(f"  molecules excluded as invalid: {report['invalid']}")
     if not report["sweep"]:
         print("  (TL sweep table absent; its panels were skipped)")
     return 0

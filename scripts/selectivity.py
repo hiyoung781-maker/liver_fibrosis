@@ -228,6 +228,44 @@ def rank_selectivity(target: dict, subtype: dict) -> dict:
     return {k: target_pct[k] - subtype_pct[k] for k in shared}
 
 
+def _inventory(target_dirs: list, subtype_dirs: list,
+               pattern: str = "*_out.pdbqt") -> str:
+    """Per-directory pose counts, for when the two sides share no ligand.
+
+    A count of zero says the docking has not finished or wrote elsewhere; two
+    non-zero counts that still share nothing says the labels differ between
+    the runs. The two need different fixes and neither is visible from the
+    shared-ligand count alone.
+    """
+    lines = []
+    for role, group in (("αvβ1 (target)", target_dirs),
+                        ("isoform", subtype_dirs)):
+        for directory in group:
+            path = Path(directory)
+            if not path.is_dir():
+                lines.append(f"  {role:16s} {directory}  -- NOT A DIRECTORY")
+                continue
+            poses = sorted(path.glob(pattern))
+            sample = ", ".join(f.name[:-len("_out.pdbqt")] for f in poses[:3])
+            lines.append(f"  {role:16s} {directory}  {len(poses)} poses"
+                         + (f"  e.g. {sample}" if sample else ""))
+    return "\n".join(lines) + "\n"
+
+
+def _control_key(control: str, table: dict):
+    """The key `table` uses for a §10.4 control, or None.
+
+    The reference set is docked twice under two naming conventions -- bare
+    (`PLN-1474`, from data/selectivity_refs.smi) on the selectivity side and
+    prefixed (`PANEL_PLN-1474`) in the geometry and ADMET tables -- so a
+    lookup that knows only one of them reports a docked control as missing.
+    """
+    for key in (control, f"PANEL_{control}", control.replace("PANEL_", "")):
+        if key in table:
+            return key
+    return None
+
+
 def calibration_verdict(delta: dict) -> dict:
     """§10.4: do the four controls come out the way their IC50s say?
 
@@ -283,9 +321,16 @@ def main(argv=None) -> int:
                     help="A Uni-Dock output directory for alphaVbeta1. Repeat "
                          "it: the target's scores are spread over the two arms "
                          "and the reference set, which were docked separately.")
-    p.add_argument("--isoform", action="append", default=[], metavar="NAME=DIR",
-                    help="A validated isoform and its pose directory. Repeat "
-                         "for each. Only isoforms that passed 10.3 belong here.")
+    p.add_argument("--isoform", action="append", default=[],
+                    metavar="NAME=DIR[,DIR...]",
+                    help="A validated isoform and its pose directories, comma "
+                         "separated. Repeat the flag per isoform. The "
+                         "directory list is comma separated for the same "
+                         "reason --target-poses repeats: the four §10.4 "
+                         "controls are docked separately from the generated "
+                         "molecules, and an isoform side missing them cannot "
+                         "run the gate at all. Only isoforms that passed "
+                         "§10.3 belong here.")
     p.add_argument("--top", type=int, default=25)
     p.add_argument("--out", type=Path, required=True)
     args = p.parse_args(argv)
@@ -306,21 +351,48 @@ def main(argv=None) -> int:
     delta_by_isoform, rank_by_isoform, shared_counts = {}, {}, {}
     for item in args.isoform:
         name, _, directory = item.partition("=")
+        dirs = [d for d in directory.split(",") if d]
         # Every label used here is verified to name the same molecule on both
         # sides. Without that the comparison is between molecules.
         try:
             shared = set()
             for target_dir in args.target_poses:
-                shared |= shared_ligands(target_dir, directory)
+                for subtype_dir in dirs:
+                    shared |= shared_ligands(target_dir, subtype_dir)
+            subtype_all = merge_affinities(dirs)
         except LigandMismatchError as exc:
             sys.stderr.write(f"{exc}\n")
             return 2
-        subtype = {k: v for k, v in best_affinities(directory).items()
-                   if k in shared}
+        if not shared:
+            # Nothing to compare is not a result, it is a broken input, and
+            # reporting it as "0 shared" produced a report that looked like a
+            # failed calibration gate. Name every directory and what is in it.
+            sys.stderr.write(
+                f"{name}: no ligand is present in both receptors, so there is "
+                "nothing to compare.\n" + _inventory(args.target_poses, dirs))
+            return 2
+        subtype = {k: v for k, v in subtype_all.items() if k in shared}
         restricted = {k: v for k, v in target.items() if k in shared}
         shared_counts[name] = len(shared)
         delta_by_isoform[name] = deltas(restricted, subtype)
         rank_by_isoform[name] = rank_selectivity(restricted, subtype)
+
+    # A control absent from BOTH sides was never docked against the isoform;
+    # a control the target has but the isoform does not is a docking that did
+    # not produce a pose. The gate reports the same FAIL for each, and they
+    # need different fixes, so name which one happened.
+    controls = list(CALIBRATION["selective"]) + list(CALIBRATION["non_selective"])
+    control_status = {}
+    for item in args.isoform:
+        name, _, directory = item.partition("=")
+        missing = [c for c in controls
+                   if c not in rank_by_isoform.get(name, {})]
+        control_status[name] = {
+            "missing": missing,
+            "absent_from_target": [c for c in missing if _control_key(c, target) is None],
+            "absent_from_isoform": [
+                c for c in missing if _control_key(c, target) is not None],
+        }
 
     rank_verdicts = {n: calibration_verdict(t) for n, t in rank_by_isoform.items()}
     delta_verdicts = {n: calibration_verdict(t) for n, t in delta_by_isoform.items()}
@@ -383,8 +455,30 @@ def main(argv=None) -> int:
                     lines.append(f"| {control} | {shown} | {expectation} |")
             if not verdict["passed"]:
                 lines += [""] + [f"- {reason}" for reason in verdict["failed"]]
+                status = control_status.get(name, {})
+                if status.get("absent_from_isoform"):
+                    lines += [
+                        "",
+                        "**이 FAIL은 게이트가 틀렸다는 뜻이 아니라 돌지 못했다는 "
+                        "뜻이다.** 다음 대조군이 αvβ1에는 있고 " + name +
+                        "에는 없다: " +
+                        ", ".join(status["absent_from_isoform"]) + ". 즉 이 "
+                        "아이소폼에 도킹된 적이 없다. 참조 화합물을 같은 수용체에 "
+                        "도킹해 `--isoform " + name + "=<생성분자>,<참조>` 로 "
+                        "다시 실행해야 판정할 수 있다."]
+                if status.get("absent_from_target"):
+                    lines += [
+                        "",
+                        "다음 대조군은 αvβ1 쪽에도 없다: " +
+                        ", ".join(status["absent_from_target"]) + "."]
 
-    if not all(v["passed"] for v in rank_verdicts.values()):
+    never_docked = any(control_status.get(n, {}).get("absent_from_isoform")
+                       for n in isoforms)
+    if never_docked:
+        lines += ["", "**게이트 미실행.** 대조군이 아이소폼 쪽에 도킹되지 않아 "
+                  "판정 자체가 불가능했다. 이 상태의 선택성 값으로 필터를 돌리면 "
+                  "검증되지 않은 축으로 후보를 자르게 된다."]
+    elif not all(v["passed"] for v in rank_verdicts.values()):
         lines += ["", "**주 지표의 보정 게이트가 미통과했다. spec §10.4대로 생성 "
                   "분자에 대한 어떤 선택성 진술도 하지 않으며 판정 기준 6번을 "
                   "평가 불가로 기록한다.**"]
@@ -407,7 +501,12 @@ def main(argv=None) -> int:
     args.out.with_suffix(".json").write_text(json.dumps(
         {"n_target": len(target), "rank_selectivity": rank_by_isoform,
          "deltas": delta_by_isoform, "calibration_rank": rank_verdicts,
-         "calibration_delta": delta_verdicts, "rank_sum": scores},
+         "calibration_delta": delta_verdicts, "rank_sum": scores,
+         # A gate that could not run is not a gate that failed, and the two
+         # need different fixes. `calibration_ran` false means a control was
+         # never docked against the isoform.
+         "calibration_ran": not never_docked,
+         "control_status": control_status},
         indent=2) + "\n")
     print("\n".join(lines))
     return 0 if all(v["passed"] for v in rank_verdicts.values()) else 1
