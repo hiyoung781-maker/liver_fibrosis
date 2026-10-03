@@ -7,9 +7,10 @@ from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from admet_window import (CACO2_TIERS, DEFAULT_GATE_JSON, admet_verdict,
-                          apply_window, read_admet, read_survivors,
-                          toxicity_thresholds)
+from admet_window import (CACO2_TIERS, CONVERSION_BANDS, DEFAULT_GATE_JSON,
+                          DILI_ENDPOINT, DILI_MAX_DEFAULT, admet_verdict,
+                          amended_window, apply_window, read_admet,
+                          read_survivors, toxicity_thresholds)
 from lead_filter import CACO2_ENDPOINT, TOXICITY_ENDPOINTS
 
 # .gitignore excludes results/*, so the §9.2 thresholds and v3's published lead
@@ -181,6 +182,106 @@ class TestReaders(unittest.TestCase):
             self.assertEqual(read_survivors(str(path)),
                              [("CC(=O)O", "gen_00001"), ("CCO", "gen_00002")])
 
+
+
+@needs_gate
+class TestAmendedRule(unittest.TestCase):
+    """§9.3.1 permits post-hoc relaxation of LEAD-SELECTION thresholds provided
+    §2's success criteria do not move and every change is recorded
+    (results/v2_threshold_ledger.md). These tests pin what the amendment is and,
+    more importantly, what it is NOT allowed to become."""
+
+    def setUp(self):
+        self.th = toxicity_thresholds()
+
+    def test_the_derived_ceiling_is_the_top_of_the_fifty_four_percent_band(self):
+        """0.75 comes from v3's measured conversion cliff, not from a target
+        count. CONVERSION_BANDS carries the evidence next to the constant."""
+        (lo, hi), pairs, converted, rate = CONVERSION_BANDS[0]
+        self.assertEqual(DILI_MAX_DEFAULT, hi)
+        # The band's lower edge IS the §9.2 threshold, rounded for display.
+        self.assertAlmostEqual(lo, toxicity_thresholds()[DILI_ENDPOINT], places=5)
+        self.assertAlmostEqual(converted / pairs, rate, places=2)
+
+    def test_the_cliff_is_monotone_and_ends_at_zero(self):
+        """The justification only holds if conversion really collapses above the
+        ceiling - 825 pairs above 0.92 produced no conversion at all. If a later
+        measurement contradicts this, the 0.75 choice has to be re-derived."""
+        rates = [rate for _band, _pairs, _conv, rate in CONVERSION_BANDS]
+        self.assertEqual(rates, sorted(rates, reverse=True))
+        self.assertEqual(CONVERSION_BANDS[-1][2], 0)
+
+    def test_srmmp_and_nrahr_are_recorded_not_gated(self):
+        """The whole point of the amendment: toxicity is the axis being
+        repaired, so pre-filtering on it discards the molecules the repair stage
+        exists to improve (optimize_leads.py). A molecule failing both other
+        endpoints must still be admitted and must still be counted."""
+        # DILI 0.70 is inside the amended ceiling (0.75) but still ABOVE §9.2's
+        # 0.6696, so this molecule fails all three by §9.2 reckoning and is
+        # admitted anyway - which is the behaviour being pinned.
+        result = amended_window([("A", "a")],
+                                {"A": pred(caco2=-5.2, srmmp=0.9, nrahr=0.9,
+                                           dili=0.70)},
+                                self.th, 0.75, -5.7)
+        self.assertEqual(result["survivors"], 1)
+        self.assertEqual(result["strata"][3], 1)
+        self.assertEqual(result["dili_bands"]["conversion_band"], 1)
+
+        # Two failures: DILI already clears §9.2, the other two do not.
+        result = amended_window([("B", "b")],
+                                {"B": pred(caco2=-5.2, srmmp=0.9, nrahr=0.9,
+                                           dili=0.50)},
+                                self.th, 0.75, -5.7)
+        self.assertEqual(result["survivors"], 1)
+        self.assertEqual(result["strata"][2], 1)
+        self.assertEqual(result["dili_bands"]["already_passing"], 1)
+
+    def test_dili_above_the_ceiling_is_excluded(self):
+        entries = [("A", "a")]
+        admet = {"A": pred(caco2=-5.2, srmmp=0.0, nrahr=0.0, dili=0.76)}
+        self.assertEqual(
+            amended_window(entries, admet, self.th, 0.75, -5.7)["survivors"], 0)
+
+    def test_the_caco2_floor_still_applies(self):
+        """The amendment relaxes toxicity, not permeability. A BCS-low molecule
+        stays out however clean its DILI."""
+        entries = [("A", "a")]
+        admet = {"A": pred(caco2=-6.4, srmmp=0.0, nrahr=0.0, dili=0.1)}
+        self.assertEqual(
+            amended_window(entries, admet, self.th, 0.75, -5.7)["survivors"], 0)
+
+    def test_survivors_split_into_direct_candidates_and_conversion_parents(self):
+        """The two sub-populations do different jobs: one can become a lead
+        without repair, the other is what the optimisation stage consumes. A
+        single count would hide which track is actually populated."""
+        entries = [("A", "a"), ("B", "b")]
+        admet = {"A": pred(caco2=-5.2, srmmp=0.0, nrahr=0.0, dili=0.50),
+                 "B": pred(caco2=-5.2, srmmp=0.0, nrahr=0.0, dili=0.70)}
+        result = amended_window(entries, admet, self.th, 0.75, -5.7)
+        self.assertEqual(result["dili_bands"]["already_passing"], 1)
+        self.assertEqual(result["dili_bands"]["conversion_band"], 1)
+        self.assertEqual(result["survivors"], 2)
+
+    def test_a_molecule_missing_either_value_is_excluded(self):
+        for prediction in (pred(caco2=None, dili=0.1),
+                           {CACO2_ENDPOINT: "-5.2", "SR-MMP": "0", "NR-AhR": "0"}):
+            with self.subTest(prediction=prediction):
+                result = amended_window([("A", "a")], {"A": prediction},
+                                        self.th, 0.75, -5.7)
+                self.assertEqual(result["survivors"], 0)
+
+    @needs_v3
+    def test_the_amendment_never_reports_fewer_than_the_preregistered_rule(self):
+        """A relaxation that returned LESS would mean the two rules are not
+        nested, and the comparison printed beside it would be meaningless."""
+        rows = list(csv.DictReader(V3_LEADS.open()))
+        admet = {r["label"]: {**r, CACO2_ENDPOINT: r["caco2"]} for r in rows}
+        entries = [(r["label"], r["label"]) for r in rows]
+        pre = apply_window(entries, admet, self.th)
+        amended = amended_window(entries, admet, self.th, 0.75, -5.7)
+        self.assertGreaterEqual(
+            amended["survivors"],
+            pre["tiers"]["tier2_bcs_moderate"]["survivors"])
 
 if __name__ == "__main__":
     unittest.main()

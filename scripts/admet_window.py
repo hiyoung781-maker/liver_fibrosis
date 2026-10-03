@@ -53,13 +53,61 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lead_filter import CACO2_ENDPOINT, TOXICITY_ENDPOINTS  # noqa: E402
 
 __all__ = ["CACO2_TIERS", "toxicity_thresholds", "read_admet", "admet_verdict",
-           "apply_window", "DEFAULT_GATE_JSON"]
+           "apply_window", "amended_window", "DILI_ENDPOINT", "DILI_MAX_DEFAULT",
+           "CONVERSION_BANDS", "DEFAULT_GATE_JSON"]
 
 # log10(Papp in cm/s). BCS/FDA: high > -5.0 (Papp > 10e-6, Fa 80-100%);
 # moderate -5.7..-5.0 (2-10e-6, Fa 50-80%); low < -5.7 (Fa < 50%).
 CACO2_TIERS = (("tier1_bcs_high", -5.0), ("tier2_bcs_moderate", -5.7))
 
 DEFAULT_GATE_JSON = "results/v3_metal_asn224/approved_drug_gate.json"
+
+DILI_ENDPOINT = "DILI"
+
+# THE AMENDED RULE (section 9.3.1 change, recorded in results/v4_threshold_ledger.md).
+#
+# The pre-registered rule is the section 9.2 conjunction, and on v4 it returns 2
+# molecules - too few to fill an optimisation track or to support the comparison
+# against v3's three leads. The amendment is NOT "the conjunction gave too few".
+# Three things justify it, and the counts under the pre-registered rule are
+# reported beside the amended ones so the change cannot hide its own cost.
+#
+# (1) THE CONJUNCTION CONTRADICTS THIS STAGE'S OWN DESIGN. optimize_leads.py:
+# "Parents are molecules that cleared the structure and affinity stages, not the
+# handful that also cleared toxicity ... toxicity is the axis being repaired, so
+# pre-filtering on it would discard exactly the molecules the stage exists to
+# improve." Gating all three endpoints before docking does that pre-filtering.
+#
+# (2) ONE ENDPOINT CARRIES THE CONSTRAINT. Measured on v4's 13,767: DILI passes
+# 1.7% with a library median of 0.9649 against a 0.669635 threshold, while
+# SR-MMP passes 20.7% and NR-AhR 7.2%. Dropping DILI alone takes the conjunction
+# from 73 to 807; dropping either other endpoint leaves 105 or 101. So DILI is
+# the axis, and SR-MMP/NR-AhR belong to the repair stage, where
+# select_analogues already re-applies them as "no worse than the parent".
+#
+# (3) 0.75 IS DERIVED, NOT CHOSEN TO HIT A COUNT. v3's 1,990 analogues give the
+# rate at which an unguided high-similarity analogue crosses the DILI threshold,
+# as a function of where its parent sat (CONVERSION_BANDS below). The rate falls
+# off a cliff: 54.1% just above the threshold, 8.5%, 2.3%, then ZERO in 825
+# pairs above 0.92. A parent above the cliff cannot be repaired at this sample
+# budget, so the window's job is to place parents where the search succeeds.
+# 0.75 is the top of the 54% band.
+DILI_MAX_DEFAULT = 0.75
+
+# Measured on results/v3_opt/analogues_admet.csv (1,990 analogues, 32 per parent,
+# run_type = "sampling" - unguided, no scoring function). (parent DILI band,
+# pairs, converted, rate). This is the UNDIRECTED baseline: v3 put no toxicity
+# term in generation, which is why the distribution did not move (49.0% improved,
+# 51.0% worsened, median delta +0.0004). It bounds what this sample budget
+# yields, NOT what chemistry allows - a larger budget buys conversion in the
+# weaker bands (~44 samples/parent for 0.85-0.92, >800 above 0.92), and ADMET
+# throughput, not generation, is the ceiling there.
+CONVERSION_BANDS = (
+    ((0.669635, 0.750), 74, 40, 0.541),
+    ((0.750, 0.850), 272, 23, 0.085),
+    ((0.850, 0.920), 434, 10, 0.023),
+    ((0.920, 1.010), 825, 0, 0.000),
+)
 
 
 def toxicity_thresholds(path: str = DEFAULT_GATE_JSON,
@@ -166,6 +214,50 @@ def apply_window(entries: list[tuple[str, str]], admet: dict[str, dict],
     return result
 
 
+def amended_window(entries: list[tuple[str, str]], admet: dict[str, dict],
+                   thresholds: dict[str, float], dili_max: float = DILI_MAX_DEFAULT,
+                   caco2_floor: float = CACO2_TIERS[1][1]) -> dict:
+    """The section 9.3.1 amendment: one Caco-2 floor and a DILI ceiling.
+
+    SR-MMP and NR-AhR are recorded, not gated - they are the repair stage's
+    target, and select_analogues re-applies them against the parent. The
+    stratification by failure count is reported for the same reason
+    optimize_leads.py reports it: a high-similarity analogue is far likelier to
+    repair one endpoint than three, so the mix of parents predicts the yield.
+    """
+    kept, strata, bands = [], {0: 0, 1: 0, 2: 0, 3: 0}, {"already_passing": 0,
+                                                         "conversion_band": 0}
+    caco2_pass = dili_pass = 0
+    for smiles, label in entries:
+        prediction = admet.get(smiles)
+        if not prediction:
+            continue
+        caco2 = _float(prediction.get(CACO2_ENDPOINT))
+        dili = _float(prediction.get(DILI_ENDPOINT))
+        if caco2 is None or dili is None:
+            continue
+        if caco2 > caco2_floor:
+            caco2_pass += 1
+        if dili < dili_max:
+            dili_pass += 1
+        if not (caco2 > caco2_floor and dili < dili_max):
+            continue
+        kept.append((smiles, label))
+        failures = sum(
+            1 for endpoint in TOXICITY_ENDPOINTS
+            if (value := _float(prediction.get(endpoint))) is None
+            or value >= thresholds[endpoint])
+        strata[failures] = strata.get(failures, 0) + 1
+        if dili < thresholds[DILI_ENDPOINT]:
+            bands["already_passing"] += 1
+        else:
+            bands["conversion_band"] += 1
+    return {"input": len(entries), "caco2_floor": caco2_floor,
+            "dili_max": dili_max, "caco2_pass": caco2_pass,
+            "dili_pass": dili_pass, "survivors": len(kept),
+            "strata": strata, "dili_bands": bands, "entries": kept}
+
+
 def read_survivors(path: str) -> list[tuple[str, str]]:
     """(smiles, label) rows of a survivors.smi, comments skipped."""
     rows = []
@@ -188,6 +280,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", required=True,
                         help="docking input to write (the adopted tier)")
     parser.add_argument("--gate-json", default=DEFAULT_GATE_JSON)
+    parser.add_argument("--dili-max", type=float, default=None,
+                        metavar="X",
+                        help="apply the §9.3.1 AMENDED rule instead of the "
+                             "pre-registered §9.2 conjunction: Caco-2 above "
+                             "--caco2-floor and DILI below X, with SR-MMP and "
+                             "NR-AhR recorded rather than gated. The "
+                             "pre-registered counts are printed either way. "
+                             f"The derived value is {DILI_MAX_DEFAULT} - see "
+                             "CONVERSION_BANDS and v4_threshold_ledger.md")
+    parser.add_argument("--caco2-floor", type=float, default=CACO2_TIERS[1][1],
+                        help="Caco-2 floor for the amended rule "
+                             f"(default {CACO2_TIERS[1][1]}, BCS moderate)")
     args = parser.parse_args(argv)
 
     thresholds = toxicity_thresholds(args.gate_json)
@@ -207,6 +311,52 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {name}  (Caco2 > {floor})")
         print(f"      Caco2 통과          {t['caco2_pass']}")
         print(f"      ∩ 독성 통과         {t['survivors']}")
+
+    if args.dili_max is not None:
+        amended = amended_window(entries, admet, thresholds, args.dili_max,
+                                 args.caco2_floor)
+        print()
+        print(f"  §9.3.1 AMENDED  (Caco2 > {amended['caco2_floor']}, "
+              f"DILI < {amended['dili_max']})")
+        print(f"      Caco2 통과          {amended['caco2_pass']}")
+        print(f"      DILI 통과           {amended['dili_pass']}")
+        print(f"      ∩ 채택             {amended['survivors']}")
+        print(f"      그중 DILI 이미 통과 (< {thresholds[DILI_ENDPOINT]:.6f}): "
+              f"{amended['dili_bands']['already_passing']}  -> 직행 리드 후보")
+        print(f"      그중 전환 구간      "
+              f"{amended['dili_bands']['conversion_band']}  -> 최적화 부모 "
+              f"(v3 실측 전환율 {CONVERSION_BANDS[0][3]:.0%})")
+        print("      §9.2 실패 엔드포인트 수별 (최적화 전망):")
+        for count in sorted(amended["strata"]):
+            print(f"          {count}개 실패  {amended['strata'][count]}")
+        if not amended["entries"]:
+            print("\n수정안으로도 0이다. 출력을 쓰지 않는다.", file=sys.stderr)
+            return 1
+        os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+        lines = [
+            "# §5.5 ADMET window survivors - the docking input.",
+            f"# from: {args.survivors} + {args.admet}",
+            f"# RULE: §9.3.1 amended - Caco2_Wang > {amended['caco2_floor']} "
+            f"and DILI < {amended['dili_max']}",
+            "#   SR-MMP and NR-AhR are recorded, not gated: they are the repair",
+            "#   stage's target and select_analogues re-applies them against the",
+            "#   parent (optimize_leads.py). See results/v4_threshold_ledger.md.",
+            f"# PRE-REGISTERED, reported so the amendment does not hide its cost:",
+            f"#   tier1 (Caco2 > {CACO2_TIERS[0][1]}) ∩ §9.2 conjunction = "
+            f"{result['tiers'][CACO2_TIERS[0][0]]['survivors']}",
+            f"#   tier2 (Caco2 > {CACO2_TIERS[1][1]}) ∩ §9.2 conjunction = "
+            f"{result['tiers'][CACO2_TIERS[1][0]]['survivors']}",
+            f"# cumulative: input {amended['input']} -> Caco2 "
+            f"{amended['caco2_pass']} -> ∩ DILI {amended['survivors']}",
+            f"#   of which DILI already below {thresholds[DILI_ENDPOINT]:.6f}: "
+            f"{amended['dili_bands']['already_passing']}; in the conversion band: "
+            f"{amended['dili_bands']['conversion_band']}",
+        ]
+        lines += [f"{smiles}\t{label}" for smiles, label in amended["entries"]]
+        with open(args.out, "w") as handle:
+            handle.write("\n".join(lines) + "\n")
+        print(f"\n  adopted amended: {amended['survivors']} -> {args.out}")
+        return 0
 
     # The adopted tier is Tier 1 unless it is empty - the rule was fixed in the
     # design note before these counts existed.
