@@ -1,0 +1,23 @@
+# GENERATED for stage 6 (scripts/optimize_leads.py) - lead optimisation.
+#
+# mol2mol_high_similarity, not de novo: the reason the delta against a parent
+# can be read at all is that an analogue shares its parent's scaffold, so the
+# model's systematic error for that chemotype largely cancels. That argument
+# only holds while the analogue stays close, which is what this prior enforces.
+#
+# multinomial rather than beamsearch: beamsearch is deterministic and returns
+# the model's most likely neighbours, which are the least diverse ones. This
+# stage needs breadth across the property axes, and the ADMET filter in front
+# of docking is what makes breadth affordable.
+run_type = "sampling"
+device = "cuda:0"
+
+[parameters]
+model_file = "REINVENT4/priors/mol2mol_high_similarity.prior"
+smiles_file = "results/v4_TL-B/parents.smi"
+output_file = "results/v4_TL-B/analogues_raw.csv"
+sample_strategy = "multinomial"
+temperature = 1.0
+num_smiles = 32
+unique_molecules = true
+randomize_smiles = true

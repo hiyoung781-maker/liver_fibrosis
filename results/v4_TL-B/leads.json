@@ -1,0 +1,26 @@
+{
+  "stage_1_geometry": 44,
+  "stage_2_affinity": 24,
+  "stage_3_interaction": 24,
+  "stage_4_toxicity": 3,
+  "leads": [
+    "gen_03329",
+    "gen_08990",
+    "gen_11276"
+  ],
+  "selectivity_excluded": true,
+  "selectivity_criterion": "unevaluable (\u00a710.4)",
+  "admet_missing": [
+    "CONTROL_crystal"
+  ],
+  "selectivity_missing": [],
+  "interaction_applied": true,
+  "selectivity_calibrated": false,
+  "selectivity_calibration_ran": true,
+  "toxicity_mean_pass": 8,
+  "leads_preregistered": [],
+  "caco2_better_than_reference": [
+    "gen_03329",
+    "gen_11276"
+  ]
+}
