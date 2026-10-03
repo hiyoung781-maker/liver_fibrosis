@@ -1,12 +1,17 @@
-"""Generate the two Task-7 arm-scoped sampling configs.
+"""Generate the arm-scoped sampling configs (Task 7).
 
-Both arms sample from their own Task-6 RL checkpoint
-(results/v2_{arm}/rl_final.chkpt), 20,000 molecules each, into their own
-arm-scoped output CSV. They differ ONLY in `model_file`, `output_file`, and
-the tb-adjacent naming - everything else (num_smiles, unique_molecules,
-randomize_smiles) is identical, generated from one template so the two
-configs cannot drift apart by hand-editing one of them. This follows the same
-precedent as scripts/make_rl_config.py for the RL configs themselves.
+Every arm samples from its own RL checkpoint, 20,000 molecules, into its own
+arm-scoped output CSV. Arms differ ONLY in `model_file` and `output_file` -
+everything else (num_smiles, unique_molecules, randomize_smiles) is identical,
+generated from one template so the configs cannot drift apart by hand-editing
+one of them. Same precedent as scripts/make_rl_config.py for the RL configs.
+
+THE PATH PREFIX IS PART OF THE ARM, not a format string. It used to be spelled
+`results/v2_{arm}` in this docstring and hardcoded per entry below, which is why
+v4's arm could not be expressed here at all: TL-B's checkpoint is under
+results/v4_TL-B. Keeping the full path in each entry is what lets two campaigns
+coexist, and it matches make_rl_config.ARMS, where `tag` carries the same
+information.
 """
 
 from __future__ import annotations
@@ -18,6 +23,10 @@ ARMS = {
     "TL-A-prime": {
         "model_file": "results/v2_TL-A-prime/rl_final.chkpt",
         "output_file": "results/v2_TL-A-prime/sample.csv",
+    },
+    "TL-B": {
+        "model_file": "results/v4_TL-B/rl_final.chkpt",
+        "output_file": "results/v4_TL-B/sample.csv",
     },
     "TL-C": {
         "model_file": "results/v2_TL-C/rl_final.chkpt",

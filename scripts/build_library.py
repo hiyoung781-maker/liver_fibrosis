@@ -28,6 +28,7 @@ import sys
 from rdkit import Chem, RDLogger
 
 import normalize
+from make_rl_config import campaign_for
 from normalize import canonical_tautomer, flatten
 
 __all__ = [
@@ -45,12 +46,12 @@ LIBRARY_COLUMNS = ("smiles", "smiles_as_scored")
 
 def input_path(arm: str) -> str:
     """The arm-scoped REINVENT sampling CSV this build reads from."""
-    return f"results/v2_{arm}/sample.csv"
+    return f"results/{campaign_for(arm)}_{arm}/sample.csv"
 
 
 def output_path(arm: str) -> str:
     """The arm-scoped library.smi this build writes."""
-    return f"data/v2_{arm}/library.smi"
+    return f"data/{campaign_for(arm)}_{arm}/library.smi"
 
 
 def read_sampling_csv(path: str) -> list[str]:

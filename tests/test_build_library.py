@@ -137,6 +137,21 @@ class TestArmScopedOutputs(unittest.TestCase):
         self.assertEqual(output_path("TL-A-prime"), "data/v2_TL-A-prime/library.smi")
         self.assertEqual(output_path("TL-C"), "data/v2_TL-C/library.smi")
 
+    def test_paths_carry_the_campaign_so_a_v4_arm_is_expressible(self):
+        """The prefix used to be "v2_" in an f-string, which made TL-B
+        (results/v4_TL-B) impossible to name here. It comes from
+        make_rl_config.campaign_for now, the same source build_survivors uses,
+        so the sample -> library -> survivors chain cannot disagree about where
+        an arm's files live."""
+        from build_library import input_path, output_path
+        from build_survivors import library_path
+
+        self.assertEqual(input_path("TL-B"), "results/v4_TL-B/sample.csv")
+        self.assertEqual(output_path("TL-B"), "data/v4_TL-B/library.smi")
+        for arm in ("TL-A-prime", "TL-B", "TL-C"):
+            with self.subTest(arm=arm):
+                self.assertEqual(output_path(arm), library_path(arm))
+
     def test_library_keeps_both_smiles_columns(self):
         """1열은 정규화 SMILES(모든 속성·신규성 주장의 대상), 2열은 정규화 전
         정준 SMILES(RL 목적함수가 실제로 채점한 구조). 토토머 선택이 디스크립터를

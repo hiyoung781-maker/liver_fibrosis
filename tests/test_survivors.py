@@ -10,7 +10,9 @@ from rdkit import Chem, RDLogger
 RDLogger.DisableLog("rdApp.*")
 
 import objective
-from build_survivors import WINDOW, passes_window, write_survivors
+from build_survivors import (WINDOW, V4_WINDOW, passes_window,
+                             library_path, survivors_path, window_for_arm,
+                             write_survivors)
 from novelty import load_smi, murcko
 
 # A generated molecule that clears every §8.2 cut.
@@ -91,6 +93,65 @@ class TestWriteSurvivors(unittest.TestCase):
         counts = write_survivors(self.out, "data/library.smi", known)
         self.assertEqual(counts["input"], 19485)
         self.assertEqual(counts["survivors"], 7767)
+
+
+class TestV4WindowIsSeparateFromTheBlueprintOne(unittest.TestCase):
+    """§8.2's comment says the gate must not diverge from the RL objective. For v4
+    that intent points away from objective.TPSA_WINDOW, not at it: v4's RL window
+    was re-derived to (60, 140) (results/v4_tpsa_window.md) while the blueprint
+    constant stays at (40, 115).
+
+    WHY THIS IS A SECOND CONSTANT. TestReportedCounts recomputes the 7,767
+    survivors of data/library.smi that §6.3 and the ADMET run both cite. Moving
+    WINDOW itself would change that number under a published result, so the
+    blueprint window remains the default and v4 passes its own."""
+
+    def test_the_blueprint_window_is_untouched(self):
+        self.assertEqual(WINDOW["tpsa_range"], (40.0, 115.0))
+
+    def test_the_v4_window_comes_from_the_rl_single_source(self):
+        from make_rl_config import RL_TRANSFORM_OVERRIDES
+
+        override = RL_TRANSFORM_OVERRIDES["TPSA"]
+        self.assertEqual(V4_WINDOW["tpsa_range"], (override["low"], override["high"]))
+        self.assertEqual(V4_WINDOW["tpsa_range"], (60.0, 140.0))
+
+    def test_only_the_tpsa_bound_differs_between_the_two_windows(self):
+        """logP and MW were not re-derived, so a v4 survivor set must differ from
+        a v2 one on TPSA alone - otherwise two cuts moved and the funnel's
+        attribution to §2 would be wrong."""
+        self.assertEqual(V4_WINDOW["logp_max"], WINDOW["logp_max"])
+        self.assertEqual(V4_WINDOW["mw_range"], WINDOW["mw_range"])
+
+    def test_v4_arms_get_the_v4_window_and_v2_arms_do_not(self):
+        self.assertEqual(window_for_arm("TL-B"), V4_WINDOW)
+        for arm in ("TL-C", "TL-A-prime"):
+            with self.subTest(arm=arm):
+                self.assertEqual(window_for_arm(arm), WINDOW)
+
+    def test_an_undeclared_arm_falls_back_to_the_pre_registered_window(self):
+        """Forgetting to declare an arm must not silently widen the gate. An arm
+        has to be in make_rl_config.ARMS to be treated as v4."""
+        self.assertEqual(window_for_arm("TL-Z"), WINDOW)
+        self.assertEqual(window_for_arm(None), WINDOW)
+
+    def test_a_molecule_between_the_two_ceilings_separates_them(self):
+        """TPSA ~121 is what TL-B's median actually looks like (spec §3.4 measured
+        121.8): rejected by the old ceiling, admitted by the new one. This is the
+        molecule the old gate would have thrown away."""
+        mid = Chem.MolFromSmiles(
+            "O=C(O)CNC(=O)c1ccc(NC(=O)c2ccc(C(=O)NC)cc2)cc1")
+        from rdkit.Chem import Descriptors
+        self.assertTrue(115.0 < Descriptors.TPSA(mid) < 140.0,
+                        Descriptors.TPSA(mid))
+        self.assertFalse(passes_window(mid, WINDOW))
+        self.assertTrue(passes_window(mid, V4_WINDOW))
+
+    def test_paths_are_scoped_by_campaign_not_hardcoded_to_v2(self):
+        self.assertEqual(library_path("TL-B"), "data/v4_TL-B/library.smi")
+        self.assertEqual(survivors_path("TL-B"), "data/v4_TL-B/survivors.smi")
+        self.assertEqual(library_path("TL-C"), "data/v2_TL-C/library.smi")
+        self.assertEqual(survivors_path("TL-C"), "data/v2_TL-C/survivors.smi")
 
 
 if __name__ == "__main__":

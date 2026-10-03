@@ -1,6 +1,8 @@
+import os
 import sys
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
@@ -9,8 +11,8 @@ from rdkit import Chem, RDLogger
 
 RDLogger.DisableLog("rdApp.*")
 
-from dock_unidock import (DEFAULTS, box_from_ligand, build_command,
-                          parse_unidock_pdbqt)
+from dock_unidock import (AFFINITY_FLOOR, DEFAULTS, box_from_ligand, build_command,
+                          filter_done, parse_unidock_pdbqt, split_index)
 
 REF = "docking/ligand_ref.sdf"
 
@@ -172,6 +174,280 @@ class TestParseUnidockPdbqt(unittest.TestCase):
     def test_empty_input_returns_no_poses_rather_than_raising(self):
         self.assertEqual(parse_unidock_pdbqt(""), [])
 
+
+SMINA_OUT = """\
+MODEL 1
+REMARK minimizedAffinity -7.0807085
+REMARK minimizedRMSD -1
+REMARK SMILES O=C(N[C@@H](Cc1ccccc1)C(=O)[O-])c1ccc(Cl)cc1Cl
+ROOT
+ATOM      1  C   UNL     1       1.474 114.913  40.627  1.00  0.00    +0.253 C
+ENDROOT
+TORSDOF 5
+ENDMDL
+MODEL 2
+REMARK minimizedAffinity -6.9
+REMARK minimizedRMSD -1
+ROOT
+ATOM      1  C   UNL     1       2.474 114.913  40.627  1.00  0.00    +0.253 C
+ENDROOT
+TORSDOF 5
+ENDMDL
+"""
+
+
+class TestParseSminaPdbqt(unittest.TestCase):
+    """The alphaVbeta6 side had to move from Uni-Dock to smina when the cluster
+    GPU allocation ended. smina records the SAME Vina 1.1.2 score as
+    `REMARK minimizedAffinity <kcal/mol>` -- one number, a different name -- so
+    the parser accepts both spellings and every downstream reader stays engine-
+    agnostic. A parser that silently returned affinity None here would not
+    raise: it would hand selectivity.py a receptor with no scores, and the
+    percentile axis would be computed from an empty side."""
+
+    def test_smina_affinity_is_read(self):
+        poses = parse_unidock_pdbqt(SMINA_OUT)
+        self.assertAlmostEqual(poses[0]["affinity"], -7.0807085)
+        self.assertAlmostEqual(poses[1]["affinity"], -6.9)
+
+    def test_smina_poses_are_counted_and_ranked_like_unidock(self):
+        poses = parse_unidock_pdbqt(SMINA_OUT)
+        self.assertEqual([p["rank"] for p in poses], [1, 2])
+
+    def test_the_minimized_rmsd_remark_is_not_mistaken_for_an_affinity(self):
+        # `REMARK minimizedRMSD -1` sits right after the affinity and also
+        # carries a negative number. Matching it would overwrite every score
+        # with -1 and leave the file looking parsed.
+        poses = parse_unidock_pdbqt(SMINA_OUT)
+        self.assertAlmostEqual(poses[0]["affinity"], -7.0807085)
+
+    def test_unidock_output_still_parses_unchanged(self):
+        poses = parse_unidock_pdbqt(UNIDOCK_OUT)
+        self.assertAlmostEqual(poses[0]["affinity"], -6.908)
+
+
+BROKEN_OUT = """\
+MODEL 1
+REMARK VINA RESULT:    -178.439      0.000      0.000
+REMARK SMILES O=C([O-])c1ccccc1
+ROOT
+ATOM      1  C   UNL     1       1.474 114.913  40.627  1.00  0.00    +0.253 C
+ENDROOT
+TORSDOF 5
+ENDMDL
+MODEL 2
+REMARK VINA RESULT:      -7.200      1.213      1.901
+ROOT
+ATOM      1  C   UNL     1       2.474 114.913  40.627  1.00  0.00    +0.253 C
+ENDROOT
+TORSDOF 5
+ENDMDL
+"""
+
+
+class TestAffinityFloor(unittest.TestCase):
+    """126 ligands across the two arms carry Meeko's macrocycle glue atoms
+    (`CG0`/`G0`), pseudo-atoms inserted to open a ring that Vina has no
+    parameters for, and 251 of their poses score between -21.9 and -219.017
+    while the strongest physical pose in the campaign is -10.340. Read as
+    scores, those poses pass any affinity filter trivially. smina confirms the
+    mechanism by refusing to parse the same ligands outright."""
+
+    def test_a_score_below_the_floor_is_missing_not_excellent(self):
+        poses = parse_unidock_pdbqt(BROKEN_OUT)
+        self.assertIsNone(poses[0]["affinity"])
+
+    def test_it_costs_the_score_and_not_the_pose(self):
+        # Same rule an absent energy remark follows: dropping the pose would
+        # shrink the denominator of every rate computed downstream.
+        poses = parse_unidock_pdbqt(BROKEN_OUT)
+        self.assertEqual(len(poses), 2)
+        self.assertIn("ATOM      1  C   UNL", poses[0]["pdbqt_block"])
+
+    def test_a_physical_score_on_another_pose_survives(self):
+        poses = parse_unidock_pdbqt(BROKEN_OUT)
+        self.assertAlmostEqual(poses[1]["affinity"], -7.2)
+
+    def test_both_measured_boundaries_fall_on_the_right_side(self):
+        # The two distributions do not touch: -10.340 is the strongest physical
+        # pose in the campaign and -21.913 the weakest artifact. Any floor
+        # between them behaves identically, which is why -15.0 is not a tuned
+        # number -- these two assertions are what it has to get right.
+        kept = BROKEN_OUT.replace("-178.439", "-10.340")
+        self.assertAlmostEqual(parse_unidock_pdbqt(kept)[0]["affinity"], -10.340)
+        dropped = BROKEN_OUT.replace("-178.439", "-21.913")
+        self.assertIsNone(parse_unidock_pdbqt(dropped)[0]["affinity"])
+
+    def test_the_floor_is_stated_once_and_imported_by_the_csv_reader(self):
+        # funnel.py reads affinities out of geometry.csv, the one path that does
+        # not go through this parser, so a second literal there could drift.
+        import funnel
+        self.assertIs(funnel.AFFINITY_FLOOR, AFFINITY_FLOOR)
+
+    def test_a_positive_affinity_is_kept(self):
+        # Vina reports positive energies for clashing poses; those are physical
+        # readings and they fail every `< cutoff` filter on their own.
+        text = BROKEN_OUT.replace("-178.439", "8.354")
+        self.assertAlmostEqual(parse_unidock_pdbqt(text)[0]["affinity"], 8.354)
+
+
+RE_DOCKED_OUT = """\
+MODEL 1
+REMARK minimizedAffinity -7.29541302
+REMARK minimizedRMSD -1
+REMARK VINA RESULT:    -7.046      0.000      0.000
+REMARK INTER + INTRA:          -8.667
+REMARK SMILES O=C([O-])c1ccccc1
+ROOT
+ATOM      1  C   UNL     1       1.474 114.913  40.627  1.00  0.00    +0.253 C
+ENDROOT
+TORSDOF 5
+ENDMDL
+"""
+
+
+class TestTwoEnergyRemarksInOneBlock(unittest.TestCase):
+    """A ligand re-docked from another run's output pose carries that run's
+    energy remarks, because an engine copies its input's remarks into its own
+    output. The block then holds two energies: this engine's first, then the
+    inherited one. Assigning on every match let the inherited one win, so the
+    alphaVbeta6 side reported alphaVbeta1's affinities and every selectivity
+    value came out exactly +0.000 -- which is how it was caught."""
+
+    def test_the_first_energy_remark_wins(self):
+        poses = parse_unidock_pdbqt(RE_DOCKED_OUT)
+        self.assertAlmostEqual(poses[0]["affinity"], -7.29541302)
+
+    def test_the_inherited_energy_is_not_what_is_reported(self):
+        poses = parse_unidock_pdbqt(RE_DOCKED_OUT)
+        self.assertNotAlmostEqual(poses[0]["affinity"], -7.046)
+
+    def test_a_block_with_only_an_inherited_remark_still_reads(self):
+        # Uni-Dock's own output has VINA RESULT first and nothing else; the rule
+        # must not make the ordinary case depend on a second remark existing.
+        text = RE_DOCKED_OUT.replace(
+            "REMARK minimizedAffinity -7.29541302\nREMARK minimizedRMSD -1\n", "")
+        self.assertAlmostEqual(parse_unidock_pdbqt(text)[0]["affinity"], -7.046)
+
+
+class TestFilterDone(unittest.TestCase):
+    """The resume path. Uni-Dock has no --resume, and the first pass is 11 GPU
+    hours / 62 CPU hours, so an interruption at hour ten would otherwise restart
+    from zero. Outputs are named after their ligand, which makes resuming an
+    index filter instead of engine state."""
+
+    @staticmethod
+    def _index(tmp, labels):
+        ligands = Path(tmp) / "pdbqt"
+        ligands.mkdir(exist_ok=True)
+        paths = []
+        for label in labels:
+            path = ligands / f"{label}.pdbqt"
+            path.write_text("REMARK stub\n")
+            paths.append(str(path))
+        index = Path(tmp) / "ligands.txt"
+        index.write_text("\n".join(paths) + "\n")
+        return str(index)
+
+    @staticmethod
+    def _outputs(tmp, labels_with_mtime):
+        """Write `<label>_out.pdbqt` files with explicit mtimes.
+
+        mtime is set rather than relied upon: the files are created within the
+        same clock tick, so without this the "most recent" output would be
+        whichever one the filesystem happened to stamp last and the re-queue
+        test would pass or fail at random.
+        """
+        out = Path(tmp) / "poses"
+        out.mkdir(exist_ok=True)
+        for label, mtime in labels_with_mtime:
+            path = out / f"{label}_out.pdbqt"
+            path.write_text("MODEL 1\nENDMDL\n")
+            os.utime(path, (mtime, mtime))
+        return str(out)
+
+    def test_finished_ligands_are_dropped_and_order_is_preserved(self):
+        with TemporaryDirectory() as tmp:
+            index = self._index(tmp, ["a", "b", "c", "d"])
+            # 'd' is newest, so it is the one re-queued; a and b are genuinely done.
+            out = self._outputs(tmp, [("a", 1000), ("b", 2000), ("d", 3000)])
+            state = filter_done(index, out)
+        self.assertEqual([Path(p).stem for p in state["remaining"]], ["c", "d"])
+        self.assertEqual(state["done"], ["a", "b"])
+        self.assertEqual(state["total"], 4)
+
+    def test_the_most_recently_modified_output_is_requeued(self):
+        """A process killed mid-write truncates exactly one file, and a truncated
+        PDBQT is indistinguishable from a ligand whose search found few poses --
+        which §4.1's retention curve and §4.6's criterion (c) both read. Re-docking
+        it costs ~8 s and Uni-Dock overwrites by name."""
+        with TemporaryDirectory() as tmp:
+            index = self._index(tmp, ["a", "b", "c"])
+            out = self._outputs(tmp, [("a", 1000), ("b", 5000), ("c", 2000)])
+            state = filter_done(index, out)
+        self.assertEqual(state["requeued"], "b")
+        self.assertIn("b", [Path(p).stem for p in state["remaining"]])
+        self.assertNotIn("b", state["done"])
+
+    def test_a_fresh_or_missing_out_dir_returns_the_whole_index(self):
+        """--resume on a first run has to be a no-op, so the flag can always be
+        passed rather than remembered only after a crash."""
+        with TemporaryDirectory() as tmp:
+            index = self._index(tmp, ["a", "b"])
+            missing = str(Path(tmp) / "never_created")
+            state = filter_done(index, missing)
+            self.assertEqual([Path(p).stem for p in state["remaining"]], ["a", "b"])
+            self.assertEqual(state["done"], [])
+            self.assertIsNone(state["requeued"])
+
+            empty = self._outputs(tmp, [])
+            state = filter_done(index, empty)
+            self.assertEqual([Path(p).stem for p in state["remaining"]], ["a", "b"])
+            self.assertIsNone(state["requeued"])
+
+    def test_an_exact_label_match_not_a_prefix_match(self):
+        """`gen_01` and `gen_010` are different ligands. A prefix test would
+        retire both on one output and silently shrink the library."""
+        with TemporaryDirectory() as tmp:
+            index = self._index(tmp, ["gen_01", "gen_010", "gen_0100"])
+            # Two outputs so the newest re-queue does not mask the matching rule.
+            out = self._outputs(tmp, [("gen_01", 1000), ("gen_0100", 3000)])
+            state = filter_done(index, out)
+        self.assertEqual(state["done"], ["gen_01"])
+        self.assertEqual([Path(p).stem for p in state["remaining"]],
+                         ["gen_010", "gen_0100"])
+
+    def test_a_fully_docked_library_leaves_only_the_requeued_ligand(self):
+        """Not an error: a finished run that gets resumed should re-dock the one
+        possibly-truncated output and stop, not raise."""
+        with TemporaryDirectory() as tmp:
+            index = self._index(tmp, ["a", "b"])
+            out = self._outputs(tmp, [("a", 1000), ("b", 2000)])
+            state = filter_done(index, out)
+        self.assertEqual([Path(p).stem for p in state["remaining"]], ["b"])
+        self.assertEqual(state["done"], ["a"])
+
+    def test_the_filtered_index_shards_round_robin_over_what_is_left(self):
+        """§7's open item 4: the 2-GPU path re-shards the REMAINING ligands, so a
+        restart keeps both devices fed instead of inheriting the original split."""
+        with TemporaryDirectory() as tmp:
+            index = self._index(tmp, ["a", "b", "c", "d", "e", "f"])
+            out = self._outputs(tmp, [("a", 1000), ("b", 2000)])
+            state = filter_done(index, out)
+            resume = Path(tmp) / "resume_index.txt"
+            resume.write_text("\n".join(state["remaining"]) + "\n")
+            shards = split_index(str(resume), 2, str(Path(tmp) / "shards"))
+
+            # INSIDE the with-block: split_index's output is files, and reading
+            # them after TemporaryDirectory cleans up raises FileNotFoundError.
+            self.assertEqual(len(shards), 2)
+            per_shard = [[Path(line).stem for line in Path(s).read_text().split()]
+                         for s in shards]
+
+        # a is done; b is re-queued (newest output). filter_done preserves the
+        # ORIGINAL index order rather than appending the re-queued ligand, so
+        # b c d e f remain -> round-robin b,d,f | c,e.
+        self.assertEqual(per_shard, [["b", "d", "f"], ["c", "e"]])
 
 
 if __name__ == "__main__":

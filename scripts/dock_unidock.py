@@ -37,23 +37,56 @@ every shard the same size mixture.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import numpy as np
 from rdkit import Chem, RDLogger
 
 __all__ = ["DEFAULTS", "box_from_ligand", "build_command", "split_index",
-           "parse_unidock_pdbqt", "run_multi_gpu"]
+           "parse_unidock_pdbqt", "run_multi_gpu", "filter_done"]
+
+OUT_SUFFIX = "_out.pdbqt"
 
 RDLogger.DisableLog("rdApp.*")
 
 # `REMARK VINA RESULT:` carries three numbers; the first is the affinity in
 # kcal/mol, the other two are Vina's own lower- and upper-bound RMSD from the
 # best mode and are not used here.
-_VINA_RESULT = re.compile(r"REMARK\s+VINA RESULT:\s*(-?\d+\.?\d*)")
+#
+# smina writes the SAME Vina score under a different remark -- `REMARK
+# minimizedAffinity`, one number -- so both spellings are accepted. This is a
+# naming difference, not a scoring one: smina is Vina 1.1.2's scoring function
+# in a different implementation, which is why section 8.5(a)'s smina redocking
+# (0.63 A) and Uni-Dock's (0.66 A) characterise each other. Accepting both
+# keeps every downstream reader engine-agnostic, the same property this
+# function was written to give validate_redock.
+_VINA_RESULT = re.compile(
+    r"REMARK\s+(?:VINA RESULT:|minimizedAffinity)\s*(-?\d+\.?\d*)")
+
+# A score below this is not a weak or a strong binding estimate, it is a broken
+# one, and it is read as a MISSING score rather than as a very good one.
+#
+# WHERE THE NUMBER COMES FROM, measured over all 52,809 poses of both arms. The
+# strongest physical pose in the campaign is -10.340 kcal/mol and the weakest is
+# +8.354. Below -15 there are 251 poses reaching -219.017, and every one of the
+# 126 ligands holding them carries Meeko's macrocycle glue atoms (`CG0`/`G0`):
+# pseudo-atoms inserted to open a ring, which Vina has no parameters for. The
+# two distributions do not touch -- nothing at all lies between -10.340 and
+# -21.9 -- so any floor in that gap gives the same answer and -15.0 sits in the
+# middle of it. smina confirms the mechanism independently by refusing to parse
+# those ligands at all ("CG0 is not a valid AutoDock type").
+#
+# IT COSTS THE SCORE, NEVER THE POSE, the same rule an absent energy remark
+# follows. Dropping the pose would shrink the denominator of every rate
+# downstream; dropping only the number lets a ligand still pass on its other
+# poses, and lets one whose only passing pose is broken fail honestly for having
+# no usable score.
+AFFINITY_FLOOR = -15.0
 
 
 def parse_unidock_pdbqt(text: str) -> list[dict]:
@@ -80,9 +113,21 @@ def parse_unidock_pdbqt(text: str) -> list[dict]:
             continue
         if not inside:
             continue
-        match = _VINA_RESULT.search(line)
-        if match:
-            affinity = float(match.group(1))
+        # THE FIRST ENERGY REMARK IN THE BLOCK IS THIS ENGINE'S, and a later
+        # one is metadata it inherited. An engine writes its own remarks
+        # straight after `MODEL n` and then copies whatever the input ligand
+        # carried, so a pose re-docked from another run's output pose holds two:
+        # smina's `minimizedAffinity` for THIS receptor first, then the
+        # `VINA RESULT` of the run the ligand came from. Assigning on every
+        # match let the inherited one win, and the alphaVbeta6 side then
+        # reported alphaVbeta1's scores -- every selectivity value came out
+        # exactly 0.000, which is how it was caught.
+        if affinity is None:
+            match = _VINA_RESULT.search(line)
+            if match:
+                affinity = float(match.group(1))
+                if affinity < AFFINITY_FLOOR:
+                    affinity = None
         block.append(line)
         if line.startswith("ENDMDL"):
             poses.append({"rank": len(poses) + 1, "affinity": affinity,
@@ -168,6 +213,51 @@ def build_command(receptor: str, ligand_index: str, out_dir: str, box: dict,
     return cmd
 
 
+def filter_done(index_path: str, out_dir: str) -> dict:
+    """The entries of `index_path` that `out_dir` holds no finished pose file for.
+
+    UNI-DOCK HAS NO --resume, and the first pass is an 11-hour GPU run (62 on
+    CPU): an interruption at hour ten would otherwise restart from zero. Because
+    Uni-Dock names every output after its ligand (`<label>_out.pdbqt`), resuming
+    is an index filter rather than engine state -- drop the ligands that already
+    have an output, re-run the rest.
+
+    THE MOST RECENTLY MODIFIED OUTPUT IS RE-QUEUED rather than counted as done.
+    If the process died mid-write, that file is the one that was truncated, and a
+    truncated PDBQT does not announce itself: parse_unidock_pdbqt would read the
+    models that reached disk and report a ligand with fewer poses, which is
+    indistinguishable from a ligand whose search genuinely found few. That
+    distinction is not cosmetic here -- section 4.1's retention curve and section
+    4.6's criterion (c) both read the pose count per ligand, so one silently
+    short ligand biases the smina-switch decision. Re-docking one ligand costs
+    about eight seconds and Uni-Dock overwrites by name, so nothing needs
+    cleaning up first.
+
+    Matching is on the EXACT label, never a prefix: `gen_01` and `gen_010` are
+    different ligands, and a prefix test would retire both on one output.
+
+    A missing or empty `out_dir` is a fresh start, not an error, so passing
+    --resume to a first run is a no-op and the flag can always be present.
+    """
+    lines = [line.strip() for line in Path(index_path).read_text().splitlines()
+             if line.strip()]
+    if not lines:
+        raise ValueError(f"{index_path}: no ligand paths")
+
+    outputs = sorted(Path(out_dir).glob(f"*{OUT_SUFFIX}")) if Path(out_dir).is_dir() else []
+    done = {path.name[: -len(OUT_SUFFIX)] for path in outputs}
+
+    requeued = None
+    if outputs:
+        newest = max(outputs, key=lambda path: path.stat().st_mtime)
+        requeued = newest.name[: -len(OUT_SUFFIX)]
+        done.discard(requeued)
+
+    remaining = [line for line in lines if Path(line).stem not in done]
+    return {"remaining": remaining, "done": sorted(done), "requeued": requeued,
+            "total": len(lines)}
+
+
 def split_index(index_path: str, shards: int, out_dir: str) -> list[str]:
     """Split a --ligand_index file into `shards` files, round-robin. Returns paths.
 
@@ -178,8 +268,6 @@ def split_index(index_path: str, shards: int, out_dir: str) -> list[str]:
     A shard that would be empty is not written, so `shards` larger than the ligand
     count does not produce processes with nothing to do.
     """
-    from pathlib import Path
-
     lines = [line.strip() for line in Path(index_path).read_text().splitlines()
              if line.strip()]
     if not lines:
@@ -206,8 +294,6 @@ def run_multi_gpu(receptor: str, index_path: str, out_dir: str, box: dict,
     raised, because the other shards' poses are still valid output - the caller
     decides whether a partial library is usable.
     """
-    import os
-
     shards = split_index(index_path, gpus, shard_dir)
     os.makedirs(out_dir, exist_ok=True)
 
@@ -262,6 +348,14 @@ def main(argv: list[str] | None = None) -> int:
                              "Uni-Dock uses a single GPU per process, and the 8gpu "
                              "partition charges the same whether 1 or 8 are busy")
     parser.add_argument("--shard-dir", default="docking/ligand_shards")
+    parser.add_argument("--resume", action="store_true",
+                        help="dock only the ligands --out-dir has no pose file "
+                             "for. Uni-Dock has no --resume of its own; this is "
+                             "the index filter that stands in for one, because "
+                             "outputs are named after their ligand. The most "
+                             "recently modified output is re-docked in case the "
+                             "interruption truncated it. Harmless on a fresh "
+                             "out-dir, so it can always be passed")
     parser.add_argument("--dry-run", action="store_true",
                         help="print the command and the box, run nothing")
     args = parser.parse_args(argv)
@@ -272,7 +366,27 @@ def main(argv: list[str] | None = None) -> int:
     for key, value in box.items():
         print(f"  {key:9s} {value:9.3f}")
 
-    cmd = build_command(args.receptor, args.ligand_index, args.out_dir, box,
+    # BEFORE the command is built, so what gets printed is what would run. The
+    # filtered index is written to disk rather than held in memory: it is the
+    # record of which ligands this restart is responsible for, and `--resume
+    # --dry-run` is the way to read the counts before committing eleven hours.
+    ligand_index = args.ligand_index
+    if args.resume:
+        state = filter_done(ligand_index, args.out_dir)
+        print(f"\nresume: {state['total']} in index, "
+              f"{len(state['done'])} already done")
+        if state["requeued"]:
+            print(f"        re-queued in case it was truncated: "
+                  f"{state['requeued']}{OUT_SUFFIX}")
+        if not state["remaining"]:
+            print("        nothing left to dock")
+            return 0
+        os.makedirs(args.shard_dir, exist_ok=True)
+        ligand_index = os.path.join(args.shard_dir, "resume_index.txt")
+        Path(ligand_index).write_text("\n".join(state["remaining"]) + "\n")
+        print(f"        {len(state['remaining'])} to dock -> {ligand_index}")
+
+    cmd = build_command(args.receptor, ligand_index, args.out_dir, box,
                         args.exhaustiveness, args.num_modes, args.seed,
                         energy_range=args.energy_range, min_rmsd=args.min_rmsd,
                         search_mode=args.search_mode)
@@ -288,13 +402,12 @@ def main(argv: list[str] | None = None) -> int:
         print("\nunidock not on PATH - activate the unidock env", file=sys.stderr)
         return 1
 
-    import os
     os.makedirs(args.out_dir, exist_ok=True)
 
     if args.gpus > 1:
         print("\nrunning...", flush=True)
         results = run_multi_gpu(
-            args.receptor, args.ligand_index, args.out_dir, box, args.gpus,
+            args.receptor, ligand_index, args.out_dir, box, args.gpus,
             args.shard_dir, exhaustiveness=args.exhaustiveness,
             num_modes=args.num_modes, seed=args.seed,
             energy_range=args.energy_range, min_rmsd=args.min_rmsd,
