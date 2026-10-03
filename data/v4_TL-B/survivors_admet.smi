@@ -1,0 +1,7 @@
+# §5.5 ADMET window survivors - the docking input.
+# from: data/v4_TL-B/survivors.smi + results/v4_TL-B/admet_preds.csv
+# adopted tier: tier1_bcs_high (Caco2_Wang > -5.0)
+# toxicity: §9.2, all of SR-MMP, NR-AhR, DILI below results/v3_metal_asn224/approved_drug_gate.json p60
+# cumulative: input 13767 -> Caco2 1578 -> ∩ toxicity 2
+C#CCN(C)C(=O)C(C)(C)c1cnc(C(CC(=O)O)c2ccc3c(c2)OCCO3)o1	gen_03193
+CC(C)(C)Cn1cc(C(CC(=O)O)c2ncccc2F)cn1	gen_03198
