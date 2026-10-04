@@ -508,11 +508,18 @@ def landscape_figure(out_path: Path, rows: list[dict], thresholds: dict) -> None
     and no molecule is at both. That is why the campaign reports two leads rather
     than one, and a card panel cannot show it.
 
-    THE PARETO FRONT IS DRAWN BECAUSE IT HAS THREE MEMBERS, NOT TWO. opt_10240
-    (-7.749, 0.189) is also non-dominated on these axes; it was set aside on
-    criteria this plot does not show - MW 524.6, the heaviest lead, and its pH 7.4
-    charge state. Labelling only the two reported leads would let the figure imply
-    the axes chose them, when one of the three was excluded by something else.
+    THE FRONT HAS THREE MEMBERS AND THE CAMPAIGN REPORTS TWO, so the figure has to
+    say why rather than leave the gap. opt_10240 (-7.749, 0.189) is non-dominated
+    for ONE reason: it beats opt_11266 on affinity by 0.022 kcal/mol. That margin
+    is smaller than the docking engine's own seed-to-seed SD, measured on these
+    same compounds at 0.032 for opt_11266 and 0.063 on average (fig7_seeds). On
+    every axis the two can actually be resolved on, opt_11266 wins - DILI 0.069 vs
+    0.189, Caco-2 -5.290 vs -5.804 (a 0.51 log gap against a model MAE of 0.31).
+    So the third front member exists only if an unresolvable difference is treated
+    as real, and the figure marks that segment instead of drawing it like the other.
+
+    The axes this plot does not show agree: MW 524.6 vs 345.5, pH 7.4 charge +2 vs
+    +1, alpha-monosubstituted vs disubstituted, retrosynthesis unsolved vs solved.
     """
     plt = _style()
     fig, (ax, ax2) = plt.subplots(
@@ -531,8 +538,19 @@ def landscape_figure(out_path: Path, rows: list[dict], thresholds: dict) -> None
         if row["dili"] < best:
             front.append(row)
             best = row["dili"]
-    ax.plot([r["aff"] for r in front], [r["dili"] for r in front],
-            color="#c0392b", lw=1.3, ls=":", zorder=2)
+    # Segments whose affinity step is inside the engine's noise are drawn greyed:
+    # they are front edges only because an unresolvable difference was counted.
+    SEED_SD = 0.063
+    for lo, hi in zip(front, front[1:]):
+        resolved = abs(hi["aff"] - lo["aff"]) > SEED_SD
+        ax.plot([lo["aff"], hi["aff"]], [lo["dili"], hi["dili"]],
+                color="#c0392b" if resolved else "#b0b0b0",
+                lw=1.3, ls=":" if resolved else "-", zorder=2)
+        if not resolved:
+            ax.annotate(f"\u0394 {abs(hi['aff'] - lo['aff']):.3f} < seed SD {SEED_SD}",
+                        ((lo["aff"] + hi["aff"]) / 2, (lo["dili"] + hi["dili"]) / 2),
+                        textcoords="offset points", xytext=(14, 0), ha="left",
+                        va="center", fontsize=8.5, color="#707070", style="italic")
     ax.annotate("Pareto front", (front[0]["aff"], front[0]["dili"]),
                 textcoords="offset points", xytext=(34, -26), ha="left",
                 fontsize=9, color="#c0392b", style="italic")
@@ -560,7 +578,7 @@ def landscape_figure(out_path: Path, rows: list[dict], thresholds: dict) -> None
                         color="#7f8c8d" if on_front_only else colour)
     ax.set_xlabel("Uni-Dock score (kcal/mol)   \u2190 stronger")
     ax.set_ylabel("Predicted DILI   \u2193 safer")
-    ax.set_title(f"(a) {len(front)} leads are non-dominated; none is best on both",
+    ax.set_title("(a) Two leads: no molecule is best on both axes",
                  fontsize=11)
     ax.invert_xaxis()
 
