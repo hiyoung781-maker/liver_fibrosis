@@ -381,6 +381,172 @@ def dili_figure(out_path: Path, admet_csv: Path, thresholds: dict,
     return {"n": n, "single": single, "conjunction": conj, "leave_one_out": drop}
 
 
+
+LEADS = ["opt_10773", "opt_11266", "opt_10928", "gen_11276"]
+
+
+def _lead_rows(root: Path = Path(".")) -> list[dict]:
+    """The shortlisted leads with the numbers the card shows, read from the
+    files that produced them. PLN-1474 comes last, as the reference row."""
+    r = root / "results/v4_TL-B"
+    direct = {x["label"]: x for x in csv.DictReader(open(r / "selection.csv"))}
+    opt = {x["label"]: x for x in csv.DictReader(open(r / "optimised_leads.csv"))}
+    adm = {x["label"]: x for x in
+           csv.DictReader(open(r / "analogues_n256_admet.csv"))}
+    panel = {x["label"]: x for x in
+             csv.DictReader(open(r / "admet_with_panel.csv"))}
+
+    out = []
+    for label in LEADS:
+        if label in opt:
+            x = opt[label]
+            a = adm.get(label, {})
+            out.append(dict(label=label, smiles=x["smiles"],
+                            aff=_f(x["affinity"]), dili=_f(x["DILI"]),
+                            srmmp=_f(x["SR_MMP"]), nrahr=_f(x["NR_AhR"]),
+                            caco=_f(x["caco2"]), hia=_f(a.get("HIA_Hou")),
+                            bioav=_f(a.get("Bioavailability_Ma")),
+                            parent=x["parent"], delta=_f(x["delta"])))
+        else:
+            x = direct[label]
+            out.append(dict(label=label, smiles=x["smiles"],
+                            aff=_f(x["affinity"]), dili=_f(x["DILI"]),
+                            srmmp=_f(x["SR_MMP"]), nrahr=_f(x["NR_AhR"]),
+                            caco=_f(x["caco2"]), hia=_f(x["hia"]),
+                            bioav=_f(x["bioavail"]), parent="", delta=None))
+    x = panel["PANEL_PLN-1474"]
+    out.append(dict(label="PLN-1474", smiles=x["smiles"], aff=-6.973,
+                    dili=_f(x["DILI"]), srmmp=_f(x["SR-MMP"]),
+                    nrahr=_f(x["NR-AhR"]), caco=_f(x["Caco2_Wang"]),
+                    hia=_f(x["HIA_Hou"]), bioav=_f(x["Bioavailability_Ma"]),
+                    parent="reference", delta=None))
+    return out
+
+
+def leads_figure(out_path: Path, rows: list[dict], thresholds: dict) -> None:
+    """Four leads and the clinical reference: structure above, numbers below.
+
+    The reference row is drawn in the same frame rather than quoted in a caption
+    because the only honest reading of a predicted number here is relative - and
+    PLN-1474 exceeds the SR-MMP threshold, which a caption would bury.
+    """
+    plt = _style()
+    from rdkit import Chem, RDLogger
+    from rdkit.Chem import Draw, rdDepictor
+    from rdkit.Chem.Draw import rdMolDraw2D
+    RDLogger.DisableLog("rdApp.*")
+    import io
+    from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+    from PIL import Image
+
+    n = len(rows)
+    fig, axes = plt.subplots(2, n, figsize=(3.05 * n, 5.6),
+                             gridspec_kw={"height_ratios": [2.05, 1.0]})
+    for col, row in enumerate(rows):
+        mol = Chem.MolFromSmiles(row["smiles"])
+        rdDepictor.Compute2DCoords(mol)
+        drawer = rdMolDraw2D.MolDraw2DCairo(540, 420)
+        opts = drawer.drawOptions()
+        opts.clearBackground = False
+        rdMolDraw2D.PrepareAndDrawMolecule(drawer, mol)
+        drawer.FinishDrawing()
+        img = Image.open(io.BytesIO(drawer.GetDrawingText()))
+
+        ax = axes[0][col]
+        ax.imshow(img); ax.axis("off")
+        ref = row["parent"] == "reference"
+        ax.set_title(("PLN-1474  (reference)" if ref else row["label"]),
+                     fontsize=12, fontweight="bold",
+                     color="#555555" if ref else "#111111", pad=4)
+
+        ax = axes[1][col]
+        ax.axis("off")
+        def mark(value, limit):
+            return "" if value < limit else "  ✗"
+        lines = [
+            ("affinity", f"{row['aff']:.3f} kcal/mol"),
+            ("DILI", f"{row['dili']:.3f}{mark(row['dili'], thresholds['DILI'])}"),
+            ("SR-MMP", f"{row['srmmp']:.4f}{mark(row['srmmp'], thresholds['SR-MMP'])}"),
+            ("NR-AhR", f"{row['nrahr']:.4f}{mark(row['nrahr'], thresholds['NR-AhR'])}"),
+            ("Caco-2", f"{row['caco']:.2f}"),
+            ("HIA / F", f"{row['hia']:.2f} / {row['bioav']:.2f}"),
+        ]
+        if row["delta"] is not None:
+            lines.append(("vs parent", f"{row['delta']:+.3f}"))
+        for i, (k, v) in enumerate(lines):
+            y = 0.94 - i * 0.145
+            ax.text(0.02, y, k, fontsize=9.5, va="top", color="#555555")
+            ax.text(0.98, y, v, fontsize=9.5, va="top", ha="right",
+                    fontweight="bold" if k == "affinity" else "normal",
+                    color="#8a2f2f" if "✗" in v else "#111111")
+    fig.tight_layout()
+    fig.savefig(out_path)
+    plt.close(fig)
+
+
+def pharmacophore_figure(out_path: Path) -> None:
+    """What each half of an RGD mimetic binds, and why that constrains design.
+
+    Drawn rather than photographed from a structure: the point is the pairing of
+    two pharmacophores with two subunits, which a rendered pocket obscures.
+    """
+    plt = _style()
+    from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
+    fig, ax = plt.subplots(figsize=(11.5, 4.3))
+    ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.axis("off")
+
+    ax.add_patch(FancyBboxPatch((0.03, 0.46), 0.42, 0.40,
+                                boxstyle="round,pad=0.006,rounding_size=0.02",
+                                facecolor="#DCE9F7", edgecolor=C_EDGE, lw=1.6))
+    ax.text(0.24, 0.79, "αV subunit", fontsize=12.5, fontweight="bold",
+            ha="center")
+    ax.text(0.24, 0.655, "Asp218", fontsize=11, ha="center")
+    ax.text(0.24, 0.545, "salt bridge to a basic head", fontsize=9.2,
+            ha="center", style="italic", color="#444444")
+
+    ax.add_patch(FancyBboxPatch((0.55, 0.46), 0.42, 0.40,
+                                boxstyle="round,pad=0.006,rounding_size=0.02",
+                                facecolor="#F7DEDC", edgecolor=C_EDGE, lw=1.6))
+    ax.text(0.76, 0.79, "β1 subunit", fontsize=12.5, fontweight="bold",
+            ha="center")
+    ax.text(0.76, 0.655, "MIDAS metal  ·  Asn224", fontsize=11, ha="center")
+    ax.text(0.76, 0.545, "coordinates a carboxylate", fontsize=9.2,
+            ha="center", style="italic", color="#444444")
+
+    ax.add_patch(FancyBboxPatch((0.17, 0.10), 0.20, 0.23,
+                                boxstyle="round,pad=0.005,rounding_size=0.02",
+                                facecolor="#FDF3D7", edgecolor=C_EDGE, lw=1.6))
+    ax.text(0.27, 0.265, "Arg mimic", fontsize=11.5, fontweight="bold",
+            ha="center")
+    ax.text(0.27, 0.165, "basic head\n(e.g. THN)", fontsize=9.2, ha="center")
+
+    ax.add_patch(FancyBboxPatch((0.63, 0.10), 0.20, 0.23,
+                                boxstyle="round,pad=0.005,rounding_size=0.02",
+                                facecolor="#FDF3D7", edgecolor=C_EDGE, lw=1.6))
+    ax.text(0.73, 0.265, "Asp mimic", fontsize=11.5, fontweight="bold",
+            ha="center")
+    ax.text(0.73, 0.165, "carboxylate", fontsize=9.2, ha="center")
+
+    ax.annotate("", xy=(0.40, 0.215), xytext=(0.60, 0.215),
+                arrowprops=dict(arrowstyle="<->", lw=1.5, color="#555555"))
+    ax.text(0.50, 0.245, "spacer", fontsize=9.5, ha="center", color="#555555")
+    ax.text(0.50, 0.145, "9–16 bonds in measured actives", fontsize=8.6,
+            ha="center", color="#555555", style="italic")
+
+    for x0, x1, colour in ((0.27, 0.24, "#2f4f8a"), (0.73, 0.76, "#8a2f2f")):
+        ax.add_patch(FancyArrowPatch((x0, 0.335), (x1, 0.455),
+                                     arrowstyle="-|>", mutation_scale=13,
+                                     lw=1.8, color=colour))
+
+    ax.text(0.5, 0.025,
+            "The carboxylate is required for MIDAS binding and costs permeability; "
+            "the basic head raises affinity on the αV side, which is shared across "
+            "β partners.",
+            fontsize=9.0, ha="center", color="#333333", style="italic")
+    fig.savefig(out_path)
+    plt.close(fig)
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--out-dir", type=Path, default=Path("figures/v4"))
@@ -405,7 +571,14 @@ def main(argv=None) -> int:
     print(f"  fig2_learning.png   {info}")
 
     info = dili_figure(args.out_dir / "fig4_dili.png", args.admet, th)
-    print(f"  fig4_dili.png       통과 {info['conjunction']} / {info['n']}")
+    print(f"  fig4_dili.png       conjunction {info['conjunction']} / {info['n']}")
+
+    rows = _lead_rows()
+    leads_figure(args.out_dir / "fig3_leads.png", rows, th)
+    print(f"  fig3_leads.png      {[r['label'] for r in rows]}")
+
+    pharmacophore_figure(args.out_dir / "fig5_pharmacophore.png")
+    print("  fig5_pharmacophore.png")
     return 0
 
 
