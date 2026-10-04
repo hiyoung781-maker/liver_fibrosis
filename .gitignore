@@ -49,6 +49,13 @@ results/*
 !results/panel_geometry.csv
 !results/leads.csv
 !results/v2_*.md
+# The v4/v5 change records are the same kind of artifact as the v2 ones -
+# small, hand-written, and cited by the reports. results/v4_threshold_ledger.md
+# and results/v5_span_term_retired.md were already force-added; this rule means
+# the next one does not need -f to be tracked.
+!results/v4_*.md
+!results/v4_*.txt
+!results/v5_*.md
 !results/FINAL_REPORT.md
 !results/POSTER_TABLES.md
 !results/v2_*.csv

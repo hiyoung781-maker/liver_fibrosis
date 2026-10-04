@@ -1,0 +1,16 @@
+library  data/v4_TL-B/library.smi: 3000 parsed (sample of 3000)
+training data/actives_core_B.smi: 191 parsed
+
+== memorization: nearest-neighbour Tanimoto to the training set ==
+  mean 0.242  median 0.229  p90 0.316  p99 0.444  max 0.895
+    >= 0.4       77 ( 2.57%)
+    >= 0.6        2 ( 0.07%)
+    >= 0.85       1 ( 0.03%)
+    >= 0.95       0 ( 0.00%)
+
+== mode collapse: internal diversity (400 random pairs) ==
+  mean pairwise Tanimoto 0.170  ->  internal diversity 0.830
+
+== scaffold reuse: unique Murcko scaffolds ==
+  2957 unique in 3000 molecules (98.6%)
+  training scaffolds: 104   also generated: 3
