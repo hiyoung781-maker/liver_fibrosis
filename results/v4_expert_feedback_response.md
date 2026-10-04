@@ -114,11 +114,36 @@ n=13,771 전수. HIA 중앙값이 −3: **0.297** → −2: **0.687** → −1: 
 |---|---|
 | `scripts/build_admet_excluded.py` | 탈락 집합 추출기 (라벨 보존) |
 | `data/v4_TL-B/admet_excluded.smi` | **13,433개** (13,767 − 334) |
-| `slurm/v4_dock_excluded.sbatch` | 8×A100 제출 스크립트 |
+| `scripts/kbds_dock_excluded.sh` | gpu-8-002 대화형 러너 |
+
+**sbatch 배치 잡이 아니다.** `docs/KBDS_GPU_DOCKING.md`("Workflow this fits")대로
+K-BDS의 `~/kbds/kbds_gpu/*.sh`는 **할당 홀더**(무한 sleep 루프로 노드를 점유)이고
+실제 작업은 점유된 할당 안에서 대화형으로 돈다. `#SBATCH` 헤더를 붙이면 이미 노드를
+쥐고 있는 잡 뒤에 **두 번째 잡을 큐에 넣는 것**이 된다.
 
 ```bash
-mkdir -p logs && sbatch slurm/v4_dock_excluded.sbatch
+# 1. 로그인 노드 — 계산 노드는 github.com을 해석하지 못한다
+cd /home01/$USER/liver_fibrosis && git pull
+
+# 2. 노드 점유 후 진입
+sbatch ~/kbds/kbds_gpu/gpu-8-002.sh
+ssh gpu-8-002                       # 또는 srun --jobid=<id> --pty bash
+
+# 3. 노드에서. ~5시간이므로 ssh가 끊겨도 살아남게 nohup
+cd /home01/$USER/liver_fibrosis
+nohup bash scripts/kbds_dock_excluded.sh > logs/v4_excluded.log 2>&1 &
+tail -f logs/v4_excluded.log
 ```
+
+환경은 `unidock` env 하나로 세 단계를 전부 돈다(rdkit·meeko·numpy 모두 포함).
+계산 노드에서 `module load`는 **no-op**이므로 호출하지 않는다 — conda의 unidock
+패키지가 자체 CUDA 런타임을 들고 온다. `set -e`도 쓰지 않는다(이 클러스터의
+`conda.sh`와 결합해 **출력 없이** 죽은 전례가 기록돼 있다).
+
+로컬에서 탈락 집합 20개로 **임베딩 → Meeko → 도킹** 전 단계를 통과 확인했다.
+`prepare_ligands.py`가 **재도킹 대조군(`CONTROL_crystal`)을 자동 포함**하므로,
+`docs/KBDS_GPU_DOCKING.md`가 요구하는 클러스터 빌드·수용체 전처리 **배관 점검**이
+공짜로 따라온다 — 대조군 점수가 엉뚱하면 원인은 화학이 아니라 빌드다.
 
 측정된 v4 처리율(335개 / 2 GPU / 25분 = 9 GPU·s/리간드)로 환산하면 13,433개는
 8×A100에서 **약 4.2시간**, 3D 임베딩 약 50분을 더해 **5시간**이다. 10시간 wall
