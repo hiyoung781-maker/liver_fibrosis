@@ -15,7 +15,7 @@ device = "cuda:0"
 [parameters]
 model_file = "REINVENT4/priors/mol2mol_high_similarity.prior"
 smiles_file = "results/v4_TL-B/parents.smi"
-output_file = "results/v4_TL-B/analogues_raw_big.csv"
+output_file = "results/v4_TL-B/analogues_raw_n256.csv"
 sample_strategy = "multinomial"
 temperature = 1.0
 num_smiles = 256
