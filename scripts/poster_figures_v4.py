@@ -80,6 +80,7 @@ def counts(root: Path = Path(".")) -> dict:
         "sampled": smi(d / "library.smi"),
         "survivors": smi(d / "survivors.smi"),
         "admet_window": smi(d / "survivors_admet.smi"),
+        "docked": len({x["label"] for x in plip}),
         "poses": len(plip),
         "binding_mode": len([m for m in mode if not m.startswith("CONTROL")]),
         "affinity": len(sel),
@@ -158,7 +159,9 @@ def pipeline_figure(out_path: Path, c: dict) -> None:
          f"{c['sampled']:,}", C_GEN),
         ("Property window", "logP, MW, TPSA\nnovelty", f"{c['survivors']:,}", C_GEN),
         ("ADMET window", "DILI\npermeability", f"{c['admet_window']}", C_ADMET),
-        ("Docking + PLIP", "MIDAS and\nβ1-Asn224", f"{c['binding_mode']}", C_STRUCT),
+        ("Docking + PLIP",
+         f"{c['docked']} \u2192 {c['poses']:,} poses\nMIDAS + \u03b21-Asn224",
+         f"{c['binding_mode']}", C_STRUCT),
         ("Affinity", "≤ PLN-1474\n(−6.97 kcal/mol)", f"{c['affinity']}", C_STRUCT),
         ("Toxicity gate", "SR-MMP, NR-AhR\nDILI", f"{c['direct']}", C_ADMET),
     ]
@@ -207,6 +210,93 @@ def pipeline_figure(out_path: Path, c: dict) -> None:
         Patch(facecolor=C_LEAD, edgecolor=C_EDGE, label="Leads"),
     ], loc="lower left", bbox_to_anchor=(0.008, -0.04), ncol=4, frameon=True,
         fontsize=9, borderpad=0.6, columnspacing=1.5, handlelength=1.4)
+
+    fig.savefig(out_path)
+    plt.close(fig)
+
+
+def pipeline_vertical(out_path: Path, c: dict) -> None:
+    """The pipeline stacked vertically, for a narrow poster column.
+
+    WHY A SECOND LAYOUT RATHER THAN SCALING THE FIRST. pipeline_figure is 14 in
+    wide with 9.5 pt body text. Printed into a 215 mm poster column that body text
+    lands at about 5.7 pt, and a poster is read from 1-2 m, where 20 pt is the
+    floor. Reaching 20 pt by scaling would need the figure 750 mm wide - the whole
+    sheet. Stacking the stages instead trades width for height, which a column has.
+
+    The feedback loop that made the horizontal version worth drawing is kept: the
+    optimisation track still leaves after Affinity carrying ALL 24 parents, and
+    still re-enters at Docking rather than skipping to the leads.
+    """
+    plt = _style()
+    fig, ax = plt.subplots(figsize=(7.2, 13.2))
+    ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.axis("off")
+
+    stages = [
+        ("Generative model", "transfer learning + RL", f"{c['sampled']:,}", C_GEN),
+        ("Property window", "logP, MW, TPSA, novelty", f"{c['survivors']:,}", C_GEN),
+        ("ADMET window", "DILI, permeability", f"{c['admet_window']}", C_ADMET),
+        ("Docking + PLIP",
+         f"{c['docked']} ligands \u2192 {c['poses']:,} poses\nMIDAS + \u03b21-Asn224",
+         f"{c['binding_mode']}", C_STRUCT),
+        ("Affinity", "\u2264 PLN-1474 (\u22126.97)", f"{c['affinity']}", C_STRUCT),
+        ("Toxicity gate", "SR-MMP, NR-AhR, DILI", f"{c['direct']}", C_ADMET),
+        ("Direct leads", "", f"{c['direct']}", C_LEAD),
+    ]
+    # The main column is inset from the right so the optimisation branch has a
+    # lane of its own; overlaying the two would make the loop read as a cycle.
+    x, w = 0.015, 0.615
+    h, gap = 0.095, 0.0295          # 8h + 7gap = 0.967, i.e. eight slots
+    top = 0.967
+    ys = [top - i * (h + gap) - h for i in range(len(stages))]
+    for (t, b, n, col), y in zip(stages, ys):
+        _box(ax, x, y, w, h, t, b, n, col, fs=12.5)
+    for i in range(len(stages) - 1):
+        _arrow(ax, x + w / 2, ys[i], x + w / 2, ys[i + 1] + h, lw=2.0)
+
+    bx, bw = 0.675, 0.31
+    branch = [
+        ("Parents", "structure + affinity", f"{c['parents']}", C_STRUCT),
+        ("Analogues", "mol2mol", f"{c['analogues']:,}", C_GEN),
+        ("Selection", "toxicity improved", f"{c['selected']}", C_ADMET),
+        ("Optimised leads", "", f"{c['optimised']}", C_LEAD),
+    ]
+    # Aligned to the Affinity stage it leaves from, so the two tracks read as
+    # parallel rather than sequential.
+    by = [ys[4] - i * (h + gap) for i in range(len(branch))]
+    for (t, b, n, col), y in zip(branch, by):
+        _box(ax, bx, y, bw, h, t, b, n, col, fs=12.5)
+    for i in range(len(branch) - 1):
+        _arrow(ax, bx + bw / 2, by[i], bx + bw / 2, by[i + 1] + h, lw=2.0)
+
+    _arrow(ax, x + w, ys[4] + h / 2, bx, by[0] + h / 2, lw=2.0)
+    label_bg = dict(facecolor="white", edgecolor="none", pad=1.2)
+    ax.text((x + w + bx) / 2, ys[4] + h / 2 + 0.020, "all 24", fontsize=11,
+            style="italic", color="#8a2f2f", ha="center", zorder=5,
+            bbox=label_bg)
+
+    # Selection -> Docking, routed up the gutter at gx. Drawn as plain segments
+    # plus one arrowhead because _elbow routes through a horizontal mid-line,
+    # which here would cross both lanes' boxes.
+    gx = (x + w + bx) / 2
+    loop = "#2f4f8a"
+    ax.plot([bx, gx], [by[2] + h / 2] * 2, color=loop, lw=2.0, zorder=1)
+    ax.plot([gx, gx], [by[2] + h / 2, ys[3] + h / 2], color=loop, lw=2.0,
+            zorder=1)
+    _arrow(ax, gx, ys[3] + h / 2, x + w, ys[3] + h / 2, lw=2.0)
+    ax.text(gx - 0.014, (by[2] + ys[3]) / 2 + h / 2, "re-dock,\nre-verify",
+            fontsize=10.5, style="italic", color=loop, ha="right", va="center",
+            zorder=5, bbox=label_bg)
+
+    from matplotlib.patches import Patch
+    ax.legend(handles=[
+        Patch(facecolor=C_GEN, edgecolor=C_EDGE, label="Generation"),
+        Patch(facecolor=C_ADMET, edgecolor=C_EDGE, label="Predicted properties"),
+        Patch(facecolor=C_STRUCT, edgecolor=C_EDGE, label="Structure-based"),
+        Patch(facecolor=C_LEAD, edgecolor=C_EDGE, label="Leads"),
+    ], loc="upper left", bbox_to_anchor=(bx - 0.01, ys[0] + h), ncol=1,
+        frameon=True, fontsize=11.5, borderpad=0.7, labelspacing=0.75,
+        handlelength=1.5)
 
     fig.savefig(out_path)
     plt.close(fig)
@@ -547,6 +637,192 @@ def pharmacophore_figure(out_path: Path) -> None:
     plt.close(fig)
 
 
+# The five seeds docked in docking/v4/seed_test/. Hard-coded rather than
+# re-parsed because the poster figure must not silently change if that directory
+# is cleaned; results/v4_seed_reproducibility.md is the record these come from.
+SEED_RUNS = {
+    "opt_10773": (-7.885, -7.888, -7.851, -7.854, -7.827),
+    "opt_11266": (-7.731, -7.690, -7.775, -7.734, -7.710),
+    "opt_10928": (-7.449, -7.095, -7.347, -7.344, -7.476),
+    "gen_11276": (-7.187, -7.157, -7.182, -7.172, -7.181),
+    "PLN-1474":  (-7.024, -7.128, -6.907, -7.123, -6.990),
+}
+
+
+def seed_figure(out_path: Path, runs: dict = None) -> dict:
+    """Five seeds per compound: is the ranking the search, or the scoring function?
+
+    THIS PANEL EXISTS TO SIT NEXT TO THE HERO COMPARISON. The gap to PLN-1474 is
+    0.83 kcal/mol and Vina's error against experiment is 1.5-2.0, so a reader who
+    sees only the comparison has a fair objection and no answer. Co-locating the
+    two turns the objection into the panel's subject: the gap is ~12x the engine's
+    own seed-to-seed SD, so the ORDER is reproducible even though the absolute
+    affinity is not resolved. The caption must not claim more than that.
+    """
+    import statistics
+    plt = _style()
+    runs = SEED_RUNS if runs is None else runs
+    names = list(runs)
+    fig, (ax, ax2) = plt.subplots(
+        1, 2, figsize=(9.2, 3.9), gridspec_kw={"width_ratios": [1.65, 1.0]})
+
+    ys = range(len(names))
+    for y, name in zip(ys, names):
+        vals = runs[name]
+        mean = statistics.mean(vals)
+        is_ref = name == "PLN-1474"
+        colour = "#1f4e79" if is_ref else ("#c0392b" if y < 2 else "#7f8c8d")
+        ax.scatter(vals, [y] * len(vals), s=34, color=colour, zorder=3,
+                   edgecolor="white", linewidth=0.7)
+        ax.plot([mean, mean], [y - 0.26, y + 0.26], color=colour, lw=2.4,
+                zorder=4)
+        ax.text(min(vals) - 0.025, y, f"SD {statistics.stdev(vals):.3f}",
+                fontsize=8, color=colour, ha="right", va="center")
+    ax.axvline(statistics.mean(runs["PLN-1474"]), color="#1f4e79", ls="--",
+               lw=1.3, zorder=1)
+    ax.set_yticks(list(ys))
+    ax.set_yticklabels(names, fontsize=9.5)
+    for i, tick in enumerate(ax.get_yticklabels()):
+        if i < len(HERO):
+            tick.set_fontweight("bold")
+    ax.invert_yaxis()
+    lo = min(min(v) for v in runs.values())
+    ax.set_xlim(lo - 0.33, None)
+    ax.set_xlabel("Uni-Dock score (kcal/mol), 5 seeds")
+    ax.set_title("(a) Seed-to-seed spread", fontsize=10.5)
+
+    # The ratio, stated as a ratio: a reader comparing 0.83 against "1.5-2.0" has
+    # to be told which quantity each bounds, or the two numbers look contradictory.
+    ref = statistics.mean(runs["PLN-1474"])
+    pooled = {}
+    for name in names[:-1]:
+        sd = ((statistics.stdev(runs[name]) ** 2
+               + statistics.stdev(runs["PLN-1474"]) ** 2) / 2) ** 0.5
+        pooled[name] = abs(statistics.mean(runs[name]) - ref) / sd
+    order = names[:-1]
+    bars = ax2.barh(range(len(order)), [pooled[n] for n in order],
+                    color=["#c0392b", "#c0392b", "#aab7b8", "#aab7b8"],
+                    edgecolor=C_EDGE, linewidth=1.0)
+    for b, n in zip(bars, order):
+        ax2.text(pooled[n] + 0.25, b.get_y() + b.get_height() / 2,
+                 f"{pooled[n]:.1f}\u00d7", va="center", fontsize=9.5,
+                 fontweight="bold")
+    ax2.axvline(1.0, color="#555", ls=":", lw=1.2)
+    ax2.set_yticks(range(len(order)))
+    ax2.set_yticklabels(order, fontsize=9)
+    ax2.invert_yaxis()
+    ax2.set_xlim(0, max(pooled.values()) * 1.28)
+    ax2.set_xlabel("|gap to PLN-1474| / pooled seed SD")
+    ax2.set_title("(b) Gap vs the engine's own noise", fontsize=10.5)
+
+    fig.tight_layout()
+    fig.savefig(out_path)
+    plt.close(fig)
+    sds = [statistics.stdev(v) for v in runs.values()]
+    return {"mean_sd": statistics.mean(sds), "max_sd": max(sds),
+            "ratios": pooled}
+
+
+HERO = ("opt_10773", "opt_11266")
+
+# Sourced from results/v4_TL-B/retro/README.md and results/v4_dili_mechanism.md.
+# The reference is unsolved too, which is why the unsolved entry is not marked
+# as a failure: it bounds the retrosynthesis model, not the molecule.
+QUALITATIVE = {
+    "opt_10773": [("AiZynthFinder: unsolved (so is PLN-1474)", False),
+                  ("\u03b1-disubstituted, as both clinical compounds", True)],
+    "opt_11266": [("AiZynthFinder: 2 routes to stock \u2014 only lead", True),
+                  ("\u03b1-disubstituted, as both clinical compounds", True)],
+}
+
+
+def hero_figure(out_path: Path, rows: list[dict], thresholds: dict) -> None:
+    """TWO heroes, because the poster makes two claims and no one molecule carries both.
+
+    opt_10773 is the affinity-and-novelty claim: best score, non-RGD, best SA.
+    But its predicted DILI is 0.55 against the reference's 0.46 - WORSE - and the
+    poster's second headline is that DILI is the dominant constraint. A single-hero
+    layout puts that contradiction in the reader's first three seconds.
+
+    opt_11266 carries the DILI claim instead: 0.069, a sixth of the reference, the
+    only lead whose retrosynthesis solved, and the same alpha-substitution grade as
+    both clinical compounds - while still scoring above the reference. Splitting the
+    hero is not hedging; it is what the data supports, and it makes the two columns
+    of the poster argue for different things instead of the same thing twice.
+    """
+    plt = _style()
+    from rdkit import Chem, RDLogger
+    from rdkit.Chem import rdDepictor
+    from rdkit.Chem.Draw import rdMolDraw2D
+    RDLogger.DisableLog("rdApp.*")
+    import io
+    from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+    from PIL import Image
+
+    by = {r["label"]: r for r in rows}
+    ref = by["PLN-1474"]
+    picked = [by[h] for h in HERO]
+
+    fig = plt.figure(figsize=(13.2, 5.0))
+    gs = fig.add_gridspec(2, 2, height_ratios=[1.0, 1.02], hspace=0.0,
+                          wspace=0.06)
+
+    claims = ("strongest binder, novel non-RGD chemotype",
+              "clears the DILI bottleneck")
+    for col, (row, claim) in enumerate(zip(picked, claims)):
+        ax = fig.add_subplot(gs[0, col])
+        ax.axis("off")
+        mol = Chem.MolFromSmiles(row["smiles"])
+        rdDepictor.Compute2DCoords(mol)
+        d = rdMolDraw2D.MolDraw2DCairo(760, 330)
+        d.drawOptions().clearBackground = False
+        rdMolDraw2D.PrepareAndDrawMolecule(d, mol)
+        d.FinishDrawing()
+        img = Image.open(io.BytesIO(d.GetDrawingText()))
+        ax.add_artist(AnnotationBbox(OffsetImage(img, zoom=0.38), (0.5, 0.38),
+                                     frameon=False, box_alignment=(0.5, 0.5)))
+        ax.text(0.5, 0.99, row["label"], fontsize=15, fontweight="bold",
+                ha="center", va="top", color="#c0392b")
+        ax.text(0.5, 0.90, claim, fontsize=10, ha="center", va="top",
+                style="italic", color="#444")
+
+        axt = fig.add_subplot(gs[1, col])
+        axt.axis("off")
+        # Signed deltas against the reference, with the sign spelled out: on this
+        # poster "lower is better" holds for DILI/SA and "lower is better" also
+        # holds for affinity, which is exactly the confusion a bare delta invites.
+        fields = [
+            ("Affinity (kcal/mol)", row["aff"], ref["aff"], "lower"),
+            ("Predicted DILI", row["dili"], ref["dili"], "lower"),
+            ("HIA", row["hia"], ref["hia"], "higher"),
+            ("Caco-2 (log cm/s)", row["caco"], ref["caco"], "higher"),
+        ]
+        axt.text(0.015, 0.97, "vs PLN-1474", fontsize=10, fontweight="bold",
+                 va="top")
+        y = 0.80
+        for name, v, rv, better in fields:
+            good = (v < rv) if better == "lower" else (v > rv)
+            axt.text(0.015, y, name, fontsize=9.5, va="center")
+            axt.text(0.60, y, f"{v:.3f}", fontsize=9.5, va="center",
+                     ha="right", fontweight="bold")
+            axt.text(0.72, y, f"{rv:.3f}", fontsize=9.5, va="center",
+                     ha="right", color="#1f4e79")
+            axt.text(0.78, y, "\u25b2" if good else "\u25bc", fontsize=10,
+                     va="center", color="#1e8449" if good else "#c0392b")
+            y -= 0.175
+        axt.text(0.60, 0.95, "lead", fontsize=8.5, ha="right", color="#555")
+        axt.text(0.72, 0.95, "ref", fontsize=8.5, ha="right", color="#1f4e79")
+        axt.axhline(0.885, 0.01, 0.80, color="#bbb", lw=0.9)
+
+        axt.axhline(0.085, 0.01, 0.80, color="#bbb", lw=0.9)
+        for dy, (text, good) in enumerate(QUALITATIVE[row["label"]]):
+            axt.text(0.015, 0.02 - dy * 0.145, text, fontsize=9,
+                     va="center", color="#1e8449" if good else "#777")
+
+    fig.savefig(out_path)
+    plt.close(fig)
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--out-dir", type=Path, default=Path("figures/v4"))
@@ -566,6 +842,9 @@ def main(argv=None) -> int:
     pipeline_figure(args.out_dir / "fig1_pipeline.png", c)
     print(f"  fig1_pipeline.png   {c}")
 
+    pipeline_vertical(args.out_dir / "fig1v_pipeline_tall.png", c)
+    print("  fig1v_pipeline_tall.png  (narrow-column variant)")
+
     info = learning_figure(args.out_dir / "fig2_learning.png", args.tl_csv,
                            args.rl_csv)
     print(f"  fig2_learning.png   {info}")
@@ -579,6 +858,13 @@ def main(argv=None) -> int:
 
     pharmacophore_figure(args.out_dir / "fig5_pharmacophore.png")
     print("  fig5_pharmacophore.png")
+
+    hero_figure(args.out_dir / "fig6_hero.png", rows, th)
+    print(f"  fig6_hero.png       {list(HERO)}")
+
+    info = seed_figure(args.out_dir / "fig7_seeds.png")
+    print(f"  fig7_seeds.png      mean SD {info['mean_sd']:.3f},"
+          f" opt_10773 {info['ratios']['opt_10773']:.1f}x")
     return 0
 
 
