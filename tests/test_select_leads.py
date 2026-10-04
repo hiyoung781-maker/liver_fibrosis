@@ -216,7 +216,7 @@ class TestSelectLeads(unittest.TestCase):
     def test_permeability_is_a_hard_filter_with_a_margin(self):
         """§9.2 (as revised by §7.5) pre-registers "beats PLN-1474 on predicted
         permeability", and §9 was frozen before sampling - a lead that misses it is not
-        a lead. The margin is the resolvable floor: model MAE 0.26-0.28 against a median
+        a lead. The margin is the resolvable floor: model MAE 0.3115 against a median
         inter-laboratory spread of 0.57 log on the same compound."""
         self.assertEqual(PERMEABILITY_FLOOR, 0.5)
         self.assertEqual(PERMEABILITY_ENDPOINT, "Caco2_Wang")

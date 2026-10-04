@@ -76,7 +76,7 @@ computed and reported, since it is the pre-registered number.
 THE PERMEABILITY FILTER IS PARTLY CIRCULAR AND THAT HAS TO BE SAID. Measured
 on this project's own library, predicted Caco-2 correlates with TPSA at
 r = -0.571, and TPSA is an axis the RL objective optimises directly. The
-0.5 log margin exists because the best Caco-2 models reach MAE 0.26-0.28 log
+0.5 log margin exists because ADMET-AI's Caco-2 model reaches MAE 0.3115 log
 units while the same compound's published values differ between laboratories
 by a median of 0.57, so a smaller margin would not clear measurement noise.
 Neither fact is a reason to drop a pre-registered filter; both are reasons
@@ -121,8 +121,25 @@ STAGES = ("geometry", "affinity", "interaction", "selectivity", "toxicity")
 CACO2_MODES = ("off", "better", "margin")
 
 
-def stages(caco2_mode: str = "off") -> tuple:
-    return STAGES + (("caco2",) if caco2_mode != "off" else ())
+def stages(caco2_mode: str = "off",
+           selectivity_unevaluable: bool = False) -> tuple:
+    """The stages actually applied.
+
+    `selectivity_unevaluable` drops the selectivity stage. That is §10.4 as
+    originally pre-registered -- when the calibration gate fails, criterion 7
+    is recorded UNEVALUABLE and "실패로 처리하지도 성공으로 주장하지도 않는다".
+    The 2026-09-30 amendment applied the stage unconditionally instead, which
+    was defensible while alphaVbeta6 was believed to be a validated axis. It no
+    longer is: BOTH alphaVbeta6 structures failed §10.3 (9CZD 5.51 A, 9CZ7
+    3.07 A) and alphaIIbbeta3's calibration inverted on 2 arms x 3 metrics.
+
+    Dropping the stage is NOT passing it. selectivity_pass stays None, the row
+    carries selectivity_excluded, and the summary reports both.
+    """
+    out = STAGES
+    if selectivity_unevaluable:
+        out = tuple(x for x in out if x != "selectivity")
+    return out + (("caco2",) if caco2_mode != "off" else ())
 
 # §9.2: the three endpoints ADMET-AI predicts best, equally weighted.
 TOXICITY_ENDPOINTS = ("SR-MMP", "NR-AhR", "DILI")
@@ -167,7 +184,9 @@ def _read(path: str) -> list:
 
 def lead_rows(funnel_csv: str, admet_csv: str, affinity_cutoff: float,
               reference: str = REFERENCE, selectivity: dict | None = None,
-              caco2_mode: str = "off") -> list:
+              caco2_mode: str = "off",
+              toxicity_thresholds: dict | None = None,
+              selectivity_unevaluable: bool = False) -> list:
     """One row per geometry-passing ligand with all five stage flags.
 
     `selectivity` is {"reference": float, "values": {label: float},
@@ -189,6 +208,10 @@ def lead_rows(funnel_csv: str, admet_csv: str, affinity_cutoff: float,
     ref_caco2 = _float(ref.get(CACO2_ENDPOINT))
     ref_tox = toxicity_composite(ref)
     ref_endpoints = {e: _float(ref.get(e)) for e in TOXICITY_ENDPOINTS}
+    if toxicity_thresholds:
+        # The reference's own values are still read, because ref_tox and
+        # ref_caco2 below are computed from them and the report prints them.
+        ref_endpoints = dict(toxicity_thresholds)
     if ref_caco2 is None or ref_tox is None or any(
             v is None for v in ref_endpoints.values()):
         raise ValueError(
@@ -203,7 +226,15 @@ def lead_rows(funnel_csv: str, admet_csv: str, affinity_cutoff: float,
 
     rows = []
     for entry in _read(funnel_csv):
-        if str(entry.get("geometry_pass")) != "True":
+        # The structure gate is whichever filter funnel.py applied:
+        # §8.5b's distances, or the PLIP interaction gate that replaces them
+        # under --no-geometry-gate. Keying on geometry_pass here would silently
+        # re-apply the removed filter and discard the ligands the replacement
+        # admitted -- 64 of 294 in TL-C. A funnel written before that option
+        # existed carries no structure_pass, and for it the geometry filter WAS
+        # the structure gate, so the fallback is the historically correct read.
+        gate = entry.get("structure_pass", entry.get("geometry_pass"))
+        if str(gate) != "True":
             continue
         label = entry["label"]
         prediction = admet.get(label)
@@ -233,7 +264,10 @@ def lead_rows(funnel_csv: str, admet_csv: str, affinity_cutoff: float,
 
         # Stage 4: selectivity, applied unconditionally (2026-09-30 amendment).
         sel_value = sel_values.get(label)
-        if sel_reference is None or sel_value is None:
+        if selectivity_unevaluable:
+            # Neither pass nor fail: None, so neither can be read off it.
+            sel_status, sel_pass = "unevaluable", None
+        elif sel_reference is None or sel_value is None:
             sel_status, sel_pass = "missing", False
         else:
             sel_status, sel_pass = "ok", sel_value > sel_reference
@@ -274,8 +308,10 @@ def lead_rows(funnel_csv: str, admet_csv: str, affinity_cutoff: float,
             row[endpoint] = _float(prediction.get(endpoint)) if prediction else None
         for endpoint in CONTEXT_ENDPOINTS:
             row[endpoint] = _float(prediction.get(endpoint)) if prediction else None
+        row["selectivity_excluded"] = selectivity_unevaluable
         row["all_stages"] = all(row[f"{stage}_pass"]
-                                for stage in stages(caco2_mode))
+                                for stage in stages(caco2_mode,
+                                                    selectivity_unevaluable))
         # What the pre-registered five-stage rule would have selected.
         row["all_stages_preregistered"] = (row["all_stages"]
                                            and row["caco2_preregistered_pass"])
@@ -287,7 +323,8 @@ def lead_rows(funnel_csv: str, admet_csv: str, affinity_cutoff: float,
     return rows
 
 
-def summarize(rows: list, caco2_mode: str = "off") -> dict:
+def summarize(rows: list, caco2_mode: str = "off",
+              selectivity_unevaluable: bool = False) -> dict:
     """The four-stage funnel, cumulative, in STAGES order.
 
     `leads_preregistered` reports what the five-stage rule with the Caco-2
@@ -295,10 +332,16 @@ def summarize(rows: list, caco2_mode: str = "off") -> dict:
     """
     out: dict = {}
     remaining = list(rows)
-    for position, stage in enumerate(stages(caco2_mode), start=1):
+    for position, stage in enumerate(stages(caco2_mode,
+                                            selectivity_unevaluable), start=1):
         remaining = [r for r in remaining if r.get(f"{stage}_pass")]
         out[f"stage_{position}_{stage}"] = len(remaining)
     out["leads"] = [r["label"] for r in remaining]
+    # Said out loud: a dropped stage and a passed stage give the same lead
+    # count and must not read the same.
+    out["selectivity_excluded"] = selectivity_unevaluable
+    out["selectivity_criterion"] = ("unevaluable (§10.4)"
+                                    if selectivity_unevaluable else "applied")
     out["admet_missing"] = [r["label"] for r in rows
                             if r.get("admet_status") == "missing"]
     out["selectivity_missing"] = [r["label"] for r in rows
@@ -355,6 +398,30 @@ def main(argv=None) -> int:
                          "that it beat PLN-1474; 'margin' is §9.1 as "
                          "written, better by more than 0.5 log. Off by "
                          "default (2026-09-30 amendment).")
+    p.add_argument("--selectivity-unevaluable", action="store_true",
+                    help="Record criterion 7 as UNEVALUABLE and drop the "
+                         "selectivity stage -- §10.4 as originally "
+                         "pre-registered. Use when no isoform axis passed its "
+                         "own validation: BOTH alphaVbeta6 structures failed "
+                         "§10.3 (9CZD 5.51 A, 9CZ7 3.07 A) and alphaIIbbeta3's "
+                         "calibration inverted on 2 arms x 3 metrics. NOT the "
+                         "same as passing: selectivity_pass becomes None and "
+                         "every artefact carries selectivity_excluded.")
+    p.add_argument("--selectivity-band", default=None,
+                    help="Require the selectivity margin over PLN-1474 to "
+                         "EXCEED this, not merely to be positive. `auto` "
+                         "derives it from the metric: DELTA_SD for delta, "
+                         "lead_cards.rank_noise_band for rank. A margin inside "
+                         "the band is not a measurement -- §7.7 measured the "
+                         "engine's own seed SD at 0.156 kcal/mol -- so passing "
+                         "a molecule on one states more than the data supports.")
+    p.add_argument("--toxicity-thresholds", type=Path,
+                    help="JSON {endpoint: value} replacing the thresholds "
+                         "taken from --reference's own predictions. "
+                         "approved_drug_gate.py writes these: percentiles of "
+                         "the approved carboxylic-acid drug population, so the "
+                         "stage has a stated specificity instead of sitting "
+                         "wherever one Phase 1 compound happens to fall.")
     p.add_argument("--reference", default=REFERENCE)
     p.add_argument("--label", default="")
     p.add_argument("--out-csv", type=Path)
@@ -407,9 +474,44 @@ def main(argv=None) -> int:
             "pose in results/v2_panel_geometry.csv. Use it unless the record "
             "says why not.\n")
 
+    if args.selectivity_band and selectivity:
+        from tradeoff import selectivity_band as _band
+        if args.selectivity_band == "auto":
+            with open(args.funnel, newline="") as handle:
+                affinities = [_float(r.get("best_passing_affinity"))
+                              for r in csv.DictReader(handle)
+                              if str(r.get("structure_pass",
+                                           r.get("geometry_pass"))) == "True"]
+            band = _band(args.selectivity_metric, affinities)
+        else:
+            band = float(args.selectivity_band)
+        # Raising the reference by the band is the whole implementation: the
+        # stage already asks `> reference`, and a band-wide margin is what the
+        # measurement can actually resolve.
+        selectivity["reference"] += band
+        print(f"  선택성 잡음 밴드: {band:.4f} ({args.selectivity_metric}) — "
+              f"기준을 {selectivity['reference'] - band:+.4f} 에서 "
+              f"{selectivity['reference']:+.4f} 로 올림")
+
+    override = None
+    if args.toxicity_thresholds:
+        data = json.loads(args.toxicity_thresholds.read_text())
+        override = data.get("thresholds", data)
+        missing = [e for e in TOXICITY_ENDPOINTS if e not in override]
+        if missing:
+            sys.stderr.write(
+                f"{args.toxicity_thresholds} has no threshold for "
+                f"{', '.join(missing)}; a stage applied with a partial rule "
+                "would pass molecules on endpoints it never checked.\n")
+            return 2
+        override = {e: float(override[e]) for e in TOXICITY_ENDPOINTS}
+        print("  독성 임계값 override: "
+              + ", ".join(f"{e} {override[e]:.4f}" for e in TOXICITY_ENDPOINTS))
+
     rows = lead_rows(args.funnel, args.admet, args.affinity_cutoff,
-                     args.reference, selectivity, args.caco2)
-    summary = summarize(rows, args.caco2)
+                     args.reference, selectivity, args.caco2, override,
+                     args.selectivity_unevaluable)
+    summary = summarize(rows, args.caco2, args.selectivity_unevaluable)
 
     print(f"\n=== {args.label or args.funnel} ===")
     print(f"  affinity 컷오프: {args.affinity_cutoff:+.3f}"
@@ -417,7 +519,8 @@ def main(argv=None) -> int:
              else f"  ← 사전등록 값 {PLN1474_CUTOFF:+.3f} 아님"))
     if args.selectivity:
         print(f"  선택성 지표: {args.selectivity_metric}")
-    for position, stage in enumerate(stages(args.caco2), start=1):
+    for position, stage in enumerate(
+            stages(args.caco2, args.selectivity_unevaluable), start=1):
         print(f"  {position} {stage:<12} {summary[f'stage_{position}_{stage}']}")
     print(f"  (사전등록 독성 규칙: 동등평균 < 기준 통과 "
           f"{summary['toxicity_mean_pass']})")
@@ -432,7 +535,16 @@ def main(argv=None) -> int:
         print("  경고: §8.2 상호작용 게이트가 적용되지 않았다 — funnel에 "
               "plip_gate_pass 컬럼이 없다. cpd25_gate.py로 게이트를 정하고 "
               "funnel.py --interaction-gate로 다시 만들어야 한다.")
-    if not summary["selectivity_calibration_ran"]:
+    if summary.get("selectivity_excluded"):
+        # These two warnings are about having FILTERED on an unvalidated axis.
+        # Neither applies when the stage was dropped, and printing them here
+        # would say the opposite of what happened.
+        print("  선택성: **평가 불가 (§10.4)** — 단계를 적용하지 않았다. "
+              "통과로도 실패로도 기록하지 않으며, 판정 기준 7번은 "
+              "unevaluable이다. 근거: αvβ6 두 구조 모두 §10.3 미통과"
+              "(9CZD 5.51 Å, 9CZ7 3.07 Å), αIIbβ3은 §10.4 보정이 "
+              "2 arm × 3 지표 전부 역전.")
+    elif not summary["selectivity_calibration_ran"]:
         print("  경고: §10.4 보정 게이트가 실행되지 않았다 — 대조군이 "
               "아이소폼에 도킹되지 않았다. 아무것도 검증하지 않은 축으로 "
               "3단계를 자른 것이므로, 참조를 도킹해 다시 실행해야 한다.")

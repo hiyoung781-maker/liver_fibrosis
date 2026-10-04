@@ -13,7 +13,7 @@ STAGE 2 - HARD FILTER on predicted permeability, against the same compound. Sect
 9.2 (as revised by 7.5) pre-registers "beats PLN-1474 on predicted permeability" as a
 success criterion, and section 9 was frozen before sampling - so a lead that misses it
 is not a lead. The margin required is 0.5 log units, the figure section 7.5 established
-as the resolvable floor: the best Caco-2 models reach MAE 0.26-0.28 while the same
+as the resolvable floor: ADMET-AI's Caco-2 model reaches MAE 0.3115 while the same
 compound's published values differ between laboratories by a median of 0.57 log, so a
 smaller gap is not a difference.
 
@@ -102,7 +102,7 @@ RDLogger.DisableLog("rdApp.*")
 PANEL_PREFIX = "PANEL_"
 REFERENCE = "PLN-1474"
 
-# log units of Caco-2. Section 7.5's resolvable floor: model MAE 0.26-0.28 against a
+# log units of Caco-2. Section 7.5's resolvable floor: model MAE 0.3115 against a
 # median inter-laboratory spread of 0.57 log on the same compound.
 PERMEABILITY_FLOOR = 0.5
 PERMEABILITY_ENDPOINT = "Caco2_Wang"
@@ -330,7 +330,7 @@ def _report(result: dict, n_leads: int) -> str:
         "",
         "Affinity and permeability are HARD FILTERS: the first is what docking measures",
         "directly, both sides from one engine and box; the second is pre-registered in",
-        "section 9.2, with a 0.5 log margin because model error (MAE 0.26-0.28) is the",
+        "section 9.2, with a 0.5 log margin; model error (MAE 0.3115) makes that",
         "size of inter-laboratory spread on the same compound (median 0.57 log).",
         "",
         "Extending the filter to every toxicity endpoint was measured and rejected: it",

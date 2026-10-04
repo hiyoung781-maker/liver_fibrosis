@@ -7,9 +7,10 @@ selects from is the 1,587 ligands with at least one pose satisfying both geometr
 criteria - a narrower and more meaningful population.
 
 ADMET is a SCREEN, not a gate (section 7.5 removed it from section 9's criteria). The
-reasons, measured: the best Caco-2 models reach MAE 0.26-0.28 log units while the same
-compound's published Caco-2 values differ between laboratories by a median of 0.57 log
-units, so model error and assay disagreement are the same size. And a Caco-2
+reasons, measured: ADMET-AI's own Caco-2 model reaches MAE 0.3115 log units
+(bundled resources/data/admet.csv, verified 2026-10-04 - the "0.26-0.28" this file
+used to quote was MapLight's leaderboard score, not this model's), which is the
+same size as the differences being judged. And a Caco-2
 prediction correlates with TPSA at r = -0.571 across our library - TPSA being an axis
 we put into the RL objective ourselves, which is why a permeability comparison cannot
 carry a non-circular claim.
@@ -65,19 +66,53 @@ def passing_labels(geometry_csv: str) -> list[str]:
     return passing
 
 
+def structure_pass_labels(funnel_csv: str) -> list[str]:
+    """Labels whose `structure_pass` is true in a funnel.py --out-csv.
+
+    The geometry filter is not the only possible structure gate: funnel.py
+    --no-geometry-gate replaces it with PLIP's interaction columns applied to
+    every pose, and the surviving set is then not derivable from geometry.csv's
+    `passes` column at all. Reading the funnel's own output keeps the gate
+    defined in exactly one place instead of reimplementing it here, where it
+    could drift.
+    """
+    labels: list[str] = []
+    seen: set[str] = set()
+    with open(funnel_csv, newline="") as handle:
+        reader = csv.DictReader(handle)
+        if "structure_pass" not in (reader.fieldnames or []):
+            raise KeyError(
+                f"{funnel_csv}: no 'structure_pass' column (found "
+                f"{reader.fieldnames}). That funnel predates --no-geometry-gate; "
+                "re-run funnel.py to get it.")
+        for row in reader:
+            label = row["label"]
+            if label in seen or label in EXCLUDE_LABELS:
+                continue
+            if row["structure_pass"] == "True":
+                seen.add(label)
+                labels.append(label)
+    return labels
+
+
 def write_admet_input(out_csv: str, geometry_csv: str,
                       survivors_smi: str = "data/survivors.smi",
-                      panel_smi: str = "data/benchmark_panel.smi") -> dict:
-    """Write `smiles,label` for the geometry survivors plus the benchmark panel.
+                      panel_smi: str = "data/benchmark_panel.smi",
+                      labels: set | None = None) -> dict:
+    """Write `smiles,label` for the surviving set plus the benchmark panel.
 
     The panel rides along in the same file so both are predicted by the same tool in
     the same run. Section 7.5 made the permeability comparison prediction-to-prediction
     rather than prediction-against-cpd-25's-measured-liabilities; that only holds if
     both sides go through one model.
+
+    `labels` names the surviving set explicitly, for a structure gate that is
+    not the geometry filter. When it is None the geometry filter is read from
+    `geometry_csv`, which is what every v2 run did.
     """
     from novelty import load_smi
 
-    labels = set(passing_labels(geometry_csv))
+    labels = set(passing_labels(geometry_csv)) if labels is None else set(labels)
     by_label = {label: smiles for smiles, label in load_smi(survivors_smi)}
 
     missing = sorted(labels - set(by_label))
@@ -130,9 +165,9 @@ def summarise(preds_csv: str, out_txt: str | None = None) -> str:
 
     out = [f"ADMET on the section 8.5b survivors: {len(gen)} molecules, "
            f"{len(panel)} panel compounds",
-           "A SCREEN, NOT A GATE (section 7.5). Caco-2 model error (MAE 0.26-0.28 log)",
-           "is the size of inter-laboratory disagreement on the same compound (median",
-           "0.57 log), so a gap below ~0.5 log is not resolvable.", ""]
+           "A SCREEN, NOT A GATE (section 7.5). ADMET-AI's Caco-2 MAE is 0.3115 log",
+           "(bundled admet.csv, verified 2026-10-04), so the 0.5 log margin is 1.6x",
+           "model error - the direction holds, the headroom is thin.", ""]
 
     def column(key, subset):
         return np.array([float(r[key]) for r in subset if r.get(key) not in (None, "")])
@@ -191,8 +226,20 @@ def main(argv: list[str] | None = None) -> int:
 
     build = sub.add_parser("build", help="write the admet_predict input CSV")
     build.add_argument("--geometry", default="results/geometry.csv")
+    build.add_argument("--funnel",
+                       help="funnel.py --out-csv, used INSTEAD of --geometry's "
+                            "`passes` column: the surviving set is read from "
+                            "its `structure_pass`, so a run with "
+                            "--no-geometry-gate selects the set its own gate "
+                            "produced rather than the geometry filter's.")
     build.add_argument("--survivors", default="data/survivors.smi")
     build.add_argument("--panel", default="data/benchmark_panel.smi")
+    build.add_argument("--already-predicted",
+                       help="An existing admet_predict output. Labels already "
+                            "in it are left out, so a re-run predicts only "
+                            "what is new. ADMET-AI is deterministic, so "
+                            "re-predicting a molecule would cost time and "
+                            "change nothing.")
     build.add_argument("--out", required=True)
 
     report = sub.add_parser("report", help="summarise admet_predict output")
@@ -202,9 +249,21 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "build":
+        labels = None
+        if args.funnel:
+            labels = set(structure_pass_labels(args.funnel))
+        if args.already_predicted:
+            if labels is None:
+                labels = set(passing_labels(args.geometry))
+            with open(args.already_predicted, newline="") as handle:
+                done = {row["label"] for row in csv.DictReader(handle)}
+            before = len(labels)
+            labels -= done
+            print(f"  {before - len(labels)} of {before} already predicted in "
+                  f"{args.already_predicted}; {len(labels)} left")
         counts = write_admet_input(args.out, args.geometry, args.survivors,
-                                   args.panel)
-        print(f"{args.geometry} -> {args.out}")
+                                   args.panel, labels)
+        print(f"{args.funnel or args.geometry} -> {args.out}")
         for key in ("passing", "written", "panel"):
             print(f"  {key:24s} {counts[key]}")
         if counts["missing_from_survivors"]:
