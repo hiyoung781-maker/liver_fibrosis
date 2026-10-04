@@ -183,7 +183,7 @@ bexotegrast는 실제로 임상에서 실패했다. 게이트는 "임상 진입 
 | `fig7_seeds.png` | **C2 2.3** | 337 × 141 mm | 205 |
 | `fig4_dili.png` | C2 2.6 | 337 × 95 mm | 314 |
 | `fig3_leads.png` | C2 2.8 | 337 × 132 mm | 300 |
-| `fig8_lead_grid.png` | C2 또는 전폭 | 337 × 97 mm (432 dpi) / 767 × 219 mm (190 dpi) | 2×7, 13종 + 참조 |
+| `fig8_lead_grid.png` | C2 또는 전폭 | 337 × 84 mm (519 dpi) / 767 × 191 mm (228 dpi) | 2×7, 13종 + 참조 |
 | `fig3_leads_cards.png` | — | 구조 카드판, 예비 | — |
 | `fig5_pharmacophore.png` | C3 3.2 | 215 × 78 mm | 345 |
 | `fig1_pipeline.png` | — | 발표 슬라이드용 | — |

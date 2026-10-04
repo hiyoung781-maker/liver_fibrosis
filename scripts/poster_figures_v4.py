@@ -609,6 +609,33 @@ def landscape_figure(out_path: Path, rows: list[dict], thresholds: dict) -> None
 LEADS = ["opt_10773", "opt_11266", "opt_10928", "gen_11276"]
 
 
+# RDKit's bondLineWidth is in DEVICE PIXELS, so a larger canvas drawn at a fixed
+# width gives thinner lines, not sharper ones. Every drawer in this file sizes the
+# width from its canvas at the ratio scripts/individual_structures.py uses for the
+# standalone lead PNGs (8 px of line at a 1000 px canvas), so a structure carries
+# the same weight whether it is read from a panel here or from its own file.
+BOND_WIDTH_PER_PX = 0.008
+
+
+def _mol_image(smiles: str, width: int, height: int):
+    """PIL image of one molecule, bond width scaled to the canvas."""
+    from rdkit import Chem
+    from rdkit.Chem import rdDepictor
+    from rdkit.Chem.Draw import rdMolDraw2D
+    import io
+    from PIL import Image
+
+    mol = Chem.MolFromSmiles(smiles)
+    rdDepictor.Compute2DCoords(mol)
+    drawer = rdMolDraw2D.MolDraw2DCairo(width, height)
+    opts = drawer.drawOptions()
+    opts.clearBackground = False
+    opts.bondLineWidth = max(2, round(width * BOND_WIDTH_PER_PX))
+    rdMolDraw2D.PrepareAndDrawMolecule(drawer, mol)
+    drawer.FinishDrawing()
+    return Image.open(io.BytesIO(drawer.GetDrawingText()))
+
+
 def _lead_rows(root: Path = Path(".")) -> list[dict]:
     """The shortlisted leads with the numbers the card shows, read from the
     files that produced them. PLN-1474 comes last, as the reference row."""
@@ -667,14 +694,7 @@ def leads_figure(out_path: Path, rows: list[dict], thresholds: dict) -> None:
     fig, axes = plt.subplots(2, n, figsize=(3.05 * n, 5.6),
                              gridspec_kw={"height_ratios": [2.05, 1.0]})
     for col, row in enumerate(rows):
-        mol = Chem.MolFromSmiles(row["smiles"])
-        rdDepictor.Compute2DCoords(mol)
-        drawer = rdMolDraw2D.MolDraw2DCairo(540, 420)
-        opts = drawer.drawOptions()
-        opts.clearBackground = False
-        rdMolDraw2D.PrepareAndDrawMolecule(drawer, mol)
-        drawer.FinishDrawing()
-        img = Image.open(io.BytesIO(drawer.GetDrawingText()))
+        img = _mol_image(row["smiles"], 1080, 840)
 
         ax = axes[0][col]
         ax.imshow(img); ax.axis("off")
@@ -906,14 +926,8 @@ def hero_figure(out_path: Path, rows: list[dict], thresholds: dict) -> None:
     for col, (row, claim) in enumerate(zip(picked, claims)):
         ax = fig.add_subplot(gs[0, col])
         ax.axis("off")
-        mol = Chem.MolFromSmiles(row["smiles"])
-        rdDepictor.Compute2DCoords(mol)
-        d = rdMolDraw2D.MolDraw2DCairo(760, 330)
-        d.drawOptions().clearBackground = False
-        rdMolDraw2D.PrepareAndDrawMolecule(d, mol)
-        d.FinishDrawing()
-        img = Image.open(io.BytesIO(d.GetDrawingText()))
-        ax.add_artist(AnnotationBbox(OffsetImage(img, zoom=0.38), (0.5, 0.38),
+        img = _mol_image(row["smiles"], 1520, 660)
+        ax.add_artist(AnnotationBbox(OffsetImage(img, zoom=0.19), (0.5, 0.38),
                                      frameon=False, box_alignment=(0.5, 0.5)))
         ax.text(0.5, 0.99, row["label"], fontsize=15, fontweight="bold",
                 ha="center", va="top", color="#c0392b")
@@ -1001,19 +1015,17 @@ def grid_figure(out_path: Path, rows: list[dict], ncols: int = 7) -> None:
     import io
     from PIL import Image
 
+    # Cell aspect follows the MOLECULES, not the page. These are elongated - a
+    # carboxylate at one end, a basic head at the other - so a taller-than-wide
+    # cell spends its height on blank space above and below the structure. 3.3 x
+    # 2.75 matches the 1240x920 canvas each cell is drawn on.
     nrows = -(-len(rows) // ncols)
-    fig, axes = plt.subplots(nrows, ncols, figsize=(2.75 * ncols, 3.15 * nrows))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(3.3 * ncols, 2.75 * nrows))
     axes = axes.ravel()
 
     for ax, row in zip(axes, rows):
         ax.axis("off")
-        mol = Chem.MolFromSmiles(row["smiles"])
-        rdDepictor.Compute2DCoords(mol)
-        d = rdMolDraw2D.MolDraw2DCairo(620, 460)
-        d.drawOptions().clearBackground = False
-        rdMolDraw2D.PrepareAndDrawMolecule(d, mol)
-        d.FinishDrawing()
-        ax.imshow(Image.open(io.BytesIO(d.GetDrawingText())))
+        ax.imshow(_mol_image(row["smiles"], 1240, 920))
 
         hero = row["label"] in HERO
         colour = "#c0392b" if hero else ("#1f4e79" if row["ref"] else "#1a1a1a")
