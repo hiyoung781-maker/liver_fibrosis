@@ -957,6 +957,92 @@ def hero_figure(out_path: Path, rows: list[dict], thresholds: dict) -> None:
     plt.close(fig)
 
 
+def _grid_rows(root: Path = Path(".")) -> list[dict]:
+    """The thirteen leads plus the reference, strongest binder first.
+
+    PLN-1474 fills the fourteenth cell of a 2x7 grid rather than leaving it
+    blank, and it belongs there on merit: every lead table in this campaign
+    carries the reference row, because a predicted affinity or DILI only means
+    something next to a compound whose clinical fate is known.
+    """
+    r = root / "results/v4_TL-B"
+    direct = {x["label"]: x for x in csv.DictReader(open(r / "selection.csv"))
+              if x["track"] == "direct_lead"}
+    opt = {x["label"]: x for x in csv.DictReader(open(r / "optimised_leads.csv"))}
+    panel = {x["label"]: x for x in
+             csv.DictReader(open(r / "admet_with_panel.csv"))}
+
+    rows = []
+    for label in ALL_LEADS:
+        x = opt.get(label) or direct[label]
+        rows.append(dict(label=label, smiles=x["smiles"], aff=_f(x["affinity"]),
+                         dili=_f(x["DILI"]), ref=False))
+    rows.sort(key=lambda d: d["aff"])
+    x = panel["PANEL_PLN-1474"]
+    rows.append(dict(label="PLN-1474", smiles=x["smiles"], aff=-6.973,
+                     dili=_f(x["DILI"]), ref=True))
+    return rows
+
+
+def grid_figure(out_path: Path, rows: list[dict], ncols: int = 7) -> None:
+    """All thirteen lead structures in one panel, reference last.
+
+    Drawn at a fixed cell size rather than by scaling a shared canvas: a grid
+    sized to its page shrinks every structure when the page is narrow, and a
+    structure too small to read is worse than no structure. 2x7 at this cell size
+    prints about 48 mm wide per cell in a poster column, which carries these
+    molecules - none has more than five rings.
+    """
+    plt = _style()
+    from rdkit import Chem, RDLogger
+    from rdkit.Chem import rdDepictor
+    from rdkit.Chem.Draw import rdMolDraw2D
+    RDLogger.DisableLog("rdApp.*")
+    import io
+    from PIL import Image
+
+    nrows = -(-len(rows) // ncols)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(2.75 * ncols, 3.15 * nrows))
+    axes = axes.ravel()
+
+    for ax, row in zip(axes, rows):
+        ax.axis("off")
+        mol = Chem.MolFromSmiles(row["smiles"])
+        rdDepictor.Compute2DCoords(mol)
+        d = rdMolDraw2D.MolDraw2DCairo(620, 460)
+        d.drawOptions().clearBackground = False
+        rdMolDraw2D.PrepareAndDrawMolecule(d, mol)
+        d.FinishDrawing()
+        ax.imshow(Image.open(io.BytesIO(d.GetDrawingText())))
+
+        hero = row["label"] in HERO
+        colour = "#c0392b" if hero else ("#1f4e79" if row["ref"] else "#1a1a1a")
+        name = row["label"] + ("  (reference)" if row["ref"] else "")
+        ax.set_title(name, fontsize=12 if hero else 11,
+                     fontweight="bold" if (hero or row["ref"]) else "normal",
+                     color=colour, pad=5)
+        ax.text(0.5, -0.04, f"{row['aff']:.3f} kcal/mol   DILI {row['dili']:.3f}",
+                transform=ax.transAxes, ha="center", va="top", fontsize=9.5,
+                color=colour)
+        # Every cell gets a frame, not only the highlighted ones: a grid where
+        # some cells are boxed and some are not reads as misaligned, and the eye
+        # spends its first pass on the layout rather than the structures.
+        ax.axis("on")
+        ax.set_xticks([]); ax.set_yticks([])
+        marked = hero or row["ref"]
+        for side in ax.spines.values():
+            side.set_visible(True)
+            side.set_color(colour if marked else "#d8d8d8")
+            side.set_linewidth(2.2 if marked else 0.8)
+
+    for ax in axes[len(rows):]:
+        ax.axis("off")
+
+    fig.tight_layout(h_pad=2.4, w_pad=0.6)
+    fig.savefig(out_path)
+    plt.close(fig)
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--out-dir", type=Path, default=Path("figures/v4"))
@@ -993,6 +1079,10 @@ def main(argv=None) -> int:
     all_rows = _all_lead_rows()
     landscape_figure(args.out_dir / "fig3_leads.png", all_rows, th)
     print(f"  fig3_leads.png      landscape, {len(all_rows)} compounds")
+
+    grid = _grid_rows()
+    grid_figure(args.out_dir / "fig8_lead_grid.png", grid)
+    print(f"  fig8_lead_grid.png  2x7 grid, {len(grid)} structures")
 
     pharmacophore_figure(args.out_dir / "fig5_pharmacophore.png")
     print("  fig5_pharmacophore.png")
