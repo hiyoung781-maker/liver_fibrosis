@@ -472,6 +472,122 @@ def dili_figure(out_path: Path, admet_csv: Path, thresholds: dict,
 
 
 
+ALL_LEADS = [
+    "gen_03329", "gen_08990", "gen_11276",
+    "opt_10773", "opt_10240", "opt_11266", "opt_11230", "opt_11694",
+    "opt_10814", "opt_11023", "opt_10928", "opt_11537", "opt_11674",
+]
+
+
+def _all_lead_rows(root: Path = Path(".")) -> list[dict]:
+    """All thirteen leads plus the reference: affinity, DILI, Caco-2, charge."""
+    r = root / "results/v4_TL-B"
+    direct = {x["label"]: x for x in csv.DictReader(open(r / "selection.csv"))
+              if x["track"] == "direct_lead"}
+    opt = {x["label"]: x for x in csv.DictReader(open(r / "optimised_leads.csv"))}
+    panel = {x["label"]: x for x in
+             csv.DictReader(open(r / "admet_with_panel.csv"))}
+    out = []
+    for label in ALL_LEADS:
+        x = opt.get(label) or direct[label]
+        out.append(dict(label=label, aff=_f(x["affinity"]), dili=_f(x["DILI"]),
+                        caco=_f(x["caco2"]), track="opt" if label in opt else "gen"))
+    x = panel["PANEL_PLN-1474"]
+    out.append(dict(label="PLN-1474", aff=-6.973, dili=_f(x["DILI"]),
+                    caco=_f(x["Caco2_Wang"]), track="ref"))
+    return out
+
+
+def landscape_figure(out_path: Path, rows: list[dict], thresholds: dict) -> None:
+    """All thirteen leads on the two axes that actually separated them.
+
+    WHY THIS REPLACED A FOUR-CARD PANEL. The cards showed four structures chosen
+    by a shortlist rule, which made the rule look like the result. Affinity against
+    predicted DILI shows the whole population and lets the leads argue for
+    themselves: opt_10773 is alone at the left edge, opt_11266 alone at the bottom,
+    and no molecule is at both. That is why the campaign reports two leads rather
+    than one, and a card panel cannot show it.
+
+    THE PARETO FRONT IS DRAWN BECAUSE IT HAS THREE MEMBERS, NOT TWO. opt_10240
+    (-7.749, 0.189) is also non-dominated on these axes; it was set aside on
+    criteria this plot does not show - MW 524.6, the heaviest lead, and its pH 7.4
+    charge state. Labelling only the two reported leads would let the figure imply
+    the axes chose them, when one of the three was excluded by something else.
+    """
+    plt = _style()
+    fig, (ax, ax2) = plt.subplots(
+        1, 2, figsize=(13.4, 5.3), gridspec_kw={"width_ratios": [1.35, 1.0]})
+
+    th = thresholds["DILI"]
+    ax.axhline(th, color="#c0392b", ls="--", lw=1.6, zorder=1)
+    ax.text(-7.9, th + 0.012, f"DILI threshold {th:.3f}", fontsize=9,
+            color="#c0392b", va="bottom")
+
+    # Non-dominated set: minimise affinity and DILI together. Walk the leads in
+    # affinity order and keep each one that improves on the best DILI so far.
+    front, best = [], float("inf")
+    for row in sorted((r for r in rows if r["track"] != "ref"),
+                      key=lambda r: r["aff"]):
+        if row["dili"] < best:
+            front.append(row)
+            best = row["dili"]
+    ax.plot([r["aff"] for r in front], [r["dili"] for r in front],
+            color="#c0392b", lw=1.3, ls=":", zorder=2)
+    ax.annotate("Pareto front", (front[0]["aff"], front[0]["dili"]),
+                textcoords="offset points", xytext=(34, -26), ha="left",
+                fontsize=9, color="#c0392b", style="italic")
+
+    front_labels = {r["label"] for r in front}
+    for row in rows:
+        hero = row["label"] in HERO
+        ref = row["track"] == "ref"
+        colour = "#c0392b" if hero else ("#1f4e79" if ref else "#95a5a6")
+        on_front = row["label"] in front_labels
+        ax.scatter(row["aff"], row["dili"],
+                   s=190 if hero else (150 if ref else (110 if on_front else 70)),
+                   marker="D" if ref else "o", color=colour, zorder=4,
+                   edgecolor="white", linewidth=1.2)
+        if hero or ref or row["label"] in front_labels:
+            on_front_only = not (hero or ref)
+            offset = (-12, 0) if on_front_only else (0, 15 if not ref else -22)
+            ax.annotate(row["label"],
+                        (row["aff"], row["dili"]), textcoords="offset points",
+                        xytext=offset,
+                        ha="right" if on_front_only else "center",
+                        va="center" if on_front_only else "baseline",
+                        fontsize=9.5 if on_front_only else 10.5,
+                        fontweight="normal" if on_front_only else "bold",
+                        color="#7f8c8d" if on_front_only else colour)
+    ax.set_xlabel("Uni-Dock score (kcal/mol)   \u2190 stronger")
+    ax.set_ylabel("Predicted DILI   \u2193 safer")
+    ax.set_title(f"(a) {len(front)} leads are non-dominated; none is best on both",
+                 fontsize=11)
+    ax.invert_xaxis()
+
+    # The second panel answers the obvious objection to panel (a) - "you picked the
+    # two axes that make your point" - by ranking every lead on each axis separately.
+    order_a = sorted(rows, key=lambda r: r["aff"])
+    order_d = sorted(rows, key=lambda r: r["dili"])
+    for col, (order, title) in enumerate(((order_a, "by affinity"),
+                                          (order_d, "by DILI"))):
+        for rank, row in enumerate(order):
+            hero = row["label"] in HERO
+            ref = row["track"] == "ref"
+            colour = "#c0392b" if hero else ("#1f4e79" if ref else "#7f8c8d")
+            ax2.text(col, -rank, row["label"],
+                     fontsize=9.5 if (hero or ref) else 8.5,
+                     fontweight="bold" if (hero or ref) else "normal",
+                     color=colour, ha="center", va="center")
+        ax2.text(col, 1.2, title, fontsize=10.5, fontweight="bold", ha="center")
+    ax2.set_xlim(-0.55, 1.55); ax2.set_ylim(-len(rows) + 0.3, 2.0)
+    ax2.axis("off")
+    ax2.set_title("(b) The ranking swaps", fontsize=11)
+
+    fig.tight_layout()
+    fig.savefig(out_path)
+    plt.close(fig)
+
+
 LEADS = ["opt_10773", "opt_11266", "opt_10928", "gen_11276"]
 
 
@@ -853,8 +969,12 @@ def main(argv=None) -> int:
     print(f"  fig4_dili.png       conjunction {info['conjunction']} / {info['n']}")
 
     rows = _lead_rows()
-    leads_figure(args.out_dir / "fig3_leads.png", rows, th)
-    print(f"  fig3_leads.png      {[r['label'] for r in rows]}")
+    leads_figure(args.out_dir / "fig3_leads_cards.png", rows, th)
+    print(f"  fig3_leads_cards.png {[r['label'] for r in rows]}")
+
+    all_rows = _all_lead_rows()
+    landscape_figure(args.out_dir / "fig3_leads.png", all_rows, th)
+    print(f"  fig3_leads.png      landscape, {len(all_rows)} compounds")
 
     pharmacophore_figure(args.out_dir / "fig5_pharmacophore.png")
     print("  fig5_pharmacophore.png")
