@@ -1,0 +1,24 @@
+REMARK  from 8W30; A1AFA renamed LIG (5-char CCD code exceeds PDB resName field)
+HETATM    1  C4  LIG B 505       1.155 113.591  39.410  1.00 95.94           C
+HETATM    2  C5  LIG B 505       0.343 112.395  37.088  1.00108.59           C
+HETATM    3  C6  LIG B 505       0.505 114.333  38.454  1.00 99.72           C
+HETATM    4  C7  LIG B 505       1.578 114.244  40.652  1.00 94.52           C
+HETATM    5  N   LIG B 505       2.801 114.864  40.583  1.00 94.36           N
+HETATM    6  CA  LIG B 505       3.442 115.304  41.805  1.00 93.99           C
+HETATM    7  C   LIG B 505       3.769 116.787  41.823  1.00 87.85           C
+HETATM    8  O   LIG B 505       3.625 117.380  40.720  1.00 88.83           O
+HETATM    9  CB  LIG B 505       4.779 114.625  42.054  1.00 88.19           C
+HETATM   10  CG  LIG B 505       4.587 113.325  42.761  1.00 89.45           C
+HETATM   11  CD1 LIG B 505       4.657 113.255  44.132  1.00 90.87           C
+HETATM   12  CD2 LIG B 505       4.340 112.177  42.046  1.00 91.46           C
+HETATM   13  CE1 LIG B 505       4.481 112.053  44.778  1.00 93.45           C
+HETATM   14  CE2 LIG B 505       4.166 110.973  42.686  1.00 92.38           C
+HETATM   15  CZ  LIG B 505       4.236 110.909  44.056  1.00 91.53           C
+HETATM   16  OXT LIG B 505       4.142 117.229  42.944  1.00 97.31           O
+HETATM   17  C1  LIG B 505       1.403 112.251  39.224  1.00 94.14           C
+HETATM   18  C2  LIG B 505       0.995 111.655  38.052  1.00101.02           C
+HETATM   19  C3  LIG B 505       0.096 113.733  37.287  1.00102.73           C
+HETATM   20  O8  LIG B 505       0.858 114.192  41.637  1.00 98.24           O
+HETATM   21 CL10 LIG B 505       0.197 116.008  38.711  1.00113.17          CL
+HETATM   22 CL9  LIG B 505      -0.178 111.661  35.611  1.00102.79          CL
+END

@@ -1,0 +1,5 @@
+# Pure-python packages that publish no wheel, only an sdist. They build with
+# setuptools alone - no compiler - which matters because K-BDS ships gcc 4.8.5.
+# Kept out of requirements-pip.txt so that file can use --only-binary=:all:,
+# which turns a silent source-build fallback into a loud, named error.
+molvs>=0.1.1,<0.2

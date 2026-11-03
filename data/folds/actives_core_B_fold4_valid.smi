@@ -1,0 +1,41 @@
+# TL diagnostic fold 4/5, valid (38/193), scaffold-disjoint, seed 20260925.
+# For choosing num_epochs only. The production prior trains on the
+# full actives_core_B.smi with the epoch count these folds identify.
+Cc1ccc(Cl)c(C(=O)NC(CNC(=O)Cn2c(=O)[nH]c3nc(C)c(F)cc32)C(=O)O)c1F	CHEMBL5532604
+Cc1ccc(Cl)c(C(=O)NC(CNC(=O)Cn2c(=O)[nH]c3ncccc32)C(=O)O)c1F	CHEMBL5532204
+COc1ccc(Cl)c(C(=O)NC(CNC(=O)Cn2c(=O)[nH]c3ncccc32)C(=O)O)c1F	CHEMBL5532608
+COc1cc(F)c(C(=O)NC(CNC(=O)Cn2c(=O)[nH]c3ncccc32)C(=O)O)c(Cl)c1	CHEMBL5558354
+O=C(Cn1c(=O)[nH]c2ncccc21)NCC(NC(=O)c1c(Cl)cccc1Cl)C(=O)O	CHEMBL5542839
+O=C(Cn1c(=O)[nH]c2ncccc21)NCC(NC(=O)c1c(F)cccc1Cl)C(=O)O	CHEMBL5559299
+Cc1cc(C#N)cc(C)c1C(=O)NC(CNC(=O)Cn1c(=O)[nH]c2ncccc21)C(=O)O	CHEMBL5549945
+O=C(Cn1c(=O)[nH]c2ncccc21)NCC(NC(=O)c1ccccc1Cl)C(=O)O	CHEMBL5557670
+Cc1cnc2[nH]c(=O)n(CC(=O)NCC(NC(=O)c3c(Cl)ccc(C)c3F)C(=O)O)c2c1	CHEMBL5505902
+O=C(O)CC(NC(=O)CNC(=O)c1cncc(NC2=NCC(O)CN2)c1)c1cc(Br)cc(Br)c1	CHEMBL5914164
+O=C(O)CC(NC(=O)CNC(=O)c1cncc(NC2=NCC(O)CN2)c1)c1cc(Br)cc(C(F)(F)F)c1	CHEMBL5786200
+O=C(O)CC(NC(=O)CNC(=O)c1cncc(NC2=NCC(O)CN2)c1)c1cc(Cl)cc(C(F)(F)F)c1	CHEMBL5920684
+O=C(O)CC(NC(=O)CNC(=O)c1cncc(NC2=NCC(O)CN2)c1)c1cc(Cl)cc(Br)c1	CHEMBL5889173
+O=C(O)CC(NC(=O)CNC(=O)c1cncc(NC2=NCC(O)CN2)c1)c1cc(Cl)cc(Br)c1O	CHEMBL244434
+COC(=O)N1CC2(CC(C(=O)NCC(NS(=O)(=O)c3c(C)cc(C)cc3C)C(=O)O)=NO2)CC1CNc1ncc[nH]1	CHEMBL340309
+CCCCOC(=O)N1CC2(CC(C(=O)NCC(NS(=O)(=O)c3c(C)cc(C)cc3C)C(=O)O)=NO2)CC1CNc1ncc[nH]1	CHEMBL126983
+Cc1cc(C)c(S(=O)(=O)NC(CNC(=O)C2=NOC3(CNC(CNc4ncc[nH]4)C3)C2)C(=O)O)c(C)c1	CHEMBL126416
+N=C(N)NCCCC(=O)Nc1ccc(CC(NC(=O)C2CCCCN2S(=O)(=O)c2ccccc2)C(=O)O)cc1	CHEMBL3909977
+N=C(N)NCCCCC(=O)Nc1ccc(CC(NC(=O)C2CCCCN2S(=O)(=O)c2ccccc2)C(=O)O)cc1	CHEMBL3952235
+COC(=O)N1CC2(CC(C(=O)NCC(NS(=O)(=O)c3c(C)cc(C)cc3C)C(=O)O)=NO2)CC1CNc1nc2ccccc2[nH]1	CHEMBL435806
+CCCCOC(=O)N1CC2(CC(C(=O)NCC(NS(=O)(=O)c3c(C)cc(C)cc3C)C(=O)O)=NO2)CC1CNc1nc2ccccc2[nH]1	CHEMBL126071
+O=C(O)CC(CN1CCC(CCc2ccc3c(n2)NCCC3)C1)c1cccc(-n2cnnc2)c1	CHEMBL4246111
+Cc1nncn1-c1cccc(C(CC(=O)O)CN2CCC(CCc3ccc4c(n3)NCCC4)C2)c1	CHEMBL4237919
+O=C(O)CC(CN1CCC(CCc2ccc3c(n2)NCCC3)C1)c1cccc(C2CC2)c1	CHEMBL4242635
+O=C(NC(Cc1ccccc1)C(=O)O)c1ccc(Cl)cc1Cl	A1AFA
+N=C(N)Nc1cc(NC(=O)CCCCNC(=O)C23CC4CC(CC(C4)C2)C3)cc(C(=O)NCC(=O)NCC(NC(=O)C2CCCN2S(=O)(=O)c2ccccc2)C(=O)O)c1	CHEMBL4794201
+Cc1cc(C)c(S(=O)(=O)NC(CNC(=O)C2=NOC3(C2)CC(CNc2ncc[nH]2)N(C(=O)OCc2cccnc2)C3)C(=O)O)c(C)c1	CHEMBL339751
+O=C(CCCCNC1=NCCN1)Nc1ccc(CC(NC(=O)C2CCCN2S(=O)(=O)c2ccccc2)C(=O)O)cc1	CHEMBL3923968
+Cc1nc(C)c(-c2cccc(C(CC(=O)O)CN3CCC(CCc4ccc5c(n4)NCCC5)C3)c2)[nH]1	CHEMBL4249629
+C#CCN(c1cnc(N(CC)CC)nc1NC(Cc1ccc(OC(=O)N2CCCC2)cc1)C(=O)O)S(=O)(=O)c1ccc(F)cc1	CHEMBL2381700
+N=C(N)NCCCCC(=O)Nc1ccc(CC(NC(=O)C2CCCN2S(=O)(=O)c2cccnc2)C(=O)O)cc1	CHEMBL3901536
+Cc1cc(C)c(S(=O)(=O)C(CNC(=O)C2=NOC3(CCC(C(=O)Nc4ncc[nH]4)CC3)C2)C(=O)O)c(C)c1	CHEMBL339476
+N=C(N)NCCCCC(=O)Nc1ccc(CC(NC(=O)C2CCN2S(=O)(=O)c2ccccc2)C(=O)O)cc1	CHEMBL3900911
+N=C(N)Nc1ccc(CC(=O)Nc2ccc(CC(NC(=O)C3CCCN3S(=O)(=O)c3ccccc3)C(=O)O)cc2)cc1	CHEMBL3962679
+O=C(CN1Cc2ccccc2NC1=O)NCC(NC(=O)c1ccccc1Cl)C(=O)O	CHEMBL5527950
+N=C(N)Nc1cccc(C(=O)Nc2ccc(CC(NS(=O)(=O)c3ccccc3)C(=O)O)cc2)c1	CHEMBL34413
+O=C(CCCNC1=NCCN1)Nc1ccc(CC(NC(=O)C2CCCN2S(=O)(=O)c2ccccc2)C(=O)O)cc1	CHEMBL3951678
+N=C(N)Nc1cc(NC(=O)CCCNC(=O)C23CC4CC(CC(C4)C2)C3)cc(C(=O)NCC(=O)NCC(NC(=O)C2CCCN2S(=O)(=O)c2ccccc2)C(=O)O)c1	CHEMBL4778229

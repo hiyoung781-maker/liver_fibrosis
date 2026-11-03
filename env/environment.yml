@@ -1,0 +1,28 @@
+# Conda half of the `reinvent` environment.
+#
+# Why rdkit is a conda package: the PyPI rdkit wheels are tagged manylinux_2_28 and
+# K-BDS runs CentOS 7.9 with glibc 2.17. The conda-forge builds declare
+# `__glibc >=2.17,<3.0.a0` and therefore install and run there.
+#
+# Why pandas, pillow and matplotlib-base are ALSO here: conda-forge rdkit declares
+# them as run dependencies, `pandas` without any version bound. Leaving them to pip
+# means conda and pip both own the same package - conda installed pandas 3.0.6 as an
+# rdkit dependency, pip then laid 2.3.2 on top, and the environment ended up with two
+# pandas dist-info directories and a 3.0.6 package that violates REINVENT4's
+# `pandas<3`. Pinning them here gives conda sole ownership, inside the ranges
+# REINVENT4 v4.5.11 declares. They are correspondingly absent from
+# requirements-pip.txt.
+#
+# Do not `conda install pytorch` - conda-forge does not offer cu118 for this
+# combination. torch comes from download.pytorch.org in setup_kbds.sh.
+name: reinvent
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - rdkit>=2023.03
+  - numpy>=1.21,<2
+  - pandas>=2,<2.3.3     # 2.3.3 dropped its manylinux_2_17 wheel; also REINVENT4 needs <3
+  - pillow>=10.0,<11.0
+  - matplotlib-base>=3.7,<4

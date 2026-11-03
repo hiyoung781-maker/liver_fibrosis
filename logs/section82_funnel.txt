@@ -1,0 +1,36 @@
+
+=== data/library.smi  n=19485 ===
+-- each cut alone --
+  carboxylate       18845   96.7%
+  alert-free        18887   96.9%
+  logP <= 5          9059   46.5%
+  MW 250-550        17513   89.9%
+  TPSA 40-115       18613   95.5%
+  Murcko-novel      19436   99.7%
+-- cumulative, cheap first (section 8 funnel order) --
+  all               19485  100.0%
+  carboxylate       18845   96.7%
+  alert-free        18273   93.8%
+  logP <= 5          8430   43.3%
+  MW 250-550         8162   41.9%
+  TPSA 40-115        7787   40.0%
+  Murcko-novel       7767   39.9%
+  survivors: logP med 3.97  MW med 379.4  TPSA med 77.8  unique scaffolds 6849
+
+=== data/library_prior.smi  n=18346 ===
+-- each cut alone --
+  carboxylate        9454   51.5%
+  alert-free        16828   91.7%
+  logP <= 5         16523   90.1%
+  MW 250-550        14750   80.4%
+  TPSA 40-115       10213   55.7%
+  Murcko-novel      16045   87.5%
+-- cumulative, cheap first (section 8 funnel order) --
+  all               18346  100.0%
+  carboxylate        9454   51.5%
+  alert-free         8920   48.6%
+  logP <= 5          8253   45.0%
+  MW 250-550         6634   36.2%
+  TPSA 40-115        2716   14.8%
+  Murcko-novel       2125   11.6%
+  survivors: logP med 3.08  MW med 393.2  TPSA med 95.5  unique scaffolds 1446

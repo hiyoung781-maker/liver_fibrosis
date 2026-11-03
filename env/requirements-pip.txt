@@ -1,0 +1,52 @@
+# REINVENT4 v4.5.11 runtime dependencies, from its pyproject.toml, adapted to the
+# K-BDS environment: CentOS 7.9, glibc 2.17, gcc 4.8.5, NVIDIA driver 470.57.02.
+#
+# Installed with --only-binary=:all:. That is deliberate: without it pip silently
+# falls back to an sdist when the newest version has only manylinux_2_28 wheels,
+# and the build then dies deep inside a dependency ("NumPy requires GCC >= 9.3")
+# rather than saying which package was unavailable. Every upper bound below was
+# checked against PyPI's actual wheel tags for cp311.
+#
+# THREE DEPENDENCIES ARE DELIBERATELY ABSENT. All three back a single scoring
+# component, and reinvent/scoring/importer.py skips a component it cannot import,
+# so nothing else is affected. This is why REINVENT4 installs with --no-deps.
+#
+#   openEye-toolkits   commercially licensed; backs ROCS only.
+#   chemprop           imported only by reinvent_plugins/components/comp_chemprop.py.
+#                      Dropped because blueprint section 3.3 rules ChemProp2 a
+#                      no-go (35 assays, largest coherent subset n=36, no negative
+#                      class), and because it drags in scipy and scikit-learn,
+#                      whose current releases are manylinux_2_28 only.
+#   descriptastorus    a hidden chemprop dependency; no REINVENT4 module imports it.
+#
+# rdkit, numpy, pandas, pillow and matplotlib come from conda-forge, not from here -
+# see environment.yml. conda-forge rdkit declares pandas, pillow and matplotlib-base
+# as run dependencies, so listing them here too made conda and pip fight over the
+# same package and left two pandas dist-info directories behind.
+# molvs is in requirements-pip-sdist.txt - it publishes no wheel at all.
+
+funcy>=2,<3
+mmpdb>=2.1,<3
+pydantic>=2,<3
+pytest>=8,<9
+pytest-mock>=3.7,<4
+python-dotenv>=1.0,<2
+PyYAML>=6.0
+requests>=2.28,<3
+# NOT declared by v4.5.11, but reinvent/runmodes/utils/plot.py imports it at module
+# level and the sampling reports pull that in, so the CLI cannot start without it.
+# 1.17.0 went manylinux_2_28; 1.16.3 is the last that runs on glibc 2.17.
+scipy>=1.11,<1.17
+requests_mock>=1.10,<2
+tenacity>=8.2,<9
+tensorboard>=2,<3
+tomli>=2.0,<3
+tqdm>=4.64,<5
+# Experiment tracking, optional at runtime (scripts/run_d3.sh --wandb).
+# Pinned below 0.24: from 0.24.0 wandb ships its Go core in a manylinux_2_28 wheel
+# only, which cannot run on K-BDS's glibc 2.17. 0.23.x is py3-none-manylinux_2_17
+# and its dependencies are pure python or already installed, so this keeps the
+# local TITAN environment and the K-BDS one identical.
+wandb>=0.23,<0.24
+typing_extensions>=4.0,<5
+xxhash>=3,<4

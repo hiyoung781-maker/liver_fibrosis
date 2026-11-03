@@ -1,0 +1,178 @@
+# Timing benchmark: the blueprint's Stage-2 objective, run for a few steps only.
+# Every TanimotoSimilarity reference is its OWN endpoint - putting several SMILES in
+# one params.smiles would silently score only the first (see blueprint section 5).
+run_type = "staged_learning"
+device = "cuda:0"
+
+[parameters]
+summary_csv_prefix = "{PREFIX}"
+use_checkpoint = false
+purge_memories = false
+prior_file = "REINVENT4/priors/reinvent.prior"
+agent_file = "REINVENT4/priors/reinvent.prior"
+batch_size = 128
+unique_sequences = true
+randomize_smiles = true
+
+[learning_strategy]
+type = "dap"
+sigma = 128
+rate = 0.0001
+
+[diversity_filter]
+type = "IdenticalMurckoScaffold"
+bucket_size = 25
+minscore = 0.4
+
+[inception]
+smiles_file = "data/actives_core.smi"
+memory_size = 100
+sample_size = 10
+
+[[stage]]
+chkpt_file = "{CHKPT}"
+termination = "simple"
+max_score = 1.0
+min_steps = {STEPS}
+max_steps = {STEPS}
+
+[stage.scoring]
+type = "geometric_mean"
+
+[[stage.scoring.component]]
+[stage.scoring.component.TanimotoSimilarity]
+[[stage.scoring.component.TanimotoSimilarity.endpoint]]
+name = "sim A1AFA"
+weight = 0.5
+params.smiles = ["O=C(NC(Cc1ccccc1)C(=O)O)c1ccc(Cl)cc1Cl"]
+params.radius = 3
+params.use_counts = true
+params.use_features = true
+
+[[stage.scoring.component]]
+[stage.scoring.component.TanimotoSimilarity]
+[[stage.scoring.component.TanimotoSimilarity.endpoint]]
+name = "sim CHEMBL4649232"
+weight = 0.5
+params.smiles = ["CCNC(=O)Nc1cnnc(-c2ccc(CC(NC(=O)c3c(Cl)cccc3Cl)C(=O)O)cc2)c1"]
+params.radius = 3
+params.use_counts = true
+params.use_features = true
+
+[[stage.scoring.component]]
+[stage.scoring.component.TanimotoSimilarity]
+[[stage.scoring.component.TanimotoSimilarity.endpoint]]
+name = "sim CHEMBL5532604"
+weight = 0.5
+params.smiles = ["Cc1ccc(Cl)c(C(=O)NC(CNC(=O)Cn2c(=O)[nH]c3nc(C)c(F)cc32)C(=O)O)c1F"]
+params.radius = 3
+params.use_counts = true
+params.use_features = true
+
+[[stage.scoring.component]]
+[stage.scoring.component.TanimotoSimilarity]
+[[stage.scoring.component.TanimotoSimilarity.endpoint]]
+name = "sim CHEMBL234562"
+weight = 0.5
+params.smiles = ["O=C(NC(Cc1ccc2nc(-c3c(Cl)cccc3Cl)ccc2c1)C(=O)O)c1c(Cl)cccc1Cl"]
+params.radius = 3
+params.use_counts = true
+params.use_features = true
+
+[[stage.scoring.component]]
+[stage.scoring.component.TanimotoSimilarity]
+[[stage.scoring.component.TanimotoSimilarity.endpoint]]
+name = "sim CHEMBL5517939"
+weight = 0.5
+params.smiles = ["O=C(NC(CNc1ccc(N2CCNC2=O)cc1)C(=O)O)c1c(Cl)cccc1Cl"]
+params.radius = 3
+params.use_counts = true
+params.use_features = true
+
+[[stage.scoring.component]]
+[stage.scoring.component.TanimotoSimilarity]
+[[stage.scoring.component.TanimotoSimilarity.endpoint]]
+name = "sim PLN-1474"
+weight = 0.5
+params.smiles = ["CC1(C(=O)NC(CCCCCCCc2ccc3c(n2)NCCC3)C(=O)O)CCOCC1"]
+params.radius = 3
+params.use_counts = true
+params.use_features = true
+
+[[stage.scoring.component]]
+[stage.scoring.component.MatchingSubstructure]
+[[stage.scoring.component.MatchingSubstructure.endpoint]]
+name = "carboxylic acid"
+weight = 2
+# MatchingSubstructure declares smarts: List[str] - the list spans ENDPOINTS, so
+# each endpoint supplies a bare string. CustomAlerts below declares
+# List[List[str]] and therefore takes a list per endpoint. Same key name, different
+# shape; pydantic rejects the wrong one, which is at least loud.
+params.smarts = "[CX3](=O)[OX2H1,OX1-]"
+params.use_chirality = false
+
+[[stage.scoring.component]]
+[stage.scoring.component.TPSA]
+[[stage.scoring.component.TPSA.endpoint]]
+name = "TPSA"
+weight = 1
+transform.type = "double_sigmoid"
+transform.high = 140.0
+transform.low = 40.0
+transform.coef_div = 140.0
+transform.coef_si = 20.0
+transform.coef_se = 20.0
+
+[[stage.scoring.component]]
+[stage.scoring.component.SlogP]
+[[stage.scoring.component.SlogP.endpoint]]
+name = "SlogP"
+weight = 1
+transform.type = "reverse_sigmoid"
+transform.high = 4.0
+transform.low = 1.0
+transform.k = 0.5
+
+[[stage.scoring.component]]
+[stage.scoring.component.NumRotBond]
+[[stage.scoring.component.NumRotBond.endpoint]]
+name = "rotatable bonds"
+weight = 1
+transform.type = "reverse_sigmoid"
+transform.high = 10.0
+transform.low = 3.0
+transform.k = 0.5
+
+[[stage.scoring.component]]
+[stage.scoring.component.MolecularWeight]
+[[stage.scoring.component.MolecularWeight.endpoint]]
+name = "MW"
+weight = 1
+transform.type = "double_sigmoid"
+transform.high = 550.0
+transform.low = 300.0
+transform.coef_div = 550.0
+transform.coef_si = 20.0
+transform.coef_se = 20.0
+
+[[stage.scoring.component]]
+[stage.scoring.component.Qed]
+[[stage.scoring.component.Qed.endpoint]]
+name = "QED"
+weight = 1
+
+[[stage.scoring.component]]
+[stage.scoring.component.SAScore]
+[[stage.scoring.component.SAScore.endpoint]]
+name = "SAScore"
+weight = 1
+transform.type = "reverse_sigmoid"
+transform.high = 6.0
+transform.low = 2.0
+transform.k = 0.5
+
+[[stage.scoring.component]]
+[stage.scoring.component.CustomAlerts]
+[[stage.scoring.component.CustomAlerts.endpoint]]
+name = "alerts"
+params.smarts = ["[*;r8]", "[*;r9]", "[*;r10]", "N=[N+]=[N-]", "C(=O)Cl", "[SH]", "[Nr0][Nr0]"]

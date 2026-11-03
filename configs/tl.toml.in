@@ -1,0 +1,33 @@
+# Transfer-learning template for blueprint section 4. One file serves both kinds of
+# run; run_d3.sh substitutes the placeholders.
+#
+#   {SMILES}      training input   - a fold's _train.smi (diagnostic) or the full set (production)
+#   {VALIDATION}  either `validation_smiles_file = "..."` or an empty line (production)
+#   {OUTPUT}      focused prior to write
+#   {EPOCHS}      20 for diagnostics; for production, the epoch the folds identified
+#   {SAVEFREQ}    1 for diagnostics (validation NLL is only computed on save epochs)
+#   {TB_LOGDIR}   TensorBoard directory; wandb mirrors it with sync_tensorboard
+#
+# Field names are exactly v4.5.11's TL SectionParameters, which uses pydantic
+# extra="forbid" - an unknown key is a hard startup error. In particular there is no
+# isomeric_smiles field in this release, and it would be wrong anyway: the de novo
+# prior's vocabulary has no stereochemistry tokens, which is why the input .smi files
+# are flattened (section 3.1).
+run_type = "transfer_learning"
+device = "cuda:0"
+tb_logdir = "{TB_LOGDIR}"
+
+[parameters]
+num_epochs = {EPOCHS}
+save_every_n_epochs = {SAVEFREQ}
+batch_size = 32
+sample_batch_size = 100
+num_refs = 0
+input_model_file = "REINVENT4/priors/reinvent.prior"
+smiles_file = "{SMILES}"
+output_model_file = "{OUTPUT}"
+standardize_smiles = true
+# Not optional at n = 29. The defaults randomise each SMILES once at file read and
+# then train on that fixed string every epoch, so there is no augmentation at all.
+randomize_all_smiles = true
+{VALIDATION}

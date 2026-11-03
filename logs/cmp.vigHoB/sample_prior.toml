@@ -1,0 +1,8 @@
+run_type = "sampling"
+device = "cuda:0"
+
+[parameters]
+model_file = "priors/focused_A.prior"
+output_file = "logs/cmp.vigHoB/samples_prior.csv"
+num_smiles = 500
+unique_molecules = true

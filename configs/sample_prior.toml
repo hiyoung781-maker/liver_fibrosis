@@ -1,0 +1,17 @@
+# Blueprint section 6, arm 2 of 2: the TL-A focused prior, unmodified by RL.
+#
+# This is the baseline arm section 6 requires. Without it, no statement of the
+# form "RL raised the carboxylate rate from X to Y" is checkable - X has to be
+# measured on the same number of samples, through the same post-processing.
+#
+# priors/focused_A.prior is TL-A, the arm D3 adopted (scripts/run_d3.sh:99,:117).
+# focused_B.prior is TL-B, rejected in D3 for Arg-mimic drift - do not use it.
+run_type = "sampling"
+device = "cuda:0"
+
+[parameters]
+model_file = "priors/focused_A.prior"
+output_file = "results/sample_prior.csv"
+num_smiles = 20000
+unique_molecules = true
+randomize_smiles = true
